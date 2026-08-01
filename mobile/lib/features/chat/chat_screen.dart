@@ -1,7 +1,10 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../../components/registry.dart';
 import '../../core/api.dart';
+import '../../core/location.dart';
 import '../../core/theme.dart';
 
 /// Le fil conversationnel.
@@ -38,6 +41,10 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scroll = ScrollController();
   final TextEditingController _saisie = TextEditingController();
   bool _charge = false;
+
+  /// Conservé entre deux tentatives : un rejeu après coupure doit présenter
+  /// le MÊME identifiant, sinon l'idempotence ne sert à rien.
+  String? _idCommandeEnCours;
 
   @override
   void initState() {
@@ -125,6 +132,9 @@ class _ChatScreenState extends State<ChatScreen> {
       case 'remove_from_cart':
         _appeler(() => widget.api.delete('/cart/items/${payload['item_id']}'));
 
+      case 'place_order':
+        _commander();
+
       case 'quick_reply':
         _ajouterTourUtilisateur('${payload['label'] ?? payload['value']}');
         // Les réponses rapides seront interprétées par l'orchestrateur en
@@ -136,6 +146,102 @@ class _ChatScreenState extends State<ChatScreen> {
         // signalant en debug via le registre.
         debugPrint('[chat] interaction non gérée : ${interaction.action}');
     }
+  }
+
+  /// Passage de commande.
+  ///
+  /// Le `client_order_id` est généré ICI, avant l'envoi, et pas côté serveur.
+  /// C'est ce qui rend l'opération idempotente : si le réseau coupe après
+  /// l'envoi mais avant la réponse — le cas courant à Niamey — un second
+  /// essai retombe sur la même commande au lieu d'en créer une deuxième.
+  Future<void> _commander() async {
+    final position = await TovoLocation.current();
+    if (!mounted) return;
+
+    if (position == null) {
+      setState(() {
+        _tours.add(_TourDeConversation(
+          deLAssistant: true,
+          contenu: "Je ne peux pas vous livrer sans savoir où vous êtes. "
+              "Activez la localisation, puis réessayez.",
+          enErreur: true,
+        ));
+      });
+      _versLeBas();
+      return;
+    }
+
+    final repere = await _demanderLeRepere();
+    if (!mounted || repere == null) return;
+
+    _idCommandeEnCours ??= _nouvelIdentifiant();
+
+    await _appeler(() => widget.api.post('/orders', {
+          'type': 'delivery',
+          'client_order_id': _idCommandeEnCours,
+          'dropoff_hint': repere,
+          'dropoff': {'lat': position.latitude, 'lng': position.longitude},
+          'payment_method': 'cash',
+        }));
+
+    // Commande acceptée : l'identifiant a joué son rôle, la prochaine
+    // commande en aura un nouveau.
+    _idCommandeEnCours = null;
+  }
+
+  /// Le repère textuel accompagne l'épingle GPS : « immeuble bleu, face à la
+  /// pharmacie ». Sans lui, le livreur a un point sur une carte et rien
+  /// d'autre.
+  Future<String?> _demanderLeRepere() async {
+    final controleur = TextEditingController();
+
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Où livrer ?', style: TextStyle(fontSize: 16)),
+        content: TextField(
+          controller: controleur,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Ex. : Yantala, derrière la pharmacie Al Nour',
+            helperText: 'Un repère que le livreur reconnaîtra',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final texte = controleur.text.trim();
+              if (texte.isEmpty) return;
+              Navigator.pop(context, texte);
+            },
+            child: const Text('Commander'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _nouvelIdentifiant() {
+    // UUID v4 sans dépendance supplémentaire.
+    const chiffres = '0123456789abcdef';
+    final aleatoire = Random.secure();
+    final tampon = StringBuffer();
+    for (var i = 0; i < 36; i++) {
+      if (i == 8 || i == 13 || i == 18 || i == 23) {
+        tampon.write('-');
+      } else if (i == 14) {
+        tampon.write('4');
+      } else if (i == 19) {
+        tampon.write(chiffres[8 + aleatoire.nextInt(4)]);
+      } else {
+        tampon.write(chiffres[aleatoire.nextInt(16)]);
+      }
+    }
+    return tampon.toString();
   }
 
   void _envoyer() {

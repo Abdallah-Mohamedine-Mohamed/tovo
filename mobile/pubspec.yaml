@@ -23,6 +23,10 @@ dependencies:
 
   http: ^1.2.2
 
+  # Adressage par épingle GPS : à Niamey l'adresse postale n'existe pas,
+  # le point GPS fait foi.
+  geolocator: ^13.0.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

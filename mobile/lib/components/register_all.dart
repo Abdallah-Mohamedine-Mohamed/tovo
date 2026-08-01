@@ -1,6 +1,8 @@
 import 'registry.dart';
 import 'widgets/cart_summary.dart';
 import 'widgets/category_grid.dart';
+import 'widgets/option_selector.dart';
+import 'widgets/order_tracking.dart';
 import 'widgets/product_carousel.dart';
 import 'widgets/quick_replies.dart';
 
@@ -33,9 +35,14 @@ void registerTovoComponents() {
     'cart_summary': (component, onInteraction) =>
         CartSummary(component: component, onInteraction: onInteraction),
 
-    // À venir : option_selector, product_card, merchant_card,
-    // order_tracking, price_comparison, image_search_prompt, courier_form.
-    // Tant qu'ils ne sont pas là, le backend peut déjà les émettre : le
-    // registre les ignore sans planter.
+    'option_selector': (component, onInteraction) =>
+        OptionSelector(component: component, onInteraction: onInteraction),
+
+    'order_tracking': (component, onInteraction) =>
+        OrderTracking(component: component, onInteraction: onInteraction),
+
+    // À venir : product_card, merchant_card, price_comparison,
+    // image_search_prompt, courier_form. Tant qu'ils ne sont pas là, le
+    // backend peut déjà les émettre : le registre les ignore sans planter.
   });
 }

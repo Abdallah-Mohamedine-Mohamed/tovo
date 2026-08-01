@@ -57,19 +57,41 @@ soumission : si l'exigence est active, il faut des versions récentes du NDK
 et du plugin Gradle Android, ce qui se règle dans la configuration Flutter —
 mais mieux vaut le découvrir maintenant qu'au moment de publier.
 
-## Ce qui reste à vérifier
+## Signature Android — vérifié le 01/08/2026
 
-**La clé de signature Android.** Une mise à jour doit être signée avec la
-même clé que la version publiée. Sans elle, le package name ne sert à rien.
+**Play App Signing est actif.** Google détient la clé de signature
+d'application, sur ses serveurs, hors d'atteinte de quiconque — y compris de
+l'ancien prestataire. L'app ne peut donc pas être perdue.
 
-Play Console → Test et versions → Intégrité de l'application → Signature de
-l'app.
+Empreintes de la **clé de signature d'application** (certificats publics, à
+enregistrer auprès de Firebase et de tout fournisseur d'API) :
 
-- Si **Play App Signing** est activé, Google détient la clé et une
-  réinitialisation de la clé d'upload est possible. Aucun risque.
-- Sinon, il faut récupérer le keystore auprès du prestataire
-  (`sanjayjangid1404`). À traiter tôt : c'est le seul point de ce document
-  qui dépend d'un tiers.
+```
+SHA-1    F5:AF:C7:18:93:10:E8:34:3E:82:11:7A:A9:6C:B8:91:E2:96:D7:7E
+SHA-256  D0:AB:82:4F:9F:44:C4:08:AD:65:24:FD:3F:0C:3E:DF:AD:C9:81:DB:1F:DF:DF:B1:82:DF:37:A9:A0:34:09:09
+```
+
+Empreintes de la **clé d'importation** (celle qui sert à téléverser un
+build) :
+
+```
+SHA-1    7B:1E:1D:2B:F7:28:C1:FE:42:04:1B:6A:2E:73:19:EB:34:46:ED:82
+SHA-256  B9:AB:82:D5:62:3B:6E:7B:2D:D0:79:7E:3D:24:48:83:D2:58:8D:CD:68:D6:F2:04:0F:E9:D5:05:6E:54:1F:2C
+```
+
+### Seul point ouvert : le keystore d'importation
+
+Le fichier `.jks` correspondant à la clé d'importation, et ses mots de passe,
+sont chez le prestataire. Deux issues :
+
+1. Il les transmet — rien à faire de plus.
+2. Il ne répond pas, ou les a perdus → Play Console → Protégé avec Play →
+   Signature d'application → **« Demander la réinitialisation de la clé
+   d'importation »**. On génère un nouveau keystore, on envoie le certificat,
+   Google bascule sous 48 h. La clé de signature d'application, elle, ne
+   change pas : les utilisateurs ne voient rien.
+
+Le délai de 48 h est la seule raison de ne pas attendre le dernier moment.
 
 Côté iOS, tant que le compte Apple Developer appartient à Mohamedine, les
 certificats se régénèrent sans difficulté.
