@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{-webkit-tap-highlight-color:transparent;box-sizing:border-box}
+body{margin:0;background:radial-gradient(ellipse at 50% 20%,#0c2020 0%,#080c0c 70%);min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:'DM Sans',system-ui,sans-serif}
+.ns::-webkit-scrollbar{display:none}
+.ns{-ms-overflow-style:none;scrollbar-width:none}
+@keyframes inFwd{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:translateX(0)}}
+@keyframes inBack{from{opacity:0;transform:translateX(-18px)}to{opacity:1;transform:translateX(0)}}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(0,102,102,.4)}70%{box-shadow:0 0 0 8px rgba(0,102,102,0)}}
+@keyframes up{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</helmet>
+
+<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px">
+<div style="width:375px;background:#0e0e0e;border-radius:54px;padding:10px;box-shadow:0 50px 100px rgba(0,0,0,.7),inset 0 0 0 1px rgba(255,255,255,.1);flex-shrink:0">
+<div style="background:#fff;border-radius:46px;overflow:hidden;display:flex;flex-direction:column;height:792px">
+
+  <!-- STATUS BAR -->
+  <div style="height:54px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 24px 10px;position:relative;flex-shrink:0">
+    <div style="position:absolute;top:10px;left:50%;transform:translateX(-50%);width:124px;height:35px;background:#0e0e0e;border-radius:18px;z-index:1"></div>
+    <span style="font:600 15px/1 'DM Sans';color:#1A1A1A;position:relative;z-index:2">{{ time }}</span>
+    <div style="display:flex;gap:6px;align-items:center;position:relative;z-index:2">
+      <svg width="17" height="12" viewBox="0 0 17 12"><rect x="0" y="8" width="3" height="4" rx=".5" fill="#1A1A1A"/><rect x="4.5" y="5.5" width="3" height="6.5" rx=".5" fill="#1A1A1A"/><rect x="9" y="3" width="3" height="9" rx=".5" fill="#1A1A1A"/><rect x="13.5" y=".5" width="3" height="11.5" rx=".5" fill="#1A1A1A"/></svg>
+      <svg width="16" height="11" viewBox="0 0 16 11" fill="none"><circle cx="8" cy="9.5" r="1.5" fill="#1A1A1A"/><path d="M4.5 6.5C5.8 5.2 6.8 4.5 8 4.5s2.2.7 3.5 2" stroke="#1A1A1A" stroke-width="1.5" stroke-linecap="round"/><path d="M1.5 3.5C3.5 1.5 5.6.5 8 .5s4.5 1 6.5 3" stroke="#1A1A1A" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x=".5" y=".5" width="21" height="11" rx="3.5" stroke="#1A1A1A" stroke-opacity=".35"/><rect x="2" y="2" width="17" height="8" rx="2" fill="#1A1A1A"/><path d="M23 4.5v3a1.5 1.5 0 000-3z" fill="#1A1A1A" fill-opacity=".4"/></svg>
+    </div>
+  </div>
+
+  <!-- HOME APPBAR -->
+  <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+    <div style="padding:8px 20px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #F2F2F2;flex-shrink:0">
+      <div>
+        <div style="font:800 21px/1 'DM Sans';color:#006666;letter-spacing:-0.8px">tovo</div>
+        <div style="display:flex;align-items:center;gap:3px;margin-top:3px">
+          <svg width="9" height="11" viewBox="0 0 9 11" fill="none"><path d="M4.5 0A3.5 3.5 0 001 3.5C1 6.1 4.5 11 4.5 11S8 6.1 8 3.5A3.5 3.5 0 004.5 0z" fill="#006666"/><circle cx="4.5" cy="3.5" r="1.2" fill="white"/></svg>
+          <span style="font:400 11px 'DM Sans';color:#8A8A8A">Paris 11ème · ~30 min</span>
+        </div>
+      </div>
+      <div onClick="{{ goHistory }}" style="width:34px;height:34px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;cursor:pointer" style-active="opacity:.75">
+        <span style="font:700 13px 'DM Sans';color:white">A</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- CHAT APPBAR -->
+  <sc-if value="{{ showBack }}" hint-placeholder-val="{{ false }}">
+    <div style="padding:8px 16px 10px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #F2F2F2;flex-shrink:0">
+      <div onClick="{{ goBack }}" style="width:32px;height:32px;border-radius:50%;background:#F2F2F2;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0" style-active="opacity:.65">
+        <svg width="8" height="14" viewBox="0 0 8 14" fill="none"><path d="M7 1L1 7l6 6" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div style="width:32px;height:32px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <span style="font:700 12px 'DM Sans';color:white">T</span>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font:700 14px/1 'DM Sans';color:#1A1A1A">{{ screenTitle }}</div>
+        <div style="display:flex;align-items:center;gap:5px;margin-top:3px">
+          <div style="width:5px;height:5px;border-radius:50%;background:#10B981"></div>
+          <span style="font:400 11px 'DM Sans';color:#8A8A8A">En ligne</span>
+        </div>
+      </div>
+      <div onClick="{{ goHome }}" style="width:32px;height:32px;border-radius:50%;background:#F2F2F2;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0" style-active="opacity:.65">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 6.5L8 2l6 4.5V13.5a.5.5 0 01-.5.5H3a.5.5 0 01-.5-.5V6.5z" stroke="#6B7280" stroke-width="1.4" stroke-linejoin="round"/><path d="M6 14v-4.5h4V14" stroke="#6B7280" stroke-width="1.4" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- SCREEN CONTAINER -->
+  <div style="flex:1;position:relative;overflow:hidden">
+
+    <!-- HOME -->
+    <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+      <div class="ns" style="position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;animation:{{ screenAnim }}">
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <div style="width:30px;height:30px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <span style="font:700 12px 'DM Sans';color:white">T</span>
+          </div>
+          <div style="background:#F0FAF9;border-radius:4px 16px 16px 16px;padding:11px 14px;max-width:82%">
+            <div style="font:400 13px/1.6 'DM Sans';color:#1A1A1A">Salut 👋 Je suis <strong>Tovo</strong>, votre assistant personnel. Livraison, coursier, comparateur de prix — que souhaitez-vous faire ?</div>
+          </div>
+        </div>
+        <!-- 2×2 service tiles -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div onClick="{{ goFood }}" style="background:#F8F8F7;border-radius:18px;padding:16px 14px;display:flex;flex-direction:column;gap:8px;cursor:pointer;border:1px solid transparent;transition:all .2s" style-hover="background:#EEF7F7;border-color:rgba(0,102,102,.12)" style-active="transform:scale(.97)">
+            <span style="font-size:26px">🍔</span>
+            <div>
+              <div style="font:700 13px/1.2 'DM Sans';color:#1A1A1A">Livraison</div>
+              <div style="font:400 11px 'DM Sans';color:#8A8A8A;margin-top:3px">Repas, courses…</div>
+            </div>
+          </div>
+          <div onClick="{{ goCourier }}" style="background:#F8F8F7;border-radius:18px;padding:16px 14px;display:flex;flex-direction:column;gap:8px;cursor:pointer;border:1px solid transparent;transition:all .2s" style-hover="background:#EEF7F7;border-color:rgba(0,102,102,.12)" style-active="transform:scale(.97)">
+            <span style="font-size:26px">📦</span>
+            <div>
+              <div style="font:700 13px/1.2 'DM Sans';color:#1A1A1A">Coursier</div>
+              <div style="font:400 11px 'DM Sans';color:#8A8A8A;margin-top:3px">Envoi de colis</div>
+            </div>
+          </div>
+          <div onClick="{{ goImageSearch }}" style="background:#F8F8F7;border-radius:18px;padding:16px 14px;display:flex;flex-direction:column;gap:8px;cursor:pointer;border:1px solid transparent;transition:all .2s" style-hover="background:#EEF7F7;border-color:rgba(0,102,102,.12)" style-active="transform:scale(.97)">
+            <span style="font-size:26px">🔍</span>
+            <div>
+              <div style="font:700 13px/1.2 'DM Sans';color:#1A1A1A">Trouver</div>
+              <div style="font:400 11px 'DM Sans';color:#8A8A8A;margin-top:3px">Comparer les prix</div>
+            </div>
+          </div>
+          <div onClick="{{ goHistory }}" style="background:#F8F8F7;border-radius:18px;padding:16px 14px;display:flex;flex-direction:column;gap:8px;cursor:pointer;border:1px solid transparent;transition:all .2s" style-hover="background:#EEF7F7;border-color:rgba(0,102,102,.12)" style-active="transform:scale(.97)">
+            <span style="font-size:26px">🕒</span>
+            <div>
+              <div style="font:700 13px/1.2 'DM Sans';color:#1A1A1A">Historique</div>
+              <div style="font:400 11px 'DM Sans';color:#8A8A8A;margin-top:3px">Mes commandes</div>
+            </div>
+          </div>
+        </div>
+        <!-- dernière commande -->
+        <div onClick="{{ goCart }}" style="background:#F8F8F7;border-radius:16px;padding:13px 15px;display:flex;align-items:center;gap:12px;cursor:pointer;border:1px solid rgba(0,0,0,.06)" style-active="opacity:.8">
+          <div style="width:36px;height:36px;border-radius:10px;background:#E8F5F5;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font-size:18px">🥬</span></div>
+          <div style="flex:1;min-width:0">
+            <div style="font:600 12px 'DM Sans';color:#1A1A1A">Recommander ma dernière commande</div>
+            <div style="font:400 11px 'DM Sans';color:#8A8A8A;margin-top:2px">Veggie Deluxe · 13 juil · 19.70€</div>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5 2.5l4.5 4.5L5 11.5" stroke="#8A8A8A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <!-- promo -->
+        <div style="background:linear-gradient(135deg,#006666,#007a7a);border-radius:16px;padding:13px 16px;display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div style="font:600 13px 'DM Sans';color:white">Première commande</div>
+            <div style="font:400 11px 'DM Sans';color:rgba(255,255,255,.75);margin-top:2px">Économisez 20% avec TOVO20</div>
+          </div>
+          <div style="background:rgba(255,255,255,.18);border-radius:8px;padding:6px 11px">
+            <span style="font:700 11px 'DM Sans';color:white;letter-spacing:.3px">TOVO20</span>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- FOOD -->
+    <sc-if value="{{ isFood }}" hint-placeholder-val="{{ false }}">
+      <div class="ns" style="position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;animation:{{ screenAnim }}">
+        <div style="display:flex;justify-content:flex-end">
+          <div style="background:#006666;border-radius:16px 3px 16px 16px;padding:10px 14px;max-width:76%">
+            <div style="font:400 13px/1.5 'DM Sans';color:white">Un burger veggie, s'il vous plaît 🌿</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <div style="width:30px;height:30px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px"><span style="font:700 12px 'DM Sans';color:white">T</span></div>
+          <div style="flex:1;min-width:0">
+            <div style="background:#F0FAF9;border-radius:4px 16px 16px 16px;padding:11px 14px;display:inline-block;margin-bottom:10px">
+              <div style="font:400 13px/1.6 'DM Sans';color:#1A1A1A">Voilà 🌿 Tapez sur une carte pour la personnaliser.</div>
+            </div>
+            <div class="ns" style="overflow-x:auto;width:100%;margin-bottom:10px">
+              <div style="display:flex;gap:8px;width:max-content;padding-bottom:2px">
+                <div onClick="{{ goOptions }}" style="width:148px;background:#fff;border-radius:14px;overflow:hidden;border:1px solid rgba(0,0,0,.07);flex-shrink:0;cursor:pointer" style-active="opacity:.85">
+                  <div style="height:84px;background:repeating-linear-gradient(135deg,#F6F6F6 0,#F6F6F6 10px,#EFEFEF 10px,#EFEFEF 20px);display:flex;align-items:center;justify-content:center;position:relative">
+                    <span style="font-size:32px">🥬</span>
+                    <div style="position:absolute;top:7px;right:7px;background:#10B981;color:white;font:600 9px 'DM Sans';padding:2px 6px;border-radius:6px">⭐ 4.8</div>
+                  </div>
+                  <div style="padding:9px 10px">
+                    <div style="font:700 12px/1.2 'DM Sans';color:#1A1A1A;margin-bottom:3px">Veggie Deluxe</div>
+                    <div style="font:400 10px 'DM Sans';color:#8A8A8A;margin-bottom:8px">Avocat · Feta · Roquette</div>
+                    <div style="display:flex;align-items:center;justify-content:space-between">
+                      <span style="font:700 13px 'DM Sans';color:#006666">10.90€</span>
+                      <div style="width:24px;height:24px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M5 1v8M1 5h8" stroke="white" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+                    </div>
+                  </div>
+                </div>
+                <div onClick="{{ goOptions }}" style="width:148px;background:#fff;border-radius:14px;overflow:hidden;border:1px solid rgba(0,0,0,.07);flex-shrink:0;cursor:pointer" style-active="opacity:.85">
+                  <div style="height:84px;background:repeating-linear-gradient(135deg,#F6F6F6 0,#F6F6F6 10px,#EFEFEF 10px,#EFEFEF 20px);display:flex;align-items:center;justify-content:center;position:relative">
+                    <span style="font-size:32px">🍄</span>
+                    <div style="position:absolute;top:7px;right:7px;background:#10B981;color:white;font:600 9px 'DM Sans';padding:2px 6px;border-radius:6px">⭐ 4.6</div>
+                  </div>
+                  <div style="padding:9px 10px">
+                    <div style="font:700 12px/1.2 'DM Sans';color:#1A1A1A;margin-bottom:3px">Champignon Grill</div>
+                    <div style="font:400 10px 'DM Sans';color:#8A8A8A;margin-bottom:8px">Portobello · Gouda</div>
+                    <div style="display:flex;align-items:center;justify-content:space-between">
+                      <span style="font:700 13px 'DM Sans';color:#006666">11.50€</span>
+                      <div style="width:24px;height:24px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M5 1v8M1 5h8" stroke="white" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+                    </div>
+                  </div>
+                </div>
+                <div onClick="{{ goOptions }}" style="width:148px;background:#fff;border-radius:14px;overflow:hidden;border:1px solid rgba(0,0,0,.07);flex-shrink:0;cursor:pointer" style-active="opacity:.85">
+                  <div style="height:84px;background:repeating-linear-gradient(135deg,#F6F6F6 0,#F6F6F6 10px,#EFEFEF 10px,#EFEFEF 20px);display:flex;align-items:center;justify-content:center;position:relative">
+                    <span style="font-size:32px">🥑</span>
+                    <div style="position:absolute;top:7px;right:7px;background:#10B981;color:white;font:600 9px 'DM Sans';padding:2px 6px;border-radius:6px">⭐ 4.9</div>
+                  </div>
+                  <div style="padding:9px 10px">
+                    <div style="font:700 12px/1.2 'DM Sans';color:#1A1A1A;margin-bottom:3px">Avocat Love</div>
+                    <div style="font:400 10px 'DM Sans';color:#8A8A8A;margin-bottom:8px">Avocat · Tomate · Vegan</div>
+                    <div style="display:flex;align-items:center;justify-content:space-between">
+                      <span style="font:700 13px 'DM Sans';color:#006666">12.90€</span>
+                      <div style="width:24px;height:24px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M5 1v8M1 5h8" stroke="white" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:7px">
+              <div style="background:#EFEFEF;border-radius:18px;padding:7px 13px;font:500 12px 'DM Sans';color:#1A1A1A;cursor:pointer;white-space:nowrap" style-active="opacity:.7">🌿 Veggie</div>
+              <div style="background:#EFEFEF;border-radius:18px;padding:7px 13px;font:500 12px 'DM Sans';color:#1A1A1A;cursor:pointer;white-space:nowrap" style-active="opacity:.7">🍔 Classique</div>
+              <div style="background:#EFEFEF;border-radius:18px;padding:7px 13px;font:500 12px 'DM Sans';color:#1A1A1A;cursor:pointer;white-space:nowrap" style-active="opacity:.7">🌶️ Piquant</div>
+              <div onClick="{{ goOptions }}" style="background:#006666;border-radius:18px;padding:7px 13px;font:600 12px 'DM Sans';color:white;cursor:pointer;white-space:nowrap" style-active="opacity:.8">Choisir →</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- OPTIONS -->
+    <sc-if value="{{ isOptions }}" hint-placeholder-val="{{ false }}">
+      <div class="ns" style="position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;animation:{{ screenAnim }}">
+        <div style="display:flex;justify-content:flex-end;opacity:.3">
+          <div style="background:#006666;border-radius:16px 3px 16px 16px;padding:8px 12px"><div style="font:400 12px 'DM Sans';color:white">Je prends le Veggie Deluxe 🥬</div></div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <div style="width:30px;height:30px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font:700 12px 'DM Sans';color:white">T</span></div>
+          <div style="flex:1">
+            <div style="background:#F0FAF9;border-radius:4px 16px 16px 16px;padding:11px 14px;margin-bottom:10px;display:inline-block">
+              <div style="font:400 13px/1.6 'DM Sans';color:#1A1A1A">Parfait 😊 Personnalisez-le à votre goût :</div>
+            </div>
+            <div style="background:#fff;border-radius:16px;border:1px solid rgba(0,0,0,.07);overflow:hidden">
+              <!-- product header -->
+              <div style="display:flex;gap:12px;align-items:center;padding:13px 14px">
+                <div style="width:56px;height:56px;border-radius:12px;background:repeating-linear-gradient(135deg,#F6F6F6 0,#F6F6F6 8px,#EFEFEF 8px,#EFEFEF 16px);display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font-size:24px">🥬</span></div>
+                <div><div style="font:700 14px/1.2 'DM Sans';color:#1A1A1A">Veggie Deluxe</div><div style="font:400 11px 'DM Sans';color:#8A8A8A;margin-top:3px">Avocat · Feta · Roquette</div><div style="font:700 16px 'DM Sans';color:#006666;margin-top:5px">{{ unitPrice }}</div></div>
+              </div>
+              <div style="height:1px;background:#F5F5F5;margin:0 14px"></div>
+              <!-- options -->
+              <div style="padding:13px 14px;display:flex;flex-direction:column;gap:14px">
+                <div>
+                  <div style="font:600 10px 'DM Sans';color:#8A8A8A;margin-bottom:8px;text-transform:uppercase;letter-spacing:.8px">Portion</div>
+                  <div style="display:flex;gap:7px">
+                    <div style="{{ portionN }}" onClick="{{ setPNormale }}">Normale</div>
+                    <div style="{{ portionG }}" onClick="{{ setPGrande }}">Grande +2.50€</div>
+                  </div>
+                </div>
+                <div>
+                  <div style="font:600 10px 'DM Sans';color:#8A8A8A;margin-bottom:8px;text-transform:uppercase;letter-spacing:.8px">Sauce</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:7px">
+                    <div style="{{ sauceK }}" onClick="{{ setSK }}">Ketchup</div>
+                    <div style="{{ sauceM }}" onClick="{{ setSM }}">Mayonnaise</div>
+                    <div style="{{ sauceB }}" onClick="{{ setSB }}">BBQ</div>
+                    <div style="{{ sauceL }}" onClick="{{ setSL }}">Légère</div>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                  <div style="font:600 10px 'DM Sans';color:#8A8A8A;text-transform:uppercase;letter-spacing:.8px">Quantité</div>
+                  <div style="display:flex;align-items:center;gap:0;background:#F2F2F2;border-radius:24px;overflow:hidden">
+                    <div onClick="{{ decQty }}" style="width:38px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;font:300 20px 'DM Sans';color:#006666;user-select:none" style-active="opacity:.6">−</div>
+                    <span style="font:600 14px 'DM Sans';color:#1A1A1A;min-width:18px;text-align:center">{{ qty }}</span>
+                    <div onClick="{{ incQty }}" style="width:38px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;font:300 20px 'DM Sans';color:#006666;user-select:none" style-active="opacity:.6">+</div>
+                  </div>
+                </div>
+              </div>
+              <div style="padding:0 13px 13px">
+                <div onClick="{{ goCart }}" style="background:#006666;border-radius:12px;padding:13px 20px;text-align:center;cursor:pointer" style-active="transform:scale(.98);opacity:.9">
+                  <div style="font:600 13px 'DM Sans';color:white">Ajouter au panier — {{ totalPrice }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- CART -->
+    <sc-if value="{{ isCart }}" hint-placeholder-val="{{ false }}">
+      <div class="ns" style="position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;animation:{{ screenAnim }}">
+        <div style="display:flex;gap:10px;align-items:flex-start;opacity:.28">
+          <div style="width:26px;height:26px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font:700 10px 'DM Sans';color:white">T</span></div>
+          <div style="background:#F0FAF9;border-radius:4px 14px 14px 14px;padding:8px 12px"><div style="font:400 12px 'DM Sans';color:#1A1A1A">Voulez-vous ajouter une boisson ?</div></div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;opacity:.28">
+          <div style="background:#006666;border-radius:14px 3px 14px 14px;padding:8px 12px"><div style="font:400 12px 'DM Sans';color:white">Oui, un Coca. C'est tout !</div></div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <div style="width:30px;height:30px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font:700 12px 'DM Sans';color:white">T</span></div>
+          <div style="flex:1">
+            <div style="background:#F0FAF9;border-radius:4px 16px 16px 16px;padding:11px 14px;margin-bottom:10px;display:inline-block">
+              <div style="font:400 13px/1.6 'DM Sans';color:#1A1A1A">Voilà 🛒 Vérifiez avant de confirmer.</div>
+            </div>
+            <div style="background:#fff;border-radius:16px;border:1px solid rgba(0,0,0,.07);overflow:hidden">
+              <div style="padding:13px 14px 11px;border-bottom:1px solid #F5F5F5">
+                <div style="font:600 12px 'DM Sans';color:#1A1A1A;margin-bottom:12px">Votre commande</div>
+                <div style="display:flex;flex-direction:column;gap:10px">
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+                    <div style="display:flex;align-items:center;gap:8px"><span style="font-size:16px;flex-shrink:0">🥬</span><div><div style="font:500 12px 'DM Sans';color:#1A1A1A">Veggie Deluxe</div><div style="font:400 10px 'DM Sans';color:#8A8A8A">{{ portion }} · {{ sauce }} · ×{{ qty }}</div></div></div>
+                    <span style="font:600 12px 'DM Sans';color:#1A1A1A;flex-shrink:0">{{ totalPrice }}</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+                    <div style="display:flex;align-items:center;gap:8px"><span style="font-size:16px;flex-shrink:0">🥤</span><div><div style="font:500 12px 'DM Sans';color:#1A1A1A">Coca Zero ×2</div><div style="font:400 10px 'DM Sans';color:#8A8A8A">33cl</div></div></div>
+                    <span style="font:600 12px 'DM Sans';color:#1A1A1A;flex-shrink:0">4.80€</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+                    <div style="display:flex;align-items:center;gap:8px"><span style="font-size:16px;flex-shrink:0">🍟</span><div><div style="font:500 12px 'DM Sans';color:#1A1A1A">Frites Maison</div><div style="font:400 10px 'DM Sans';color:#8A8A8A">Grande portion</div></div></div>
+                    <span style="font:600 12px 'DM Sans';color:#1A1A1A;flex-shrink:0">3.50€</span>
+                  </div>
+                </div>
+              </div>
+              <div style="padding:11px 14px;display:flex;flex-direction:column;gap:6px">
+                <div style="display:flex;justify-content:space-between"><span style="font:400 11px 'DM Sans';color:#8A8A8A">Sous-total</span><span style="font:400 11px 'DM Sans';color:#8A8A8A">{{ cartSubtotal }}</span></div>
+                <div style="display:flex;justify-content:space-between"><span style="font:400 11px 'DM Sans';color:#8A8A8A">Livraison</span><span style="font:400 11px 'DM Sans';color:#8A8A8A">2.50€</span></div>
+                <div style="display:flex;justify-content:space-between"><span style="font:500 11px 'DM Sans';color:#10B981">Code TOVO20</span><span style="font:600 11px 'DM Sans';color:#10B981">−2.00€</span></div>
+                <div style="height:1px;background:#F5F5F5;margin:3px 0"></div>
+                <div style="display:flex;justify-content:space-between;align-items:center"><span style="font:700 14px 'DM Sans';color:#1A1A1A">Total</span><span style="font:800 16px 'DM Sans';color:#006666">{{ cartTotal }}</span></div>
+              </div>
+              <div style="padding:0 13px 13px;display:flex;flex-direction:column;gap:8px">
+                <div onClick="{{ goTracking }}" style="background:#006666;border-radius:12px;padding:13px 20px;text-align:center;cursor:pointer" style-active="transform:scale(.98);opacity:.9">
+                  <div style="font:600 14px 'DM Sans';color:white">Payer {{ cartTotal }}</div>
+                </div>
+                <div style="text-align:center"><span onClick="{{ goOptions }}" style="font:400 11px 'DM Sans';color:#006666;cursor:pointer">Modifier la commande</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- TRACKING -->
+    <sc-if value="{{ isTracking }}" hint-placeholder-val="{{ false }}">
+      <div class="ns" style="position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;animation:{{ screenAnim }}">
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <div style="width:30px;height:30px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font:700 12px 'DM Sans';color:white">T</span></div>
+          <div style="background:#F0FAF9;border-radius:4px 16px 16px 16px;padding:11px 14px"><div style="font:400 13px/1.6 'DM Sans';color:#1A1A1A">C'est parti ! 🎉 Je vous tiens informé en temps réel.</div></div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="width:30px;flex-shrink:0"></div>
+          <div style="flex:1;background:#fff;border-radius:16px;border:1px solid rgba(0,0,0,.07);overflow:hidden">
+            <svg viewBox="0 0 311 108" width="100%" height="108" style="display:block">
+              <rect width="311" height="108" fill="#EAF5F5"/>
+              <rect x="0" y="48" width="311" height="12" fill="#D2E9E9"/>
+              <rect x="128" y="0" width="12" height="108" fill="#D2E9E9"/>
+              <rect x="0" y="20" width="311" height="4" fill="#DAF0F0"/>
+              <rect x="0" y="84" width="311" height="4" fill="#DAF0F0"/>
+              <rect x="52" y="0" width="4" height="108" fill="#DAF0F0"/>
+              <rect x="220" y="0" width="4" height="108" fill="#DAF0F0"/>
+              <polyline points="170,54 148,54 128,36 66,36" stroke="#006666" stroke-width="2" stroke-dasharray="4,3" fill="none" stroke-linecap="round"/>
+              <circle cx="170" cy="54" r="16" fill="rgba(0,102,102,.12)"/>
+              <circle cx="170" cy="54" r="9" fill="#006666"/>
+              <circle cx="170" cy="54" r="3.5" fill="white"/>
+              <rect x="52" y="24" width="22" height="22" rx="6" fill="#10B981"/>
+              <text x="63" y="39" text-anchor="middle" font-size="12">🏠</text>
+            </svg>
+            <div style="margin:10px 12px;background:#006666;border-radius:10px;padding:10px 13px;display:flex;align-items:center;justify-content:space-between">
+              <div style="display:flex;align-items:center;gap:7px"><span style="font-size:14px">⏱</span><span style="font:600 13px 'DM Sans';color:white">Livraison dans 23 min</span></div>
+              <span style="font:400 11px 'DM Sans';color:rgba(255,255,255,.65)">~10:15</span>
+            </div>
+            <div style="padding:0 13px 10px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #F5F5F5">
+              <div style="width:40px;height:40px;border-radius:50%;background:#F0FAF9;display:flex;align-items:center;justify-content:center;font:700 15px 'DM Sans';color:#006666;flex-shrink:0">T</div>
+              <div style="flex:1"><div style="font:600 12px 'DM Sans';color:#1A1A1A">Thomas R.</div><div style="font:400 11px 'DM Sans';color:#8A8A8A;margin-top:2px">⭐ 4.9 · 823 livraisons</div></div>
+              <div style="display:flex;gap:7px">
+                <div style="width:32px;height:32px;border-radius:50%;background:#F2F2F2;display:flex;align-items:center;justify-content:center;cursor:pointer"><span style="font-size:13px">📞</span></div>
+                <div style="width:32px;height:32px;border-radius:50%;background:#F2F2F2;display:flex;align-items:center;justify-content:center;cursor:pointer"><span style="font-size:13px">💬</span></div>
+              </div>
+            </div>
+            <div style="padding:12px 14px;display:flex;flex-direction:column;gap:0">
+              <div style="display:flex;gap:12px;align-items:flex-start">
+                <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0">
+                  <div style="width:24px;height:24px;border-radius:50%;background:#10B981;display:flex;align-items:center;justify-content:center"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l2.5 2.5 5.5-5" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                  <div style="width:1.5px;height:22px;background:#10B981"></div>
+                </div>
+                <div style="padding-top:4px"><div style="font:600 12px 'DM Sans';color:#1A1A1A">Commande reçue</div><div style="font:400 10px 'DM Sans';color:#8A8A8A;margin-top:2px">09:43</div></div>
+              </div>
+              <div style="display:flex;gap:12px;align-items:flex-start">
+                <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0">
+                  <div style="width:24px;height:24px;border-radius:50%;background:#10B981;display:flex;align-items:center;justify-content:center"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l2.5 2.5 5.5-5" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                  <div style="width:1.5px;height:22px;background:linear-gradient(to bottom,#10B981,#006666)"></div>
+                </div>
+                <div style="padding-top:4px"><div style="font:600 12px 'DM Sans';color:#1A1A1A">En préparation</div><div style="font:400 10px 'DM Sans';color:#8A8A8A;margin-top:2px">09:45</div></div>
+              </div>
+              <div style="display:flex;gap:12px;align-items:flex-start">
+                <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0">
+                  <div style="width:24px;height:24px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;animation:pulse 2s infinite"><div style="width:8px;height:8px;border-radius:50%;background:white"></div></div>
+                  <div style="width:1.5px;height:22px;background:#EBEBEB"></div>
+                </div>
+                <div style="padding-top:4px"><div style="font:700 12px 'DM Sans';color:#006666">En route 🛵</div><div style="font:400 10px 'DM Sans';color:#8A8A8A;margin-top:2px">09:52 · En cours</div></div>
+              </div>
+              <div style="display:flex;gap:12px;align-items:flex-start">
+                <div style="width:24px;height:24px;border-radius:50%;background:#F2F2F2;border:1.5px solid #E5E5E5;display:flex;align-items:center;justify-content:center;flex-shrink:0"><div style="width:7px;height:7px;border-radius:50%;background:#D1D5DB"></div></div>
+                <div style="padding-top:4px"><div style="font:500 12px 'DM Sans';color:#C0C0C0">Livré</div><div style="font:400 10px 'DM Sans';color:#D5D5D5;margin-top:2px">~10:15</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- COURIER -->
+    <sc-if value="{{ isCourier }}" hint-placeholder-val="{{ false }}">
+      <div class="ns" style="position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;animation:{{ screenAnim }}">
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <div style="width:30px;height:30px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font:700 12px 'DM Sans';color:white">T</span></div>
+          <div style="background:#F0FAF9;border-radius:4px 16px 16px 16px;padding:11px 14px"><div style="font:400 13px/1.6 'DM Sans';color:#1A1A1A">Super ! D'où part le colis ?</div></div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="width:30px;flex-shrink:0"></div>
+          <div style="flex:1;background:#fff;border-radius:14px;border:1px solid rgba(0,0,0,.07);overflow:hidden">
+            <div style="padding:12px 14px;border-bottom:1px solid #F5F5F5;display:flex;align-items:center;gap:11px">
+              <div style="width:8px;height:8px;border-radius:50%;background:#006666;flex-shrink:0"></div>
+              <div><div style="font:600 10px 'DM Sans';color:#8A8A8A;text-transform:uppercase;letter-spacing:.6px">Prise en charge</div><div style="font:500 13px 'DM Sans';color:#1A1A1A;margin-top:3px">14 Rue de la Paix, Paris 11ème</div></div>
+            </div>
+            <div style="padding:12px 14px;display:flex;align-items:center;gap:11px">
+              <div style="width:8px;height:8px;border-radius:50%;background:#E74C3C;flex-shrink:0"></div>
+              <div><div style="font:600 10px 'DM Sans';color:#8A8A8A;text-transform:uppercase;letter-spacing:.6px">Livraison</div><div style="font:500 13px 'DM Sans';color:#1A1A1A;margin-top:3px">37 Av. Montaigne, Paris 8ème</div></div>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <div style="width:30px;height:30px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font:700 12px 'DM Sans';color:white">T</span></div>
+          <div style="background:#F0FAF9;border-radius:4px 16px 16px 16px;padding:11px 14px"><div style="font:400 13px/1.6 'DM Sans';color:#1A1A1A">Taille du colis ? 📐</div></div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="width:30px;flex-shrink:0"></div>
+          <div style="display:flex;gap:7px;flex-wrap:wrap">
+            <div style="{{ pkgSmall }}" onClick="{{ setPkgS }}" style-active="opacity:.8">📍 Petit</div>
+            <div style="{{ pkgMedium }}" onClick="{{ setPkgM }}" style-active="opacity:.8">📦 Moyen</div>
+            <div style="{{ pkgLarge }}" onClick="{{ setPkgL }}" style-active="opacity:.8">🗃 Grand</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <div style="width:30px;height:30px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font:700 12px 'DM Sans';color:white">T</span></div>
+          <div style="background:#F0FAF9;border-radius:4px 16px 16px 16px;padding:11px 14px"><div style="font:400 13px/1.6 'DM Sans';color:#1A1A1A">Quand souhaitez-vous l'envoi ?</div></div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="width:30px;flex-shrink:0"></div>
+          <div style="display:flex;gap:7px">
+            <div style="{{ schedNow }}" onClick="{{ setSchedN }}" style-active="opacity:.8">⚡ Maintenant</div>
+            <div style="{{ schedLater }}" onClick="{{ setSchedL }}" style-active="opacity:.8">📅 Programmer</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="width:30px;flex-shrink:0"></div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:9px">
+            <div style="background:#F8F8F7;border-radius:14px;padding:13px 15px;display:flex;align-items:center;justify-content:space-between;border:1px solid rgba(0,0,0,.06)">
+              <div><div style="font:600 12px 'DM Sans';color:#1A1A1A">Estimation</div><div style="font:400 11px 'DM Sans';color:#8A8A8A;margin-top:2px">Livraison en ~45 min</div></div>
+              <div style="font:800 20px 'DM Sans';color:#006666">{{ courierPrice }}</div>
+            </div>
+            <div onClick="{{ goTracking }}" style="background:#006666;border-radius:12px;padding:13px 20px;text-align:center;cursor:pointer" style-active="transform:scale(.98);opacity:.9">
+              <div style="font:600 13px 'DM Sans';color:white">Confirmer l'envoi — {{ courierPrice }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- IMAGE SEARCH -->
+    <sc-if value="{{ isImageSearch }}" hint-placeholder-val="{{ false }}">
+      <div class="ns" style="position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;animation:{{ screenAnim }}">
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <div style="width:30px;height:30px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font:700 12px 'DM Sans';color:white">T</span></div>
+          <div style="background:#F0FAF9;border-radius:4px 16px 16px 16px;padding:11px 14px"><div style="font:400 13px/1.6 'DM Sans';color:#1A1A1A">Montrez-moi une photo — je compare les prix pour vous 📸</div></div>
+        </div>
+        <sc-if value="{{ imageStateIdle }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;gap:10px">
+            <div style="width:30px;flex-shrink:0"></div>
+            <div onClick="{{ startSearch }}" style="flex:1;border:1.5px dashed #D5D5D5;border-radius:16px;padding:32px 20px;display:flex;flex-direction:column;align-items:center;gap:10px;cursor:pointer;background:#FAFAFA;text-align:center;transition:all .2s" style-hover="border-color:#006666;background:#F0FAF9" style-active="transform:scale(.98)">
+              <span style="font-size:36px">📷</span>
+              <div>
+                <div style="font:600 13px 'DM Sans';color:#1A1A1A">Importer une image</div>
+                <div style="font:400 11px 'DM Sans';color:#8A8A8A;margin-top:3px">Photo, capture d'écran, galerie…</div>
+              </div>
+              <div style="background:#006666;border-radius:10px;padding:9px 20px;margin-top:3px"><span style="font:600 12px 'DM Sans';color:white">Choisir une image</span></div>
+            </div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ imageStateSearching }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:16px;padding:36px 20px;animation:fadeUp .3s ease">
+            <div style="width:60px;height:60px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;animation:pulse 1.3s infinite"><span style="font:700 22px 'DM Sans';color:white">T</span></div>
+            <div style="text-align:center"><div style="font:700 14px 'DM Sans';color:#1A1A1A">Analyse en cours…</div><div style="font:400 12px 'DM Sans';color:#8A8A8A;margin-top:4px">Comparaison chez 4 enseignes</div></div>
+            <div style="display:flex;gap:7px">
+              <div style="width:8px;height:8px;border-radius:50%;background:#006666;animation:up 1.4s infinite 0s"></div>
+              <div style="width:8px;height:8px;border-radius:50%;background:#006666;animation:up 1.4s infinite .18s"></div>
+              <div style="width:8px;height:8px;border-radius:50%;background:#006666;animation:up 1.4s infinite .36s"></div>
+            </div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ imageStateResults }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:12px;animation:fadeUp .3s ease">
+            <div style="display:flex;gap:10px;align-items:flex-start">
+              <div style="width:30px;height:30px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font:700 12px 'DM Sans';color:white">T</span></div>
+              <div style="background:#F0FAF9;border-radius:4px 16px 16px 16px;padding:11px 14px"><div style="font:400 13px/1.6 'DM Sans';color:#1A1A1A">J'ai trouvé ce produit chez 4 enseignes 🛍️</div></div>
+            </div>
+            <div style="display:flex;gap:10px">
+              <div style="width:30px;flex-shrink:0"></div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:9px">
+                <div style="background:#F8F8F7;border-radius:14px;padding:11px 13px;display:flex;align-items:center;gap:11px;border:1px solid rgba(0,0,0,.06)">
+                  <div style="width:46px;height:46px;border-radius:10px;background:repeating-linear-gradient(135deg,#EBEBEB 0,#EBEBEB 7px,#E3E3E3 7px,#E3E3E3 14px);display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font-size:20px">🎧</span></div>
+                  <div><div style="font:700 13px 'DM Sans';color:#1A1A1A">Sony WH-1000XM5</div><div style="font:400 11px 'DM Sans';color:#8A8A8A;margin-top:2px">Casque · Noise Cancelling</div></div>
+                </div>
+                <div style="background:#fff;border-radius:14px;border:1px solid rgba(0,0,0,.07);overflow:hidden">
+                  <div style="background:#F0FAF9;padding:8px 13px;border-bottom:1px solid rgba(0,0,0,.06)"><div style="font:600 10px 'DM Sans';color:#006666;text-transform:uppercase;letter-spacing:.7px">🏆 Meilleure offre</div></div>
+                  <div style="padding:11px 13px;border-bottom:1px solid #F5F5F5;display:flex;align-items:center;justify-content:space-between;gap:8px">
+                    <div style="display:flex;align-items:center;gap:9px"><span style="font-size:18px">🛒</span><div><div style="font:700 12px 'DM Sans';color:#1A1A1A">Cdiscount</div><div style="font:400 10px 'DM Sans';color:#8A8A8A">⭐ 4.3 · Livraison 2j</div></div></div>
+                    <div style="display:flex;align-items:center;gap:7px;flex-shrink:0"><div style="font:800 15px 'DM Sans';color:#006666">269€</div><div style="background:#006666;border-radius:8px;padding:6px 11px;cursor:pointer" style-active="opacity:.8"><span style="font:600 11px 'DM Sans';color:white">Voir</span></div></div>
+                  </div>
+                  <div style="padding:11px 13px;border-bottom:1px solid #F5F5F5;display:flex;align-items:center;justify-content:space-between;gap:8px">
+                    <div style="display:flex;align-items:center;gap:9px"><span style="font-size:18px">📦</span><div><div style="font:700 12px 'DM Sans';color:#1A1A1A">Amazon</div><div style="font:400 10px 'DM Sans';color:#8A8A8A">⭐ 4.7 · Livraison 1j</div></div></div>
+                    <div style="display:flex;align-items:center;gap:7px;flex-shrink:0"><div style="font:600 15px 'DM Sans';color:#1A1A1A">279€</div><div style="background:#EFEFEF;border-radius:8px;padding:6px 11px;cursor:pointer" style-active="opacity:.7"><span style="font:600 11px 'DM Sans';color:#1A1A1A">Voir</span></div></div>
+                  </div>
+                  <div style="padding:11px 13px;border-bottom:1px solid #F5F5F5;display:flex;align-items:center;justify-content:space-between;gap:8px">
+                    <div style="display:flex;align-items:center;gap:9px"><span style="font-size:18px">🏪</span><div><div style="font:700 12px 'DM Sans';color:#1A1A1A">Fnac</div><div style="font:400 10px 'DM Sans';color:#8A8A8A">⭐ 4.8 · Livraison 3j</div></div></div>
+                    <div style="display:flex;align-items:center;gap:7px;flex-shrink:0"><div style="font:600 15px 'DM Sans';color:#1A1A1A">299€</div><div style="background:#EFEFEF;border-radius:8px;padding:6px 11px;cursor:pointer" style-active="opacity:.7"><span style="font:600 11px 'DM Sans';color:#1A1A1A">Voir</span></div></div>
+                  </div>
+                  <div style="padding:11px 13px;display:flex;align-items:center;justify-content:space-between;gap:8px">
+                    <div style="display:flex;align-items:center;gap:9px"><span style="font-size:18px">🔌</span><div><div style="font:700 12px 'DM Sans';color:#1A1A1A">Darty</div><div style="font:400 10px 'DM Sans';color:#8A8A8A">⭐ 4.6 · Livraison 2j</div></div></div>
+                    <div style="display:flex;align-items:center;gap:7px;flex-shrink:0"><div style="font:600 15px 'DM Sans';color:#1A1A1A">289€</div><div style="background:#EFEFEF;border-radius:8px;padding:6px 11px;cursor:pointer" style-active="opacity:.7"><span style="font:600 11px 'DM Sans';color:#1A1A1A">Voir</span></div></div>
+                  </div>
+                </div>
+                <div style="text-align:center"><span onClick="{{ resetSearch }}" style="font:400 11px 'DM Sans';color:#006666;cursor:pointer">Rechercher un autre produit</span></div>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <!-- HISTORY -->
+    <sc-if value="{{ isHistory }}" hint-placeholder-val="{{ false }}">
+      <div class="ns" style="position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;animation:{{ screenAnim }}">
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <div style="width:30px;height:30px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="font:700 12px 'DM Sans';color:white">T</span></div>
+          <div style="background:#F0FAF9;border-radius:4px 16px 16px 16px;padding:11px 14px"><div style="font:400 13px/1.6 'DM Sans';color:#1A1A1A">Vos dernières commandes 📋 Souhaitez-vous en recommander une ?</div></div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="width:30px;flex-shrink:0"></div>
+          <div style="flex:1;background:#fff;border-radius:14px;border:1px solid rgba(0,0,0,.07);padding:13px 14px">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">🍔</span><div><div style="font:600 12px 'DM Sans';color:#1A1A1A">Livraison repas</div><div style="font:400 10px 'DM Sans';color:#8A8A8A;margin-top:2px">13 juil · Paris 11ème</div></div></div>
+              <div style="text-align:right"><div style="font:700 13px 'DM Sans';color:#1A1A1A">19.70€</div><div style="background:#E8F5F0;color:#10B981;font:600 9px 'DM Sans';padding:2px 6px;border-radius:6px;margin-top:3px;display:inline-block">Livré ✓</div></div>
+            </div>
+            <div style="font:400 11px 'DM Sans';color:#8A8A8A;margin-bottom:11px">Veggie Deluxe · Coca Zero ×2 · Frites</div>
+            <div onClick="{{ goCart }}" style="background:#006666;border-radius:10px;padding:8px 16px;text-align:center;cursor:pointer;display:inline-block" style-active="opacity:.8"><span style="font:600 12px 'DM Sans';color:white">Recommander</span></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="width:30px;flex-shrink:0"></div>
+          <div style="flex:1;background:#fff;border-radius:14px;border:1px solid rgba(0,0,0,.07);padding:13px 14px">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">📦</span><div><div style="font:600 12px 'DM Sans';color:#1A1A1A">Coursier</div><div style="font:400 10px 'DM Sans';color:#8A8A8A;margin-top:2px">10 juil · Colis moyen</div></div></div>
+              <div style="text-align:right"><div style="font:700 13px 'DM Sans';color:#1A1A1A">5.90€</div><div style="background:#E8F5F0;color:#10B981;font:600 9px 'DM Sans';padding:2px 6px;border-radius:6px;margin-top:3px;display:inline-block">Livré ✓</div></div>
+            </div>
+            <div style="font:400 11px 'DM Sans';color:#8A8A8A;margin-bottom:11px">Paris 11ème → Paris 8ème</div>
+            <div onClick="{{ goCourier }}" style="background:#F2F2F2;border-radius:10px;padding:8px 16px;text-align:center;cursor:pointer;display:inline-block" style-active="opacity:.7"><span style="font:600 12px 'DM Sans';color:#1A1A1A">Renvoyer</span></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="width:30px;flex-shrink:0"></div>
+          <div style="flex:1;background:#fff;border-radius:14px;border:1px solid rgba(0,0,0,.07);padding:13px 14px">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">🍣</span><div><div style="font:600 12px 'DM Sans';color:#1A1A1A">Livraison repas</div><div style="font:400 10px 'DM Sans';color:#8A8A8A;margin-top:2px">5 juil · Paris 11ème</div></div></div>
+              <div style="text-align:right"><div style="font:700 13px 'DM Sans';color:#1A1A1A">28.90€</div><div style="background:#E8F5F0;color:#10B981;font:600 9px 'DM Sans';padding:2px 6px;border-radius:6px;margin-top:3px;display:inline-block">Livré ✓</div></div>
+            </div>
+            <div style="font:400 11px 'DM Sans';color:#8A8A8A;margin-bottom:11px">Sushi Pack ×3 · Miso Soup · Edamame</div>
+            <div style="background:#F2F2F2;border-radius:10px;padding:8px 16px;text-align:center;cursor:pointer;display:inline-block" style-active="opacity:.7"><span style="font:600 12px 'DM Sans';color:#1A1A1A">Recommander</span></div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+  </div><!-- /screens -->
+
+  <!-- INPUT BAR -->
+  <div style="padding:9px 13px 11px;background:#fff;border-top:1px solid #F0F0F0;flex-shrink:0;display:flex;align-items:center;gap:9px">
+    <div style="flex:1;background:#F2F2F2;border-radius:22px;padding:10px 15px;display:flex;align-items:center;gap:8px;min-height:40px;box-sizing:border-box">
+      <span style="font:400 13px 'DM Sans';color:#AAAAAA;flex:1">{{ inputPlaceholder }}</span>
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2.5v5M5.5 5.5l1.5-3 1.5 3" stroke="#BEBEBE" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="8.5" width="9" height="4" rx="1.2" stroke="#BEBEBE" stroke-width="1.3"/></svg>
+    </div>
+    <div style="width:40px;height:40px;border-radius:50%;background:#006666;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0" style-active="transform:scale(.92)">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 12V4M4 8l4-4 4 4" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+  </div>
+
+  <!-- HOME INDICATOR -->
+  <div style="height:28px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+    <div style="width:130px;height:4px;background:#1A1A1A;border-radius:2px;opacity:.15"></div>
+  </div>
+
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    screen: 'home', navDir: 'forward',
+    portion: 'normale', sauce: 'ketchup', qty: 1,
+    pkgType: 'medium', schedule: 'now',
+    imageState: 'idle',
+    time: '',
+  };
+
+  componentDidMount() {
+    const tick = () => {
+      const d = new Date();
+      this.setState({ time: d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0') });
+    };
+    tick();
+    this._t = setInterval(tick, 30000);
+  }
+
+  componentWillUnmount() { clearInterval(this._t); }
+
+  go(screen) { this.setState({ screen, navDir: 'forward' }); }
+  goBackFn() {
+    const map = { food:'home', courier:'home', imageSearch:'home', history:'home', options:'food', cart:'options', tracking:'home' };
+    this.setState({ screen: map[this.state.screen] || 'home', navDir: 'back' });
+  }
+
+  startSearch() {
+    this.setState({ imageState: 'searching' });
+    setTimeout(() => this.setState({ imageState: 'results' }), 2300);
+  }
+
+  renderVals() {
+    const { screen, navDir, portion, sauce, qty, pkgType, schedule, imageState, time } = this.state;
+
+    const ON  = { display:'inline-flex', alignItems:'center', padding:'7px 15px', borderRadius:'20px', cursor:'pointer', fontSize:'13px', fontWeight:'600', fontFamily:"'DM Sans',system-ui", background:'#006666', color:'#fff', transition:'all .15s', whiteSpace:'nowrap', userSelect:'none' };
+    const OFF = { display:'inline-flex', alignItems:'center', padding:'7px 15px', borderRadius:'20px', cursor:'pointer', fontSize:'13px', fontWeight:'500', fontFamily:"'DM Sans',system-ui", background:'#EFEFEF', color:'#1A1A1A', transition:'all .15s', whiteSpace:'nowrap', userSelect:'none' };
+
+    const titles = { food:'Livraison', options:'Personnaliser', cart:'Panier', tracking:'Suivi commande', courier:'Coursier', imageSearch:'Trouver', history:'Mes commandes' };
+
+    const base = 10.90 + (portion === 'grande' ? 2.50 : 0);
+    const tProd = (base * qty).toFixed(2);
+    const sub = (parseFloat(tProd) + 4.80 + 3.50).toFixed(2);
+    const tot = (parseFloat(sub) + 2.50 - 2.00).toFixed(2);
+
+    return {
+      time: time || '9:41',
+      isHome: screen === 'home', isFood: screen === 'food',
+      isOptions: screen === 'options', isCart: screen === 'cart',
+      isTracking: screen === 'tracking', isCourier: screen === 'courier',
+      isImageSearch: screen === 'imageSearch', isHistory: screen === 'history',
+      showBack: screen !== 'home',
+      screenTitle: titles[screen] || 'Tovo',
+      screenAnim: `${navDir === 'back' ? 'inBack' : 'inFwd'} .28s cubic-bezier(.4,0,.2,1) both`,
+
+      qty, portion, sauce,
+      unitPrice: base.toFixed(2) + '€',
+      totalPrice: tProd + '€',
+      cartSubtotal: sub + '€',
+      cartTotal: tot + '€',
+
+      portionN: portion === 'normale' ? ON : OFF,
+      portionG: portion === 'grande'  ? ON : OFF,
+      sauceK:   sauce === 'ketchup'   ? ON : OFF,
+      sauceM:   sauce === 'mayo'      ? ON : OFF,
+      sauceB:   sauce === 'bbq'       ? ON : OFF,
+      sauceL:   sauce === 'legere'    ? ON : OFF,
+      setPNormale: () => this.setState({ portion: 'normale' }),
+      setPGrande:  () => this.setState({ portion: 'grande' }),
+      setSK: () => this.setState({ sauce: 'ketchup' }),
+      setSM: () => this.setState({ sauce: 'mayo' }),
+      setSB: () => this.setState({ sauce: 'bbq' }),
+      setSL: () => this.setState({ sauce: 'legere' }),
+      incQty: () => this.setState(s => ({ qty: Math.min(s.qty+1,9) })),
+      decQty: () => this.setState(s => ({ qty: Math.max(s.qty-1,1) })),
+
+      pkgSmall:   pkgType==='small'  ? ON : OFF,
+      pkgMedium:  pkgType==='medium' ? ON : OFF,
+      pkgLarge:   pkgType==='large'  ? ON : OFF,
+      schedNow:   schedule==='now'   ? ON : OFF,
+      schedLater: schedule==='later' ? ON : OFF,
+      setPkgS: () => this.setState({ pkgType:'small' }),
+      setPkgM: () => this.setState({ pkgType:'medium' }),
+      setPkgL: () => this.setState({ pkgType:'large' }),
+      setSchedN: () => this.setState({ schedule:'now' }),
+      setSchedL: () => this.setState({ schedule:'later' }),
+      courierPrice: { small:'3.90€', medium:'5.90€', large:'8.90€' }[pkgType],
+
+      imageStateIdle:      imageState === 'idle',
+      imageStateSearching: imageState === 'searching',
+      imageStateResults:   imageState === 'results',
+      startSearch:  () => this.startSearch(),
+      resetSearch:  () => this.setState({ imageState:'idle' }),
+
+      goHome:        () => this.go('home'),
+      goFood:        () => this.go('food'),
+      goOptions:     () => this.go('options'),
+      goCart:        () => this.go('cart'),
+      goTracking:    () => this.go('tracking'),
+      goCourier:     () => this.go('courier'),
+      goImageSearch: () => this.setState({ screen:'imageSearch', imageState:'idle', navDir:'forward' }),
+      goHistory:     () => this.go('history'),
+      goBack:        () => this.goBackFn(),
+
+      inputPlaceholder: {
+        home: "Qu'est-ce qui vous ferait plaisir ?",
+        food: "Écrivez votre message…",
+        options: "Une question sur le plat ?",
+        cart: "Un code promo ?",
+        tracking: "Une question sur la livraison ?",
+        courier: "Décrivez votre envoi…",
+        imageSearch: "Décrivez le produit…",
+        history: "Recommandez ou posez une question…",
+      }[screen] || "Écrivez votre message…",
+    };
+  }
+}
+</script>
+</body>
+</html>

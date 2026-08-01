@@ -1,0 +1,47 @@
+name: tovo
+description: "Tovo — livraison conversationnelle à Niamey."
+publish_to: 'none'
+
+# La version publiée sur les stores est 2.0.0 build 4 (avril 2025).
+# Toute mise à jour doit avoir un build strictement supérieur, sinon les
+# stores la refusent. Voir docs/app_identity.md.
+version: 2.1.0+5
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Auth, Realtime et Storage. Les appels métier passent par notre backend,
+  # pas directement par PostgREST : le calcul des prix et l'atomicité vivent
+  # dans les fonctions Postgres, exposées via /cart et /orders.
+  supabase_flutter: ^2.8.0
+
+  http: ^1.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+
+  # La maquette utilise DM Sans. Déposer les fichiers .ttf dans
+  # assets/fonts/ puis décommenter — sans eux, Flutter retombe sur la police
+  # système, ce qui reste lisible mais ne correspond pas au design.
+  #
+  # fonts:
+  #   - family: DM Sans
+  #     fonts:
+  #       - asset: assets/fonts/DMSans-Regular.ttf
+  #       - asset: assets/fonts/DMSans-Medium.ttf
+  #         weight: 500
+  #       - asset: assets/fonts/DMSans-Bold.ttf
+  #         weight: 700
+  #       - asset: assets/fonts/DMSans-ExtraBold.ttf
+  #         weight: 800

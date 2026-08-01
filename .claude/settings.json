@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($c = Get-Command supabase -ErrorAction SilentlyContinue; if \\($c\\) { \"CLI trouvé: $\\($c.Source\\)\"; supabase --version } else { \"CLI absent\" }; $s = Get-Command scoop -ErrorAction SilentlyContinue; if \\($s\\) { \"scoop: oui\" } else { \"scoop: non\" })"
+    ]
+  }
+}

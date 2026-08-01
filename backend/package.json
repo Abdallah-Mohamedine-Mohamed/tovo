@@ -1,0 +1,33 @@
+{
+  "name": "tovo-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:rls": "vitest run tests/rls",
+    "test:flow": "vitest run tests/flow",
+    "test:db": "vitest run tests/rls tests/flow tests/http",
+    "test:http": "vitest run tests/http"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "fastify": "^4.28.0",
+    "standardwebhooks": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "pino-pretty": "^11.2.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

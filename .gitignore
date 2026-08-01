@@ -1,0 +1,29 @@
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+
+# Flutter
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+mobile/build/
+mobile/ios/Pods/
+mobile/**/GeneratedPluginRegistrant.*
+*.iml
+
+# Secrets — ne jamais commiter
+**/service-account*.json
+**/google-services.json
+**/GoogleService-Info.plist
+
+# Outils
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+coverage/
+*.log
