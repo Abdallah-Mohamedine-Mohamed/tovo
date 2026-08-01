@@ -1,0 +1,11 @@
+# Copier en android/key.properties et renseigner.
+# Ce fichier-ci est un modèle : il ne contient aucun secret.
+#
+# storeFile accepte un chemin relatif à android/app/ ou absolu.
+# Ne place PAS le .jks dans le dépôt — garde-le dans un gestionnaire de mots
+# de passe ou un coffre, avec ses mots de passe.
+
+storeFile=C:\chemin\vers\tovo-upload.jks
+storePassword=
+keyAlias=upload
+keyPassword=

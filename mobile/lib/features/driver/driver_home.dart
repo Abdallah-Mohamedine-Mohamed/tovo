@@ -1,0 +1,517 @@
+import 'package:flutter/material.dart';
+
+import '../../components/registry.dart';
+import '../../core/api.dart';
+import '../../core/theme.dart';
+import 'driver_controller.dart';
+
+/// Écran unique de l'app livreur.
+///
+/// Un seul état visible à la fois : disponible, ou en course. Pas d'onglets,
+/// pas de navigation. Le livreur regarde son téléphone à l'arrêt, casque sur
+/// la tête, sous le soleil — chaque écran doit tenir en un coup d'œil et
+/// n'offrir qu'une seule action.
+class DriverHome extends StatefulWidget {
+  const DriverHome({super.key, required this.api});
+
+  final TovoApi api;
+
+  @override
+  State<DriverHome> createState() => _DriverHomeState();
+}
+
+class _DriverHomeState extends State<DriverHome> {
+  late final DriverController _c = DriverController(api: widget.api);
+
+  @override
+  void initState() {
+    super.initState();
+    _c.addListener(_maj);
+    _c.start();
+  }
+
+  @override
+  void dispose() {
+    _c.removeListener(_maj);
+    _c.dispose();
+    super.dispose();
+  }
+
+  void _maj() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: TovoTheme.surface,
+      appBar: AppBar(
+        title: const Text(
+          'Tovo Livreur',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        ),
+        actions: [
+          // L'interrupteur de disponibilité est la commande la plus utilisée
+          // de l'app : il reste toujours accessible, jamais enfoui.
+          Row(
+            children: [
+              Text(
+                _c.online ? 'En ligne' : 'Hors ligne',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _c.online ? TovoTheme.success : TovoTheme.muted,
+                ),
+              ),
+              Switch(
+                value: _c.online,
+                activeThumbColor: TovoTheme.success,
+                onChanged: (v) => _c.setOnline(v),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: () => _c.refresh(),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _BandeauSync(controller: _c),
+            _ResumeJournee(resume: _c.resume),
+            const SizedBox(height: 16),
+            if (_c.course != null)
+              _CourseEnCours(controller: _c)
+            else if (!_c.online)
+              const _Repos()
+            else if (_c.pool.isEmpty)
+              const _AucuneCourse()
+            else
+              ..._c.pool.map((o) => _CarteCourse(ordre: o, controller: _c)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Indicateur d'actions en attente de synchronisation.
+///
+/// Rendre l'attente visible évite que le livreur croie son geste perdu et le
+/// refasse. C'est la contrepartie honnête d'une interface qui avance sans le
+/// réseau.
+class _BandeauSync extends StatelessWidget {
+  const _BandeauSync({required this.controller});
+
+  final DriverController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: controller.queue.pending,
+      builder: (context, enAttente, _) {
+        final rejets = controller.queue.rejets;
+
+        if (enAttente == 0 && rejets.isEmpty) return const SizedBox.shrink();
+
+        if (rejets.isNotEmpty) {
+          return _Bandeau(
+            couleur: const Color(0xFFFDECEA),
+            texte: rejets.first.message,
+            icone: Icons.error_outline,
+            teinte: TovoTheme.danger,
+            action: TextButton(
+              onPressed: () {
+                controller.queue.clearRejets();
+                controller.refresh();
+              },
+              child: const Text('OK'),
+            ),
+          );
+        }
+
+        return _Bandeau(
+          couleur: const Color(0xFFFFF4E5),
+          texte: '$enAttente action${enAttente > 1 ? 's' : ''} en attente de réseau',
+          icone: Icons.cloud_off,
+          teinte: const Color(0xFFB26A00),
+        );
+      },
+    );
+  }
+}
+
+class _Bandeau extends StatelessWidget {
+  const _Bandeau({
+    required this.couleur,
+    required this.texte,
+    required this.icone,
+    required this.teinte,
+    this.action,
+  });
+
+  final Color couleur;
+  final String texte;
+  final IconData icone;
+  final Color teinte;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: couleur,
+        borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
+      ),
+      child: Row(
+        children: [
+          Icon(icone, size: 18, color: teinte),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              texte,
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: teinte),
+            ),
+          ),
+          if (action != null) action!,
+        ],
+      ),
+    );
+  }
+}
+
+/// Gains et cash du jour.
+///
+/// Les deux montants sont séparés délibérément : ce que le livreur GAGNE et
+/// ce qu'il DOIT reverser ne se compensent pas. Les afficher ensemble, ou
+/// pire en solde net, ferait croire à un gain de 4 900 F sur une course qui
+/// en rapporte 500.
+class _ResumeJournee extends StatelessWidget {
+  const _ResumeJournee({required this.resume});
+
+  final Map<String, dynamic> resume;
+
+  int _v(String cle) => (resume[cle] as num?)?.toInt() ?? 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
+        border: Border.all(color: const Color(0x12000000)),
+      ),
+      child: Row(
+        children: [
+          _Chiffre(libelle: 'Courses', valeur: '${_v('courses')}'),
+          _Separateur(),
+          _Chiffre(
+            libelle: 'Gagné',
+            valeur: Money.format(_v('earned')),
+            couleur: TovoTheme.success,
+          ),
+          _Separateur(),
+          _Chiffre(
+            libelle: 'À reverser',
+            valeur: Money.format(_v('cash_due')),
+            couleur: TovoTheme.teal,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Chiffre extends StatelessWidget {
+  const _Chiffre({required this.libelle, required this.valeur, this.couleur});
+
+  final String libelle;
+  final String valeur;
+  final Color? couleur;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            valeur,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: couleur ?? TovoTheme.ink,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(libelle, style: const TextStyle(fontSize: 11, color: TovoTheme.muted)),
+        ],
+      ),
+    );
+  }
+}
+
+class _Separateur extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) =>
+      Container(width: 1, height: 30, color: TovoTheme.line);
+}
+
+/// Une course disponible dans le pool.
+class _CarteCourse extends StatelessWidget {
+  const _CarteCourse({required this.ordre, required this.controller});
+
+  final Map<String, dynamic> ordre;
+  final DriverController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final gain = (ordre['driver_earning'] as num?)?.toInt() ?? 0;
+    final total = (ordre['total'] as num?)?.toInt() ?? 0;
+    final coursier = ordre['type'] == 'courier';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
+        border: Border.all(color: const Color(0x12000000)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                coursier ? Icons.inventory_2_outlined : Icons.restaurant_outlined,
+                size: 18,
+                color: TovoTheme.teal,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  coursier ? 'Colis' : 'Livraison',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ),
+              // Le gain du livreur en premier et en gros : c'est l'information
+              // sur laquelle il décide. Le total de la commande n'est là que
+              // pour savoir combien encaisser.
+              Text(
+                Money.format(gain),
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: TovoTheme.success,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            (ordre['dropoff_hint'] as String?) ?? '',
+            style: const TextStyle(fontSize: 13, color: TovoTheme.ink),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'À encaisser : ${Money.format(total)}',
+            style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
+          ),
+          const SizedBox(height: 12),
+          FilledButton(
+            onPressed: () => controller.accepter(ordre),
+            child: const Text('Accepter'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// La course en cours — un seul bouton, celui de l'étape suivante.
+class _CourseEnCours extends StatelessWidget {
+  const _CourseEnCours({required this.controller});
+
+  final DriverController controller;
+
+  static const Map<String, String> _libelles = {
+    'assigned': 'Allez chercher la commande',
+    'picked_up': 'Commande récupérée',
+    'delivering': 'En route vers le client',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final course = controller.course!;
+    final dropoff = (course['dropoff'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final pickup = (course['pickup'] as Map?)?.cast<String, dynamic>();
+    final etape = controller.prochaineEtape;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
+            border: Border.all(color: const Color(0x12000000)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _libelles[controller.statut] ?? controller.statut,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: TovoTheme.teal,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _Point(
+                couleur: TovoTheme.teal,
+                titre: 'Récupérer',
+                detail: (pickup?['hint'] as String?) ??
+                    (course['merchant_name'] as String?) ??
+                    '—',
+              ),
+              const SizedBox(height: 12),
+              _Point(
+                couleur: TovoTheme.danger,
+                titre: 'Livrer',
+                detail: (dropoff['hint'] as String?) ?? '—',
+              ),
+              const Divider(height: 28),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'À encaisser',
+                    style: TextStyle(fontSize: 13, color: TovoTheme.muted),
+                  ),
+                  Text(
+                    Money.format((course['total'] as num?)?.toInt() ?? 0),
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (etape != null)
+          FilledButton(
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(56),
+              backgroundColor:
+                  etape == 'delivered' ? TovoTheme.success : TovoTheme.teal,
+            ),
+            onPressed: () => controller.avancer(etape),
+            child: Text(
+              controller.libelleProchaineEtape,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _Point extends StatelessWidget {
+  const _Point({required this.couleur, required this.titre, required this.detail});
+
+  final Color couleur;
+  final String titre;
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          margin: const EdgeInsets.only(top: 5),
+          width: 9,
+          height: 9,
+          decoration: BoxDecoration(color: couleur, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                titre.toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: TovoTheme.muted,
+                  letterSpacing: 0.6,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(detail, style: const TextStyle(fontSize: 14, color: TovoTheme.ink)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Repos extends StatelessWidget {
+  const _Repos();
+
+  @override
+  Widget build(BuildContext context) => const _Message(
+        icone: Icons.nightlight_outlined,
+        titre: 'Vous êtes hors ligne',
+        detail: 'Passez en ligne pour recevoir des courses.',
+      );
+}
+
+class _AucuneCourse extends StatelessWidget {
+  const _AucuneCourse();
+
+  @override
+  Widget build(BuildContext context) => const _Message(
+        icone: Icons.check_circle_outline,
+        titre: 'Aucune course pour le moment',
+        detail: 'Vous serez prévenu dès qu’une course est disponible.',
+      );
+}
+
+class _Message extends StatelessWidget {
+  const _Message({required this.icone, required this.titre, required this.detail});
+
+  final IconData icone;
+  final String titre;
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 48),
+      child: Column(
+        children: [
+          Icon(icone, size: 40, color: TovoTheme.muted),
+          const SizedBox(height: 12),
+          Text(
+            titre,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            detail,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: TovoTheme.muted),
+          ),
+        ],
+      ),
+    );
+  }
+}

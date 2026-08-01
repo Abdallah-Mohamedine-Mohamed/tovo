@@ -27,6 +27,10 @@ dependencies:
   # le point GPS fait foi.
   geolocator: ^13.0.2
 
+  # File de synchronisation hors ligne de l'app livreur : elle doit
+  # survivre à la fermeture de l'app, donc au disque.
+  shared_preferences: ^2.3.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

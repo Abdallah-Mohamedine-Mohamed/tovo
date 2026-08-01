@@ -104,13 +104,31 @@ SHA-1    F5:AF:C7:18:93:10:E8:34:3E:82:11:7A:A9:6C:B8:91:E2:96:D7:7E
 SHA-256  D0:AB:82:4F:9F:44:C4:08:AD:65:24:FD:3F:0C:3E:DF:AD:C9:81:DB:1F:DF:DF:B1:82:DF:37:A9:A0:34:09:09
 ```
 
-Empreintes de la **clé d'importation** (celle qui sert à téléverser un
-build) :
+Empreintes de l'**ancienne clé d'importation**, celle du prestataire —
+conservées pour mémoire, elles seront caduques après la réinitialisation :
 
 ```
 SHA-1    7B:1E:1D:2B:F7:28:C1:FE:42:04:1B:6A:2E:73:19:EB:34:46:ED:82
 SHA-256  B9:AB:82:D5:62:3B:6E:7B:2D:D0:79:7E:3D:24:48:83:D2:58:8D:CD:68:D6:F2:04:0F:E9:D5:05:6E:54:1F:2C
 ```
+
+### Nouvelle clé d'importation
+
+Générée le 01/08/2026, `tovo-upload.jks`, alias `upload`, RSA 2048, valide
+jusqu'au 17/12/2053. Demande de réinitialisation déposée auprès de Google.
+
+```
+SHA-1    94:8E:09:70:21:B6:6F:DE:AF:24:60:7B:A9:3A:FB:54:54:87:54:9F
+SHA-256  6C:98:C1:F2:FA:05:A7:68:9D:0F:38:74:AF:8E:02:02:88:25:2B:42:8C:30:DE:1D:7E:04:26:24:4C:70:94:A8
+```
+
+C'est cette empreinte SHA-1 que doit afficher un APK release compilé en
+local. Si `keytool -printcert -jarfile` en montre une autre, `key.properties`
+n'a pas été lu et le binaire est signé avec la clé de debug.
+
+Le fichier `.jks` et ses mots de passe sont hors du dépôt
+(`~/tovo-keys`), et doivent être sauvegardés ailleurs que sur la machine de
+développement. Procédure complète : `docs/keystore.md`.
 
 ### Seul point ouvert : le keystore d'importation
 

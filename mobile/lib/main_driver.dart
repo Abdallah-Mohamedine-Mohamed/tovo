@@ -1,14 +1,33 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'core/api.dart';
+import 'core/config.dart';
 import 'core/theme.dart';
+import 'features/driver/driver_home.dart';
 
-/// Point d'entrée de l'app LIVREUR — nouvelle fiche store,
-/// identifiant `com.unique.tovo.driver`.
+/// Point d'entrée de l'app LIVREUR — `com.tovo.delivery`.
 ///
-/// Phase 5 : file de synchronisation Isar, position adaptative, solde du
-/// jour. L'offline-first n'est pas une option ici, c'est la contrainte
-/// première.
-void main() {
+/// Offline-first : toute action est écrite localement avant d'être envoyée,
+/// et rejouée dans l'ordre au retour du réseau. Voir
+/// features/driver/sync_queue.dart.
+///
+/// flutter run --flavor driver -t lib/main_driver.dart \
+///   --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=... \
+///   --dart-define=API_BASE_URL=...
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  if (!TovoConfig.isConfigured) {
+    runApp(const _EcranDeConfiguration());
+    return;
+  }
+
+  await Supabase.initialize(
+    url: TovoConfig.supabaseUrl,
+    publishableKey: TovoConfig.supabaseAnonKey,
+  );
+
   runApp(const TovoDriverApp());
 }
 
@@ -21,8 +40,30 @@ class TovoDriverApp extends StatelessWidget {
       title: 'Tovo Livreur',
       debugShowCheckedModeBanner: false,
       theme: TovoTheme.build(),
-      home: const Scaffold(
-        body: Center(child: Text('Tovo Livreur — Phase 5')),
+      home: DriverHome(api: TovoApi()),
+    );
+  }
+}
+
+class _EcranDeConfiguration extends StatelessWidget {
+  const _EcranDeConfiguration();
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: TovoTheme.build(),
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Text(
+              TovoConfig.configurationError,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 14, color: TovoTheme.muted),
+            ),
+          ),
+        ),
       ),
     );
   }

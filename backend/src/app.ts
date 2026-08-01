@@ -8,6 +8,7 @@ import { fulfillmentRoutes } from './routes/fulfillment.js';
 import { orderRoutes } from './routes/orders.js';
 import { CONTRACT_VERSION } from './components/builders.js';
 import { registerDispatchProcessor } from './services/dispatch.js';
+import { registerSweepProcessor } from './services/sweep.js';
 import { queuesEnabled } from './services/queue.js';
 import { pushStatus } from './services/notifications.js';
 
@@ -55,6 +56,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // que dans index.ts : une instance construite pour les tests ne doit pas
   // ouvrir de connexion Redis.
   registerDispatchProcessor();
+  registerSweepProcessor();
   if (!queuesEnabled) {
     app.log.warn(
       "REDIS_URL absent : le dispatch s'exécute en direct, sans réessai. " +

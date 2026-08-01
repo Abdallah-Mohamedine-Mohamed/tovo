@@ -16,10 +16,33 @@ import { env } from '../config/env.js';
  */
 
 let connexion: IORedis | null = null;
+let redisHorsService = false;
 
 function redis(): IORedis | null {
-  if (!env.REDIS_URL) return null;
-  connexion ??= new IORedis(env.REDIS_URL, {
+  if (!env.REDIS_URL || redisHorsService) return null;
+  if (connexion) return connexion;
+
+  try {
+    connexion = construireConnexion(env.REDIS_URL);
+  } catch (cause) {
+    // Une URL malformée ne doit PAS faire tomber le serveur. Le dispatch est
+    // une commodité : sans lui l'API continue de servir, en mode direct.
+    // L'inverse — une variable mal collée qui met l'API à terre en boucle —
+    // est un défaut de robustesse, pas une protection.
+    redisHorsService = true;
+    // eslint-disable-next-line no-console
+    console.error(
+      '[queue] REDIS_URL inexploitable, dispatch en mode direct :',
+      cause instanceof Error ? cause.message : cause,
+    );
+    return null;
+  }
+
+  return connexion;
+}
+
+function construireConnexion(url: string): IORedis {
+  return new IORedis(url, {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
     // Sans ces deux réglages, un Redis injoignable fait attendre l'appelant
@@ -32,12 +55,10 @@ function redis(): IORedis | null {
     // ENOTFOUND — symptôme classique et déroutant, puisque l'URL est
     // correcte. `family: 0` laisse Node choisir la famille disponible.
     family: 0,
-  });
-  connexion.on('error', () => {
+  }).on('error', () => {
     // Les erreurs de connexion sont récurrentes par nature ; les laisser
     // remonter en `unhandled error` ferait tomber le process.
   });
-  return connexion;
 }
 
 export const queuesEnabled = Boolean(env.REDIS_URL);

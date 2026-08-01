@@ -1,8 +1,28 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// ----------------------------------------------------------------------
+// Clé de signature
+// ----------------------------------------------------------------------
+// Les identifiants vivent dans android/key.properties, hors du dépôt.
+// Un keystore ou son mot de passe versionné, c'est la capacité de publier
+// une fausse mise à jour à tous les utilisateurs.
+//
+// Le fichier n'existe pas encore : la compilation retombe alors sur la clé
+// de debug, ce qui permet de développer. Une release signée en debug est
+// refusée par le Play Store — c'est voulu, mieux vaut un refus au dépôt
+// qu'une mise à jour impossible à installer.
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+val hasReleaseKeystore = keystorePropertiesFile.exists()
+if (hasReleaseKeystore) {
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
 }
 
 android {
@@ -66,13 +86,33 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO — signature de production.
-            // L'app client DOIT être signée avec la clé de la version déjà
-            // publiée, sinon la mise à jour est refusée par le Play Store.
-            // Voir docs/app_identity.md § clé de signature.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                // Pas de keystore : on signe en debug pour que
+                // `flutter build --release` reste possible en local. Le Play
+                // Store refusera ce binaire, et c'est très bien ainsi.
+                signingConfigs.getByName("debug")
+            }
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }

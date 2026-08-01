@@ -13,12 +13,21 @@ import 'config.dart';
 /// l'orchestrateur IA. L'app ne fait pas la différence, et c'est exactement
 /// ce que le contrat UI garantit.
 class TovoApi {
-  TovoApi({http.Client? client}) : _client = client ?? http.Client();
+  TovoApi({http.Client? client, String? Function()? tokenProvider})
+      : _client = client ?? http.Client(),
+        _token = tokenProvider ?? _tokenDepuisSupabase;
 
   final http.Client _client;
 
+  /// Injectable : sans cela, tester la file hors ligne exigerait d'initialiser
+  /// Supabase, ce qui transformerait un test unitaire en test d'intégration.
+  final String? Function() _token;
+
+  static String? _tokenDepuisSupabase() =>
+      Supabase.instance.client.auth.currentSession?.accessToken;
+
   Map<String, String> get _headers {
-    final token = Supabase.instance.client.auth.currentSession?.accessToken;
+    final token = _token();
     return {
       'content-type': 'application/json',
       'x-tovo-contract': '${TovoConfig.contractVersion}',
@@ -66,6 +75,7 @@ class TovoApi {
       return TovoResponse.success(
         content: decoded['content'] as String? ?? '',
         components: _components(decoded),
+        raw: decoded,
       );
     } on Exception {
       // Coupure réseau : le cas normal à Niamey, pas l'exception.
@@ -94,13 +104,21 @@ class TovoResponse {
     required this.content,
     required this.components,
     required this.statusCode,
+    required this.raw,
   });
 
   factory TovoResponse.success({
     required String content,
     required List<TovoComponent> components,
+    Map<String, dynamic> raw = const {},
   }) =>
-      TovoResponse._(ok: true, content: content, components: components, statusCode: 200);
+      TovoResponse._(
+        ok: true,
+        content: content,
+        components: components,
+        statusCode: 200,
+        raw: raw,
+      );
 
   factory TovoResponse.failure({
     required String message,
@@ -112,12 +130,29 @@ class TovoResponse {
         content: message,
         components: components,
         statusCode: statusCode,
+        raw: const {},
       );
 
   final bool ok;
   final String content;
   final List<TovoComponent> components;
   final int statusCode;
+
+  /// Corps décodé tel quel.
+  ///
+  /// Toutes les routes ne renvoient pas l'enveloppe du contrat : les listes
+  /// destinées aux apps livreur et boutiquier (`/orders`, `/driver/pool`,
+  /// `/driver/summary`) sont des lectures brutes, pas des éléments du fil
+  /// conversationnel. Les forcer dans des composants serait déformer le
+  /// contrat pour rien.
+  final Map<String, dynamic> raw;
+
+  /// Liste d'objets sous une clé donnée, vide si absente ou mal typée.
+  List<Map<String, dynamic>> list(String key) {
+    final valeur = raw[key];
+    if (valeur is! List) return const [];
+    return valeur.whereType<Map<String, dynamic>>().toList(growable: false);
+  }
 
   /// Vrai quand l'échec vient du réseau et non d'un refus du serveur : dans
   /// ce cas seulement, réessayer a du sens.

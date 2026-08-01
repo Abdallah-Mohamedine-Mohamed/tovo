@@ -16,6 +16,9 @@ mobile/**/GeneratedPluginRegistrant.*
 *.iml
 
 # Secrets — ne jamais commiter
+**/key.properties
+*.jks
+*.keystore
 **/service-account*.json
 **/google-services.json
 **/GoogleService-Info.plist
