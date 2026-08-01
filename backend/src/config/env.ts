@@ -35,6 +35,7 @@ const schema = z.object({
   EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
 
   REDIS_URL: z.string().optional(),
+  FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

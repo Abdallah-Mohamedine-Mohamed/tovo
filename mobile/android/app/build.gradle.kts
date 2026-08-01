@@ -41,8 +41,11 @@ android {
     // ------------------------------------------------------------------
     // Trois applications, une seule base de code.
     // ------------------------------------------------------------------
-    // Seule « client » reprend l'identifiant publié. Livreur et boutiquier
-    // sont de nouvelles fiches store, donc de nouveaux identifiants.
+    // « client » reprend l'identifiant publié sur les stores.
+    // « driver » et « merchant » reprennent ceux déjà déclarés dans le projet
+    // Firebase : rien n'est publié de ce côté, mais réutiliser les
+    // identifiants existants évite de créer deux apps Firebase de plus, et un
+    // seul google-services.json couvre alors les trois flavors.
     flavorDimensions += "app"
 
     productFlavors {
@@ -53,12 +56,12 @@ android {
         }
         create("driver") {
             dimension = "app"
-            applicationId = "com.unique.tovo.driver"
+            applicationId = "com.tovo.delivery"
             resValue("string", "app_name", "Tovo Livreur")
         }
         create("merchant") {
             dimension = "app"
-            applicationId = "com.unique.tovo.merchant"
+            applicationId = "com.tovo.store"
             resValue("string", "app_name", "Tovo Boutique")
         }
     }

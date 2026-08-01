@@ -4,8 +4,12 @@ import { registerAuth } from './plugins/auth.js';
 import { authHookRoutes } from './routes/authHook.js';
 import { cartRoutes } from './routes/cart.js';
 import { catalogRoutes } from './routes/catalog.js';
+import { fulfillmentRoutes } from './routes/fulfillment.js';
 import { orderRoutes } from './routes/orders.js';
 import { CONTRACT_VERSION } from './components/builders.js';
+import { registerDispatchProcessor } from './services/dispatch.js';
+import { queuesEnabled } from './services/queue.js';
+import { pushStatus } from './services/notifications.js';
 
 /**
  * Construction de l'application, séparée du démarrage : les tests ont besoin
@@ -47,12 +51,34 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   registerAuth(app);
 
+  // Enregistre l'exécuteur du dispatch. Le worker BullMQ, lui, ne démarre
+  // que dans index.ts : une instance construite pour les tests ne doit pas
+  // ouvrir de connexion Redis.
+  registerDispatchProcessor();
+  if (!queuesEnabled) {
+    app.log.warn(
+      "REDIS_URL absent : le dispatch s'exécute en direct, sans réessai. " +
+        'Acceptable en développement, pas en production.',
+    );
+  }
+
+  const fcm = pushStatus();
+  if (fcm.enabled) {
+    app.log.info({ projectId: fcm.projectId }, 'FCM configuré : les notifications partiront réellement.');
+  } else {
+    app.log.warn(
+      { cause: fcm.error },
+      'FCM non configuré : les notifications seront seulement journalisées.',
+    );
+  }
+
   app.get('/health', async () => ({ status: 'ok', contract: CONTRACT_VERSION }));
 
   await app.register(authHookRoutes);
   await app.register(catalogRoutes);
   await app.register(cartRoutes);
   await app.register(orderRoutes);
+  await app.register(fulfillmentRoutes);
 
   // Phase 4 : await app.register(chatRoutes);
 

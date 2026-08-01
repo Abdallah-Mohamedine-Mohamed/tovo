@@ -125,7 +125,14 @@ export function anonymous(): SupabaseClient {
 
 /** Première zone du seed, pour rattacher boutiques et commandes. */
 export async function firstZoneId(): Promise<string> {
-  const { data, error } = await admin.from('delivery_zones').select('id').limit(1).single();
+  // Ordonné par nom : sans tri, Postgres renvoie une zone arbitraire et les
+  // tests deviennent instables d'une exécution à l'autre.
+  const { data, error } = await admin
+    .from('delivery_zones')
+    .select('id')
+    .order('name')
+    .limit(1)
+    .single();
   if (error) throw error;
   return data.id as string;
 }

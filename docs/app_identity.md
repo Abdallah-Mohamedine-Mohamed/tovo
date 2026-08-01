@@ -29,6 +29,39 @@ Les deux valeurs sont vérifiées : l'iOS depuis App Store Connect, l'Android
 depuis l'URL de la fiche publique —
 `play.google.com/store/apps/details?id=com.unique.tovo.user`.
 
+## Apps livreur et boutiquier
+
+Ni l'une ni l'autre n'est publiée sur les stores — aucune contrainte de ce
+côté. Mais leurs identifiants existent déjà dans le projet Firebase, hérités
+de l'ancienne stack. On les reprend plutôt que d'en inventer :
+
+| App | Identifiant | Publié |
+|---|---|---|
+| Tovo Livreur | `com.tovo.delivery` | non |
+| Tovo Boutique | `com.tovo.store` | non |
+
+L'intérêt est pratique : un seul `google-services.json`, celui du projet,
+couvre les trois flavors Android. Créer de nouveaux identifiants aurait
+imposé de déclarer deux applications Firebase supplémentaires pour rien.
+
+## Firebase
+
+Projet : **`tovoapp-4903b`** (« TovoApp »), forfait Blaze.
+Compte de service : `firebase-adminsdk-j1xaf@tovoapp-4903b.iam.gserviceaccount.com`
+
+Applications déclarées utiles au projet :
+
+| Nom dans la console | Identifiant | Plateforme |
+|---|---|---|
+| tovo user new | `com.unique.tovo.user` | Android |
+| tovo ios | `com.tovoapp.UserApp` | iOS |
+| Tovo Delivery | `com.tovo.delivery` | Android |
+| Tovo Store | `com.tovo.store` | Android |
+
+Les autres entrées (`com.tovoapp.user` en Android et iOS, l'app Web) sont des
+vestiges d'itérations antérieures. Les laisser ne coûte rien ; les supprimer
+pourrait casser quelque chose qu'on ne connaît pas.
+
 ## Version publiée
 
 - Version : **2.0.0**, build **4** (importé le 04/04/2025)
