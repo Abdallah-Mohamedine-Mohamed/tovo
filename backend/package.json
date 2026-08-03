@@ -15,9 +15,14 @@
     "test:rls": "vitest run tests/rls",
     "test:flow": "vitest run tests/flow",
     "test:db": "vitest run tests/rls tests/flow tests/http",
-    "test:http": "vitest run tests/http"
+    "test:http": "vitest run tests/http",
+    "migrate:dry": "tsx --env-file=.env scripts/etl/load.ts",
+    "migrate:apply": "tsx --env-file=.env scripts/etl/load.ts",
+    "migrate:index": "tsx --env-file=.env scripts/etl/indexAll.ts",
+    "migrate:verify": "tsx --env-file=.env scripts/etl/verify.ts"
   },
   "dependencies": {
+    "@sentry/node": "^10.69.0",
     "@supabase/supabase-js": "^2.45.0",
     "bullmq": "^6.0.5",
     "fastify": "^4.28.0",

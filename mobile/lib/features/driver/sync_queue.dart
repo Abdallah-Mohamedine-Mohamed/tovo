@@ -1,8 +1,10 @@
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/api.dart';
 
@@ -151,6 +153,14 @@ class SyncAction {
         createdAt: DateTime.now(),
       );
 
+  /// Preuve de livraison : le fichier reste local jusqu’à son envoi.
+  factory SyncAction.proof(String orderId, String localPath) => SyncAction(
+        kind: SyncKind.proof,
+        path: '/orders/$orderId/proof',
+        body: {'order_id': orderId, 'local_path': localPath},
+        createdAt: DateTime.now(),
+      );
+
   factory SyncAction.status(String orderId, String status) => SyncAction(
         kind: SyncKind.status,
         path: '/orders/$orderId/status',
@@ -158,7 +168,53 @@ class SyncAction {
         createdAt: DateTime.now(),
       );
 
-  Future<TovoResponse> execute(TovoApi api) => api.post(path, body);
+  Future<TovoResponse> execute(TovoApi api) async {
+    if (kind != SyncKind.proof) return api.post(path, body);
+
+    // La preuve de livraison est un FICHIER, pas du JSON. On le garde sur
+    // le téléphone et on le téléverse au retour du réseau — sans quoi un
+    // livreur dans une cour sans couverture devrait reprendre la photo,
+    // ou pire, livrer sans preuve.
+    final chemin = body['local_path'] as String?;
+    final orderId = body['order_id'] as String?;
+    if (chemin == null || orderId == null) {
+      return TovoResponse.failure(
+        message: 'preuve incomplète',
+        statusCode: 400,
+        components: const [],
+      );
+    }
+
+    final fichier = File(chemin);
+    if (!fichier.existsSync()) {
+      // Android a nettoyé son cache avant qu'on ait pu envoyer. On
+      // abandonne la preuve plutôt que de bloquer la file : la livraison,
+      // elle, a déjà été confirmée par une action distincte.
+      return TovoResponse.success(content: 'preuve introuvable', components: const []);
+    }
+
+    try {
+      final distant = '$orderId/${DateTime.now().millisecondsSinceEpoch}.jpg';
+      await Supabase.instance.client.storage.from('proofs').uploadBinary(
+        distant,
+        await fichier.readAsBytes(),
+        fileOptions: const FileOptions(contentType: 'image/jpeg'),
+      );
+      await Supabase.instance.client
+          .from('orders')
+          .update({'proof_photo_path': distant})
+          .eq('id', orderId);
+
+      await fichier.delete().catchError((_) => fichier);
+      return TovoResponse.success(content: 'preuve envoyée', components: const []);
+    } on Exception {
+      return TovoResponse.failure(
+        message: 'réseau indisponible',
+        statusCode: 0,
+        components: const [],
+      );
+    }
+  }
 
   String encode() => jsonEncode({
         'kind': kind.name,
@@ -189,10 +245,11 @@ class SyncAction {
   String get label => switch (kind) {
         SyncKind.accept => 'Acceptation de course',
         SyncKind.status => 'Changement de statut',
+        SyncKind.proof => 'Photo de livraison',
       };
 }
 
-enum SyncKind { accept, status }
+enum SyncKind { accept, status, proof }
 
 @immutable
 class SyncFailure {

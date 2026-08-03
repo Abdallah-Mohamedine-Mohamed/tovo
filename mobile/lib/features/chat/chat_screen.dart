@@ -1,6 +1,9 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../components/registry.dart';
 import '../../core/api.dart';
@@ -9,10 +12,18 @@ import '../../core/theme.dart';
 
 /// Le fil conversationnel.
 ///
-/// En Phase 2 les composants viennent des routes REST du catalogue et du
-/// panier. En Phase 4 ils viendront de l'orchestrateur IA, par `POST /chat`.
-/// Cet écran ne changera pas : il affiche une enveloppe `content` +
-/// `components`, sans savoir qui l'a produite.
+/// Deux chemins vers le backend, et le partage n'est pas arbitraire :
+///
+///   `/chat`  — tout ce qui demande de comprendre une intention. Le texte
+///              libre, les photos, les réponses rapides.
+///
+///   REST     — tout ce qui est déterministe. Ajouter au panier, changer une
+///              quantité, passer commande. Ces actions ne coûtent pas un
+///              aller-retour au modèle, et surtout : passer commande engage
+///              de l'argent et ne doit dépendre d'aucune interprétation.
+///
+/// L'enveloppe renvoyée est identique dans les deux cas — `content` +
+/// `components` — donc cet écran ne fait pas la différence.
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key, required this.api});
 
@@ -22,8 +33,8 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _TourDeConversation {
-  _TourDeConversation({
+class _Tour {
+  _Tour({
     required this.deLAssistant,
     required this.contenu,
     this.composants = const [],
@@ -37,10 +48,12 @@ class _TourDeConversation {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final List<_TourDeConversation> _tours = [];
+  final List<_Tour> _tours = [];
   final ScrollController _scroll = ScrollController();
   final TextEditingController _saisie = TextEditingController();
+
   bool _charge = false;
+  String? _conversationId;
 
   /// Conservé entre deux tentatives : un rejeu après coupure doit présenter
   /// le MÊME identifiant, sinon l'idempotence ne sert à rien.
@@ -61,9 +74,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _accueil() => _appeler(() => widget.api.get('/categories'));
 
-  /// Point unique par lequel passe toute réponse du backend : un seul
-  /// endroit à modifier pour ajouter un indicateur de chargement, un
-  /// journal, ou le passage à `POST /chat` en Phase 4.
+  // ------------------------------------------------------------------
+  // Échanges
+  // ------------------------------------------------------------------
+
   Future<void> _appeler(Future<TovoResponse> Function() requete) async {
     setState(() => _charge = true);
     final reponse = await requete();
@@ -71,13 +85,42 @@ class _ChatScreenState extends State<ChatScreen> {
 
     setState(() {
       _charge = false;
-      _tours.add(_TourDeConversation(
+      _tours.add(_Tour(
         deLAssistant: true,
         contenu: reponse.content,
         composants: reponse.components,
         enErreur: !reponse.ok,
       ));
+      final id = reponse.raw['conversation_id'];
+      if (id is String) _conversationId = id;
     });
+    _versLeBas();
+  }
+
+  /// Parle à l'assistant. Texte libre ou interaction à interpréter.
+  Future<void> _parler({String? texte, Map<String, dynamic>? interaction}) {
+    return _appeler(() => widget.api.post('/chat', {
+          'client_message_id': _nouvelIdentifiant(),
+          if (_conversationId != null) 'conversation_id': _conversationId,
+          if (texte != null) 'text': texte,
+          if (interaction != null) 'interaction': interaction,
+          if (_position != null)
+            'context': {'lat': _position!.$1, 'lng': _position!.$2},
+        }));
+  }
+
+  /// Dernière position connue, envoyée à l'assistant pour les recherches de
+  /// proximité. On ne la redemande pas à chaque message : le GPS coûte de la
+  /// batterie et l'utilisateur ne se téléporte pas entre deux phrases.
+  (double, double)? _position;
+
+  Future<void> _rafraichirPosition() async {
+    final p = await TovoLocation.current();
+    if (p != null && mounted) setState(() => _position = (p.latitude, p.longitude));
+  }
+
+  void _ajouterTourUtilisateur(String texte) {
+    setState(() => _tours.add(_Tour(deLAssistant: false, contenu: texte)));
     _versLeBas();
   }
 
@@ -92,86 +135,152 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  void _ajouterTourUtilisateur(String texte) {
-    setState(() {
-      _tours.add(_TourDeConversation(deLAssistant: false, contenu: texte));
-    });
-    _versLeBas();
-  }
+  // ------------------------------------------------------------------
+  // Interactions
+  // ------------------------------------------------------------------
 
-  /// Routage des interactions.
-  ///
-  /// Les actions déterministes partent vers les routes REST, sans tour LLM.
-  /// C'est la règle du contrat : un tap sur « ajouter » ne doit pas coûter un
-  /// aller-retour au modèle.
   void _interaction(TovoInteraction interaction) {
-    final payload = interaction.payload;
+    final p = interaction.payload;
 
     switch (interaction.action) {
+      // --- déterministe : REST, sans modèle -------------------------
       case 'select_category':
         _ajouterTourUtilisateur('Voir cette catégorie');
-        _appeler(() =>
-            widget.api.get('/categories/${payload['category_id']}/products'));
+        _appeler(() => widget.api.get('/categories/${p['category_id']}/products'));
 
       case 'select_product':
-        _appeler(() => widget.api.get('/products/${payload['product_id']}'));
+        _appeler(() => widget.api.get('/products/${p['product_id']}'));
 
       case 'add_to_cart':
         _appeler(() => widget.api.post('/cart/items', {
-              'product_id': payload['product_id'],
-              'quantity': payload['quantity'] ?? 1,
-              'selections': payload['selections'] ?? const [],
+              'product_id': p['product_id'],
+              'quantity': p['quantity'] ?? 1,
+              'selections': p['selections'] ?? const [],
             }));
 
       case 'update_qty':
         _appeler(() => widget.api.patch(
-              '/cart/items/${payload['item_id']}',
-              {'quantity': payload['quantity']},
+              '/cart/items/${p['item_id']}',
+              {'quantity': p['quantity']},
             ));
 
       case 'remove_from_cart':
-        _appeler(() => widget.api.delete('/cart/items/${payload['item_id']}'));
+        _appeler(() => widget.api.delete('/cart/items/${p['item_id']}'));
 
       case 'place_order':
         _commander();
 
+      case 'submit_courier':
+        _envoyerColis(p);
+
+      // --- interprétation nécessaire : l'assistant -------------------
+      case 'select_merchant':
+        _parler(interaction: {'action': 'select_merchant', 'payload': p});
+
+      case 'compare_price':
+        _ajouterTourUtilisateur('Comparer les prix pour ${p['query']}');
+        _parler(interaction: {'action': 'compare_price', 'payload': p});
+
       case 'quick_reply':
-        _ajouterTourUtilisateur('${payload['label'] ?? payload['value']}');
-        // Les réponses rapides seront interprétées par l'orchestrateur en
-        // Phase 4. En attendant, on retombe sur l'accueil.
-        _accueil();
+        final valeur = '${p['value'] ?? ''}';
+        _ajouterTourUtilisateur('${p['label'] ?? valeur}');
+        // Deux réponses rapides sont des ordres, pas des intentions : les
+        // faire interpréter serait payer un aller-retour pour rien.
+        if (valeur == 'vider_panier') {
+          _appeler(() => widget.api.delete('/cart'));
+        } else if (valeur == 'garder_panier') {
+          _appeler(() => widget.api.get('/cart'));
+        } else {
+          _parler(interaction: {'action': 'quick_reply', 'payload': p});
+        }
+
+      // --- cas particuliers ------------------------------------------
+      case 'pick_image':
+        _chercherParPhoto(
+          '${p['source']}' == 'camera' ? ImageSource.camera : ImageSource.gallery,
+        );
+
+      case 'open_external':
+        _ouvrirLien('${p['url'] ?? ''}');
+
+      case 'call_driver':
+        _appeler_(p['phone']);
 
       default:
-        // Une action inconnue ne doit pas casser le fil : on l'ignore, en la
-        // signalant en debug via le registre.
         debugPrint('[chat] interaction non gérée : ${interaction.action}');
     }
   }
 
-  /// Passage de commande.
-  ///
-  /// Le `client_order_id` est généré ICI, avant l'envoi, et pas côté serveur.
-  /// C'est ce qui rend l'opération idempotente : si le réseau coupe après
-  /// l'envoi mais avant la réponse — le cas courant à Niamey — un second
-  /// essai retombe sur la même commande au lieu d'en créer une deuxième.
+  // ------------------------------------------------------------------
+  // Recherche par photo
+  // ------------------------------------------------------------------
+
+  Future<void> _chercherParPhoto(ImageSource source) async {
+    final fichier = await ImagePicker().pickImage(
+      source: source,
+      // Compression avant l'envoi : une photo brute de 4 Mo depuis Niamey
+      // prend une minute et consomme le forfait de l'utilisateur. 1024 px
+      // suffisent largement à reconnaître un produit.
+      maxWidth: 1024,
+      imageQuality: 75,
+    );
+    if (fichier == null || !mounted) return;
+
+    _ajouterTourUtilisateur('📷 Photo envoyée');
+    setState(() => _charge = true);
+
+    try {
+      final utilisateur = Supabase.instance.client.auth.currentUser;
+      if (utilisateur == null) throw Exception('session absente');
+
+      // Convention imposée par les policies Storage : le premier segment est
+      // l'identifiant de l'utilisateur. Chacun n'écrit que chez soi.
+      final chemin = '${utilisateur.id}/${_nouvelIdentifiant()}.jpg';
+
+      await Supabase.instance.client.storage.from('search-images').uploadBinary(
+            chemin,
+            await fichier.readAsBytes(),
+            fileOptions: const FileOptions(contentType: 'image/jpeg'),
+          );
+
+      if (!mounted) return;
+      setState(() => _charge = false);
+
+      // Seul le CHEMIN part vers l'assistant. Les octets de l'image
+      // n'entrent jamais dans le contexte du modèle : ils y resteraient à
+      // chaque tour, pour toujours.
+      await _parler(interaction: {
+        'action': 'search_by_image',
+        'payload': {'image_path': chemin},
+      });
+    } on Exception catch (cause) {
+      if (!mounted) return;
+      setState(() {
+        _charge = false;
+        _tours.add(_Tour(
+          deLAssistant: true,
+          contenu: "L'envoi de la photo a échoué. Vérifiez votre réseau.",
+          enErreur: true,
+        ));
+      });
+      debugPrint('[chat] photo non envoyée : $cause');
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Commande
+  // ------------------------------------------------------------------
+
   Future<void> _commander() async {
     final position = await TovoLocation.current();
     if (!mounted) return;
 
     if (position == null) {
-      setState(() {
-        _tours.add(_TourDeConversation(
-          deLAssistant: true,
-          contenu: "Je ne peux pas vous livrer sans savoir où vous êtes. "
-              "Activez la localisation, puis réessayez.",
-          enErreur: true,
-        ));
-      });
-      _versLeBas();
+      _erreurLocalisation();
       return;
     }
 
-    final repere = await _demanderLeRepere();
+    final repere = await _demanderLeRepere('Où livrer ?');
     if (!mounted || repere == null) return;
 
     _idCommandeEnCours ??= _nouvelIdentifiant();
@@ -184,21 +293,53 @@ class _ChatScreenState extends State<ChatScreen> {
           'payment_method': 'cash',
         }));
 
-    // Commande acceptée : l'identifiant a joué son rôle, la prochaine
-    // commande en aura un nouveau.
     _idCommandeEnCours = null;
   }
 
-  /// Le repère textuel accompagne l'épingle GPS : « immeuble bleu, face à la
-  /// pharmacie ». Sans lui, le livreur a un point sur une carte et rien
-  /// d'autre.
-  Future<String?> _demanderLeRepere() async {
+  Future<void> _envoyerColis(Map<String, dynamic> p) async {
+    final depart = (p['pickup'] as Map?)?.cast<String, dynamic>();
+    final arrivee = (p['dropoff'] as Map?)?.cast<String, dynamic>();
+
+    if (depart?['lat'] == null || arrivee?['lat'] == null) {
+      _erreurLocalisation();
+      return;
+    }
+
+    _idCommandeEnCours ??= _nouvelIdentifiant();
+
+    await _appeler(() => widget.api.post('/orders', {
+          'type': 'courier',
+          'client_order_id': _idCommandeEnCours,
+          'pickup_hint': depart!['hint'],
+          'pickup': {'lat': depart['lat'], 'lng': depart['lng']},
+          'dropoff_hint': arrivee!['hint'],
+          'dropoff': {'lat': arrivee['lat'], 'lng': arrivee['lng']},
+          'parcel': p['parcel'] ?? 'small',
+          'payment_method': 'cash',
+        }));
+
+    _idCommandeEnCours = null;
+  }
+
+  void _erreurLocalisation() {
+    setState(() {
+      _tours.add(_Tour(
+        deLAssistant: true,
+        contenu: "Je ne peux pas livrer sans savoir où vous êtes. "
+            "Activez la localisation, puis réessayez.",
+        enErreur: true,
+      ));
+    });
+    _versLeBas();
+  }
+
+  Future<String?> _demanderLeRepere(String titre) {
     final controleur = TextEditingController();
 
     return showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Où livrer ?', style: TextStyle(fontSize: 16)),
+        title: Text(titre, style: const TextStyle(fontSize: 16)),
         content: TextField(
           controller: controleur,
           autofocus: true,
@@ -218,15 +359,36 @@ class _ChatScreenState extends State<ChatScreen> {
               if (texte.isEmpty) return;
               Navigator.pop(context, texte);
             },
-            child: const Text('Commander'),
+            child: const Text('Confirmer'),
           ),
         ],
       ),
     );
   }
 
+  Future<void> _ouvrirLien(String url) async {
+    if (url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _appeler_(Object? telephone) async {
+    final numero = '${telephone ?? ''}'.replaceAll(' ', '');
+    if (numero.isEmpty) return;
+    await launchUrl(Uri.parse('tel:$numero'));
+  }
+
+  void _envoyer() {
+    final texte = _saisie.text.trim();
+    if (texte.isEmpty) return;
+    _saisie.clear();
+    _ajouterTourUtilisateur(texte);
+    _rafraichirPosition();
+    _parler(texte: texte);
+  }
+
   static String _nouvelIdentifiant() {
-    // UUID v4 sans dépendance supplémentaire.
     const chiffres = '0123456789abcdef';
     final aleatoire = Random.secure();
     final tampon = StringBuffer();
@@ -244,22 +406,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return tampon.toString();
   }
 
-  void _envoyer() {
-    final texte = _saisie.text.trim();
-    if (texte.isEmpty) return;
-    _saisie.clear();
-    _ajouterTourUtilisateur(texte);
-
-    // Phase 4 : POST /chat. D'ici là, la saisie libre n'a pas d'interlocuteur.
-    setState(() {
-      _tours.add(_TourDeConversation(
-        deLAssistant: true,
-        contenu: "La recherche en langage naturel arrive bientôt. "
-            "En attendant, choisissez une catégorie.",
-      ));
-    });
-    _accueil();
-  }
+  // ------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -279,9 +426,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 letterSpacing: -1,
               ),
             ),
-            Text(
+            const Text(
               'Niamey · livraison',
-              style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
+              style: TextStyle(fontSize: 11, color: TovoTheme.muted),
             ),
           ],
         ),
@@ -300,10 +447,8 @@ class _ChatScreenState extends State<ChatScreen> {
               controller: _scroll,
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               itemCount: _tours.length,
-              itemBuilder: (context, i) => _Tour(
-                tour: _tours[i],
-                onInteraction: _interaction,
-              ),
+              itemBuilder: (context, i) =>
+                  _TourVue(tour: _tours[i], onInteraction: _interaction),
             ),
           ),
           if (_charge)
@@ -312,17 +457,21 @@ class _ChatScreenState extends State<ChatScreen> {
               color: TovoTheme.teal,
               backgroundColor: TovoTheme.line,
             ),
-          _BarreDeSaisie(controller: _saisie, onSend: _envoyer),
+          _BarreDeSaisie(
+            controller: _saisie,
+            onSend: _envoyer,
+            onCamera: () => _chercherParPhoto(ImageSource.camera),
+          ),
         ],
       ),
     );
   }
 }
 
-class _Tour extends StatelessWidget {
-  const _Tour({required this.tour, required this.onInteraction});
+class _TourVue extends StatelessWidget {
+  const _TourVue({required this.tour, required this.onInteraction});
 
-  final _TourDeConversation tour;
+  final _Tour tour;
   final InteractionCallback onInteraction;
 
   @override
@@ -335,9 +484,8 @@ class _Tour extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             color: TovoTheme.teal,
-            borderRadius: BorderRadius.circular(16).copyWith(
-              bottomRight: const Radius.circular(4),
-            ),
+            borderRadius: BorderRadius.circular(16)
+                .copyWith(bottomRight: const Radius.circular(4)),
           ),
           child: Text(
             tour.contenu,
@@ -358,9 +506,8 @@ class _Tour extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
               color: tour.enErreur ? const Color(0xFFFDECEA) : TovoTheme.tealSoft,
-              borderRadius: BorderRadius.circular(16).copyWith(
-                bottomLeft: const Radius.circular(4),
-              ),
+              borderRadius: BorderRadius.circular(16)
+                  .copyWith(bottomLeft: const Radius.circular(4)),
             ),
             child: Text(
               tour.contenu,
@@ -372,33 +519,43 @@ class _Tour extends StatelessWidget {
             ),
           ),
         for (final widget in widgets)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: widget,
-          ),
+          Padding(padding: const EdgeInsets.only(bottom: 16), child: widget),
       ],
     );
   }
 }
 
 class _BarreDeSaisie extends StatelessWidget {
-  const _BarreDeSaisie({required this.controller, required this.onSend});
+  const _BarreDeSaisie({
+    required this.controller,
+    required this.onSend,
+    required this.onCamera,
+  });
 
   final TextEditingController controller;
   final VoidCallback onSend;
+  final VoidCallback onCamera;
 
   @override
   Widget build(BuildContext context) {
     return SafeArea(
       top: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+        padding: const EdgeInsets.fromLTRB(8, 8, 12, 10),
         decoration: const BoxDecoration(
           color: Colors.white,
           border: Border(top: BorderSide(color: TovoTheme.line)),
         ),
         child: Row(
           children: [
+            // La recherche par photo est ce que Tovo fait de mieux et que
+            // personne ne fait ici. Elle mérite un bouton permanent, pas
+            // d'être enfouie derrière une question de l'assistant.
+            IconButton(
+              onPressed: onCamera,
+              tooltip: 'Chercher par photo',
+              icon: const Icon(Icons.photo_camera_outlined, color: TovoTheme.teal),
+            ),
             Expanded(
               child: TextField(
                 controller: controller,

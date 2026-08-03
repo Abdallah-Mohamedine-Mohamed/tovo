@@ -36,12 +36,26 @@ export async function sweepReadyOrders(): Promise<SweepOutcome> {
   const db = serviceClient();
   const seuil = new Date(Date.now() - SEUIL_SECONDES * 1000).toISOString();
 
+  // Borne haute autant que basse : sans elle, le balayage redispatcherait
+  // éternellement des commandes que personne n'a prises depuis la veille,
+  // en notifiant les livreurs pour rien.
+  const { data: reglages } = await db
+    .from('platform_settings')
+    .select('order_stale_after_min')
+    .single();
+
+  const perime = new Date(
+    Date.now() - (reglages?.order_stale_after_min ?? 60) * 60_000,
+  ).toISOString();
+
   const { data, error } = await db
     .from('orders')
     .select('id, updated_at')
     .eq('status', 'ready')
     .is('driver_id', null)
     .lt('updated_at', seuil)
+    .gt('placed_at', perime)
+    .order('placed_at', { ascending: true })
     .limit(20);
 
   if (error) throw error;

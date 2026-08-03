@@ -195,11 +195,20 @@ class DriverController extends ChangeNotifier {
     await refresh();
   }
 
-  Future<void> avancer(String nouveauStatut) async {
+  /// Fait avancer la course.
+  ///
+  /// [preuveLocale] est le chemin d'une photo prise sur le téléphone. Elle
+  /// est mise en file APRÈS le changement de statut : la livraison est le
+  /// fait qui compte, la photo l'accompagne. Si l'envoi de l'image échoue,
+  /// la livraison reste confirmée.
+  Future<void> avancer(String nouveauStatut, {String? preuveLocale}) async {
     final id = courseId;
     if (id == null) return;
 
     await queue.submit(SyncAction.status(id, nouveauStatut));
+    if (preuveLocale != null) {
+      await queue.submit(SyncAction.proof(id, preuveLocale));
+    }
     await refresh();
   }
 

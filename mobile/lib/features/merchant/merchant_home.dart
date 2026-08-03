@@ -4,6 +4,7 @@ import '../../components/registry.dart';
 import '../../core/api.dart';
 import '../../core/theme.dart';
 import 'merchant_controller.dart';
+import 'product_editor.dart';
 
 /// Écran du boutiquier.
 ///
@@ -40,6 +41,21 @@ class _MerchantHomeState extends State<MerchantHome> {
 
   void _maj() {
     if (mounted) setState(() {});
+  }
+
+  /// Ouvre la fiche produit. `null` pour une création.
+  Future<void> _editer(Map<String, dynamic>? produit) async {
+    final modifie = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProductEditor(
+          api: widget.api,
+          merchantId: _c.boutiqueId!,
+          produit: produit,
+        ),
+      ),
+    );
+    if (modifie == true) await _c.refresh();
   }
 
   @override
@@ -81,8 +97,16 @@ class _MerchantHomeState extends State<MerchantHome> {
             ? const _AucuneBoutique()
             : _onglet == 0
                 ? _ListeCommandes(controller: _c)
-                : _ListeProduits(controller: _c),
+                : _ListeProduits(controller: _c, onEditer: _editer),
       ),
+      floatingActionButton: _onglet == 1 && _c.boutiqueId != null
+          ? FloatingActionButton.extended(
+              onPressed: () => _editer(null),
+              backgroundColor: TovoTheme.teal,
+              icon: const Icon(Icons.add, color: Colors.white),
+              label: const Text('Produit', style: TextStyle(color: Colors.white)),
+            )
+          : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _onglet,
         onDestinationSelected: (i) => setState(() => _onglet = i),
@@ -211,9 +235,10 @@ class _CarteCommande extends StatelessWidget {
 }
 
 class _ListeProduits extends StatelessWidget {
-  const _ListeProduits({required this.controller});
+  const _ListeProduits({required this.controller, required this.onEditer});
 
   final MerchantController controller;
+  final void Function(Map<String, dynamic>) onEditer;
 
   @override
   Widget build(BuildContext context) {
@@ -225,7 +250,7 @@ class _ListeProduits extends StatelessWidget {
           _Message(
             icone: Icons.inventory_2_outlined,
             titre: 'Catalogue vide',
-            detail: 'Vos produits apparaîtront ici.',
+            detail: 'Touchez « Produit » en bas à droite pour ajouter votre premier article.',
           ),
         ],
       );
@@ -239,8 +264,11 @@ class _ListeProduits extends StatelessWidget {
         final produit = produits[i];
         final disponible = produit['is_available'] as bool? ?? true;
 
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        return InkWell(
+          onTap: () => onEditer(produit),
+          borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
@@ -277,7 +305,9 @@ class _ListeProduits extends StatelessWidget {
                 activeThumbColor: TovoTheme.success,
                 onChanged: (_) => controller.basculerDisponibilite(produit),
               ),
+              const Icon(Icons.chevron_right, size: 18, color: TovoTheme.muted),
             ],
+            ),
           ),
         );
       },

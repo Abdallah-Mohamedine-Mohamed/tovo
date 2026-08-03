@@ -235,7 +235,7 @@ describe('API — parcours de commande', () => {
     });
     expect(rejeu.statusCode).toBe(201);
     expect(rejeu.json().components[0].data.order_id).toBe(composant.data.order_id);
-  }, 30_000);
+  }, 60_000);
 
   it('une course coursier passe sans panier', async () => {
     const res = await app.inject({

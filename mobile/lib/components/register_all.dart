@@ -1,8 +1,12 @@
 import 'registry.dart';
+import 'widgets/cards.dart';
 import 'widgets/cart_summary.dart';
 import 'widgets/category_grid.dart';
+import 'widgets/courier_form.dart';
+import 'widgets/image_search_prompt.dart';
 import 'widgets/option_selector.dart';
 import 'widgets/order_tracking.dart';
+import 'widgets/price_comparison.dart';
 import 'widgets/product_carousel.dart';
 import 'widgets/quick_replies.dart';
 
@@ -12,6 +16,8 @@ import 'widgets/quick_replies.dart';
 /// fichier qui change quand on ajoute un composant — `registry.dart` ne
 /// bouge jamais, et un type non enregistré est simplement ignoré au lieu de
 /// casser le fil.
+///
+/// Les douze composants du contrat v1 sont désormais tous implémentés.
 void registerTovoComponents() {
   ComponentRegistry.registerAll({
     'category_grid': (component, onInteraction) =>
@@ -29,6 +35,12 @@ void registerTovoComponents() {
           horizontal: false,
         ),
 
+    'product_card': (component, onInteraction) =>
+        ProductCard(component: component, onInteraction: onInteraction),
+
+    'merchant_card': (component, onInteraction) =>
+        MerchantCard(component: component, onInteraction: onInteraction),
+
     'quick_replies': (component, onInteraction) =>
         QuickReplies(component: component, onInteraction: onInteraction),
 
@@ -41,8 +53,13 @@ void registerTovoComponents() {
     'order_tracking': (component, onInteraction) =>
         OrderTracking(component: component, onInteraction: onInteraction),
 
-    // À venir : product_card, merchant_card, price_comparison,
-    // image_search_prompt, courier_form. Tant qu'ils ne sont pas là, le
-    // backend peut déjà les émettre : le registre les ignore sans planter.
+    'price_comparison': (component, onInteraction) =>
+        PriceComparison(component: component, onInteraction: onInteraction),
+
+    'image_search_prompt': (component, onInteraction) =>
+        ImageSearchPrompt(component: component, onInteraction: onInteraction),
+
+    'courier_form': (component, onInteraction) =>
+        CourierForm(component: component, onInteraction: onInteraction),
   });
 }

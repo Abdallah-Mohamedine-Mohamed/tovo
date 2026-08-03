@@ -1,14 +1,18 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { env, isProduction } from './config/env.js';
 import { registerAuth } from './plugins/auth.js';
+import { attachObservability, initObservability } from './lib/observability.js';
 import { authHookRoutes } from './routes/authHook.js';
 import { cartRoutes } from './routes/cart.js';
 import { catalogRoutes } from './routes/catalog.js';
 import { fulfillmentRoutes } from './routes/fulfillment.js';
+import { chatRoutes } from './routes/chat.js';
+import { merchantCatalogRoutes } from './routes/merchantCatalog.js';
 import { orderRoutes } from './routes/orders.js';
 import { CONTRACT_VERSION } from './components/builders.js';
 import { registerDispatchProcessor } from './services/dispatch.js';
 import { registerSweepProcessor } from './services/sweep.js';
+import { registerIndexProcessor } from './services/indexer.js';
 import { queuesEnabled } from './services/queue.js';
 import { pushStatus } from './services/notifications.js';
 
@@ -16,6 +20,10 @@ import { pushStatus } from './services/notifications.js';
  * Construction de l'application, séparée du démarrage : les tests ont besoin
  * d'une instance sans port ouvert, via `app.inject()`.
  */
+// Avant toute construction : Sentry doit intercepter jusqu’aux erreurs de
+// démarrage.
+initObservability();
+
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -51,12 +59,14 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   registerAuth(app);
+  attachObservability(app);
 
   // Enregistre l'exécuteur du dispatch. Le worker BullMQ, lui, ne démarre
   // que dans index.ts : une instance construite pour les tests ne doit pas
   // ouvrir de connexion Redis.
   registerDispatchProcessor();
   registerSweepProcessor();
+  registerIndexProcessor();
   if (!queuesEnabled) {
     app.log.warn(
       "REDIS_URL absent : le dispatch s'exécute en direct, sans réessai. " +
@@ -81,8 +91,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(cartRoutes);
   await app.register(orderRoutes);
   await app.register(fulfillmentRoutes);
-
-  // Phase 4 : await app.register(chatRoutes);
+  await app.register(chatRoutes);
+  await app.register(merchantCatalogRoutes);
 
   return app;
 }

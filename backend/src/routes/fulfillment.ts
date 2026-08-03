@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { toHttpFailure } from '../lib/errors.js';
 import { envelope, orderTracking } from '../components/builders.js';
 import { queueDispatch } from '../services/dispatch.js';
+import { notifierClient } from '../services/orderNotifications.js';
 
 /**
  * Exécution d'une commande — boutiquier et livreur.
@@ -57,6 +58,12 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(failure.status).send(failure.body);
     }
 
+    // Une notification qui échoue ne doit pas faire échouer le changement
+    // de statut : la commande a bien avancé, c'est un fait acquis.
+    notifierClient(params.data.orderId, body.data.status).catch((cause) => {
+      request.log.error({ cause, orderId: params.data.orderId }, 'notification client impossible');
+    });
+
     // « Prête » est le seul statut qui ouvre la course aux livreurs.
     if (body.data.status === 'ready') {
       // La mise en file ne doit jamais faire échouer le changement de
@@ -84,13 +91,10 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
    * voit que les commandes `ready` sans livreur, dans sa zone.
    */
   app.get('/driver/pool', { preHandler: app.requireAuth }, async (request, reply) => {
-    const { data, error } = await request.supabase!
-      .from('orders')
-      .select('id, type, total, dropoff_hint, placed_at, driver_earning, merchant_id')
-      .is('driver_id', null)
-      .eq('status', 'ready')
-      .order('placed_at', { ascending: true })
-      .limit(20);
+    // Par la RPC et non par une requête directe : le seuil de fraîcheur
+    // vient des réglages, et une commande abandonnée ne doit plus occuper
+    // une place dans le pool.
+    const { data, error } = await request.supabase!.rpc('driver_pool');
 
     if (error) {
       const failure = toHttpFailure(error);
@@ -123,6 +127,8 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
     if (data !== true) {
       return reply.code(409).send({ error: 'course déjà prise', code: 'ALREADY_TAKEN' });
     }
+
+    notifierClient(params.data.orderId, 'assigned').catch(() => undefined);
 
     const suivi = await db.rpc('order_tracking', { p_order_id: params.data.orderId });
     return reply.send(

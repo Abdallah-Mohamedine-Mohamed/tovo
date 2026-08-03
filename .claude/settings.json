@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell($c = Get-Command supabase -ErrorAction SilentlyContinue; if \\($c\\) { \"CLI trouvé: $\\($c.Source\\)\"; supabase --version } else { \"CLI absent\" }; $s = Get-Command scoop -ErrorAction SilentlyContinue; if \\($s\\) { \"scoop: oui\" } else { \"scoop: non\" })"
+      "PowerShell($c = Get-Command supabase -ErrorAction SilentlyContinue; if \\($c\\) { \"CLI trouvé: $\\($c.Source\\)\"; supabase --version } else { \"CLI absent\" }; $s = Get-Command scoop -ErrorAction SilentlyContinue; if \\($s\\) { \"scoop: oui\" } else { \"scoop: non\" })",
+      "Bash(node -e ' *)",
+      "Bash(npx tsc *)",
+      "Bash(npx vitest *)",
+      "Bash(sed 's/\\\\x1b\\\\[[0-9;]*m//g' \"C:/Users/abdal/AppData/Local/Temp/claude/c--Users-abdal-Downloads-Tovo/ebde53dd-9f82-4c92-89ee-4c36421cb950/tasks/bmueobdgi.output\" | grep -E \"Test Files|Tests |FAIL\" | tail -5)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\abdal\\AppData\\Local\\Temp\\claude\\c--Users-abdal-Downloads-Tovo\\ebde53dd-9f82-4c92-89ee-4c36421cb950\\tasks"
     ]
   }
 }

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { toHttpFailure } from '../lib/errors.js';
 import { envelope, orderTracking } from '../components/builders.js';
+import { notifierBoutique } from '../services/orderNotifications.js';
 
 /**
  * Commandes — sans tour LLM, et c'est délibéré.
@@ -83,6 +84,14 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     if (error) {
       const failure = toHttpFailure(error);
       return reply.code(failure.status).send(failure.body);
+    }
+
+    // La notification la plus critique du système : tant que le boutiquier
+    // ne l'a pas vue, rien n'avance et le client attend.
+    if (body.data.type === 'delivery') {
+      notifierBoutique(orderId as string).catch((cause) => {
+        request.log.error({ cause, orderId }, 'notification boutique impossible');
+      });
     }
 
     const suivi = await db.rpc('order_tracking', { p_order_id: orderId });

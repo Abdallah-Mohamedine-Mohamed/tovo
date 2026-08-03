@@ -4,7 +4,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'components/register_all.dart';
 import 'core/api.dart';
 import 'core/config.dart';
+import 'core/push.dart';
 import 'core/theme.dart';
+import 'features/auth/auth_gate.dart';
 import 'features/chat/chat_screen.dart';
 
 /// Point d'entrée de l'app CLIENT.
@@ -18,6 +20,10 @@ import 'features/chat/chat_screen.dart';
 ///   --dart-define=API_BASE_URL=...
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Un échec ici ne doit pas empêcher l'app de démarrer : mieux vaut une
+  // app sans notifications qu'une app qui ne s'ouvre pas.
+  await TovoPush.initialiser();
 
   registerTovoComponents();
 
@@ -47,7 +53,12 @@ class TovoClientApp extends StatelessWidget {
       title: 'Tovo',
       debugShowCheckedModeBanner: false,
       theme: TovoTheme.build(),
-      home: ChatScreen(api: TovoApi()),
+      home: AuthGate(
+        appPush: 'client',
+        titre: 'tovo',
+        sousTitre: 'Livraison, coursier, comparateur de prix à Niamey.',
+        child: () => ChatScreen(api: TovoApi()),
+      ),
     );
   }
 }

@@ -3,7 +3,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/api.dart';
 import 'core/config.dart';
+import 'core/push.dart';
 import 'core/theme.dart';
+import 'features/auth/auth_gate.dart';
 import 'features/driver/driver_home.dart';
 
 /// Point d'entrée de l'app LIVREUR — `com.tovo.delivery`.
@@ -17,6 +19,10 @@ import 'features/driver/driver_home.dart';
 ///   --dart-define=API_BASE_URL=...
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Un échec ici ne doit pas empêcher l'app de démarrer : mieux vaut une
+  // app sans notifications qu'une app qui ne s'ouvre pas.
+  await TovoPush.initialiser();
 
   if (!TovoConfig.isConfigured) {
     runApp(const _EcranDeConfiguration());
@@ -40,7 +46,13 @@ class TovoDriverApp extends StatelessWidget {
       title: 'Tovo Livreur',
       debugShowCheckedModeBanner: false,
       theme: TovoTheme.build(),
-      home: DriverHome(api: TovoApi()),
+      home: AuthGate(
+        appPush: 'driver',
+        titre: 'Tovo Livreur',
+        sousTitre: 'Recevez des courses et suivez vos gains.',
+        roleRequis: 'driver',
+        child: () => DriverHome(api: TovoApi()),
+      ),
     );
   }
 }

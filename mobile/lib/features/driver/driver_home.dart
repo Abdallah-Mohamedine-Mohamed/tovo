@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../components/registry.dart';
 import '../../core/api.dart';
@@ -332,10 +335,29 @@ class _CarteCourse extends StatelessWidget {
 }
 
 /// La course en cours — un seul bouton, celui de l'étape suivante.
-class _CourseEnCours extends StatelessWidget {
+class _CourseEnCours extends StatefulWidget {
   const _CourseEnCours({required this.controller});
 
   final DriverController controller;
+
+  @override
+  State<_CourseEnCours> createState() => _CourseEnCoursState();
+}
+
+class _CourseEnCoursState extends State<_CourseEnCours> {
+  File? _preuve;
+
+  DriverController get controller => widget.controller;
+
+  Future<void> _photographier() async {
+    final fichier = await ImagePicker().pickImage(
+      source: ImageSource.camera,
+      maxWidth: 1024,
+      imageQuality: 70,
+    );
+    if (fichier == null || !mounted) return;
+    setState(() => _preuve = File(fichier.path));
+  }
 
   static const Map<String, String> _libelles = {
     'assigned': 'Allez chercher la commande',
@@ -402,6 +424,13 @@ class _CourseEnCours extends StatelessWidget {
             ],
           ),
         ),
+        // La photo n’est proposée qu’au dernier geste, et reste
+        // facultative : un livreur sous la pluie, de nuit, dans une cour
+        // sans lumière, ne doit pas être bloqué par un appareil photo.
+        if (etape == 'delivered') ...[
+          const SizedBox(height: 12),
+          _BoutonPreuve(fichier: _preuve, onTap: _photographier),
+        ],
         const SizedBox(height: 16),
         if (etape != null)
           FilledButton(
@@ -410,13 +439,62 @@ class _CourseEnCours extends StatelessWidget {
               backgroundColor:
                   etape == 'delivered' ? TovoTheme.success : TovoTheme.teal,
             ),
-            onPressed: () => controller.avancer(etape),
+            onPressed: () => controller.avancer(etape, preuveLocale: _preuve?.path),
             child: Text(
               controller.libelleProchaineEtape,
               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
             ),
           ),
       ],
+    );
+  }
+}
+
+class _BoutonPreuve extends StatelessWidget {
+  const _BoutonPreuve({required this.fichier, required this.onTap});
+
+  final File? fichier;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
+          border: Border.all(
+            color: fichier != null ? TovoTheme.success : const Color(0x14000000),
+          ),
+        ),
+        child: Row(
+          children: [
+            if (fichier != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image.file(fichier!, width: 40, height: 40, fit: BoxFit.cover),
+              )
+            else
+              const Icon(Icons.photo_camera_outlined, color: TovoTheme.muted),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                fichier != null ? 'Photo prise' : 'Photo de livraison (facultatif)',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: fichier != null ? TovoTheme.success : TovoTheme.muted,
+                ),
+              ),
+            ),
+            if (fichier != null)
+              const Icon(Icons.check_circle, size: 18, color: TovoTheme.success),
+          ],
+        ),
+      ),
     );
   }
 }

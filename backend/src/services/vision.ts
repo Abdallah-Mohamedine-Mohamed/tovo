@@ -1,0 +1,152 @@
+import { env } from '../config/env.js';
+import { serviceClient } from './supabase.js';
+
+/**
+ * Description d'image par Gemini Vision.
+ *
+ * N'est PLUS utilisée pour la recherche par photo : celle-ci compare
+ * désormais les vecteurs d'image directement, sans passer par une phrase
+ * — voir embedImage(). Réduire une image à une phrase perdait trop, et se
+ * trompait sur les plats dont le nom dépend du pays.
+ *
+ * Reste utile à l'INDEXATION : beaucoup de boutiquiers écrivent « Menu 3 »
+ * en guise de description. Une description générée à partir de la photo
+ * enrichit alors le texte indexé du produit.
+ *
+ * L'image ne transite JAMAIS par le contexte du modèle d'orchestration. Elle
+ * est téléversée dans Storage par Flutter, lue ici avec la service_role, et
+ * seule sa description revient. Faire passer les octets en base64 dans un
+ * argument d'outil les inscrirait dans l'historique de conversation, à
+ * chaque tour, pour toujours.
+ */
+
+// Le même modèle que l'orchestrateur, et depuis la même variable : un
+// modèle épinglé à deux endroits finit toujours par diverger, et l'un des
+// deux tombe en silence le jour où Google en retire un.
+const MODELE = env.GEMINI_MODEL;
+
+const CONSIGNE = `Décris ce produit en une seule phrase française, factuelle et précise,
+destinée à retrouver l'article dans un catalogue.
+
+Mentionne : la nature de l'objet ou du plat, sa marque si elle est lisible,
+sa couleur, sa matière, son conditionnement, sa contenance.
+
+Si c'est un plat ouest-africain, nomme-le si tu le reconnais.
+N'invente aucune marque ni aucun détail que tu ne vois pas.
+Ne décris ni l'arrière-plan, ni les personnes, ni le lieu.`;
+
+export class VisionUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'VisionUnavailableError';
+  }
+}
+
+export const visionEnabled = Boolean(env.GEMINI_API_KEY);
+
+/**
+ * Décrit l'image déposée dans le bucket `search-images`.
+ *
+ * @param path   chemin Storage, de la forme `{user_id}/{uuid}.jpg`
+ * @param bucket `search-images` pour une recherche client, `products`
+ *               pour enrichir une fiche produit à l'indexation
+ */
+export async function decrireImage(
+  path: string,
+  bucket: 'search-images' | 'products' = 'search-images',
+): Promise<string> {
+  if (!env.GEMINI_API_KEY) {
+    throw new VisionUnavailableError('GEMINI_API_KEY absente');
+  }
+
+  // Le chemin vient d'une interaction utilisateur : on vérifie qu'il reste
+  // dans le bucket prévu. Sans ça, un client pourrait faire décrire par le
+  // modèle une preuve de livraison ou une image d'un autre bucket.
+  if (path.includes('..') || path.startsWith('/')) {
+    throw new VisionUnavailableError('chemin invalide');
+  }
+
+  const { data, error } = await serviceClient()
+    .storage.from(bucket)
+    .download(path);
+
+  if (error || !data) {
+    throw new VisionUnavailableError('image introuvable');
+  }
+
+  const octets = Buffer.from(await data.arrayBuffer());
+  if (octets.byteLength > 4 * 1024 * 1024) {
+    throw new VisionUnavailableError('image trop lourde');
+  }
+
+  const controleur = new AbortController();
+  const delai = setTimeout(() => controleur.abort(), 20_000);
+
+  try {
+    const reponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODELE}:generateContent`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-goog-api-key': env.GEMINI_API_KEY,
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: CONSIGNE },
+                {
+                  inlineData: {
+                    mimeType: data.type || 'image/jpeg',
+                    data: octets.toString('base64'),
+                  },
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 400,
+            // Les tokens de réflexion des modèles Gemini 3 se déduisent de
+            // maxOutputTokens. Sans budget explicite, le modèle épuise son
+            // quota à réfléchir et n'émet que deux mots — observé : « Ce
+            // plat ». Décrire une photo ne demande aucun raisonnement.
+            thinkingConfig: { thinkingBudget: 0 },
+          },
+        }),
+        signal: controleur.signal,
+      },
+    );
+
+    if (!reponse.ok) {
+      throw new VisionUnavailableError(`Vision a répondu ${reponse.status}`);
+    }
+
+    const json = (await reponse.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const description = (json.candidates?.[0]?.content?.parts ?? [])
+      .map((p) => p.text ?? '')
+      .join('')
+      .trim();
+
+    if (!description) {
+      throw new VisionUnavailableError("Aucune description n'a pu être produite");
+    }
+
+    return description.slice(0, 400);
+  } catch (cause) {
+    if (cause instanceof VisionUnavailableError) throw cause;
+    if (cause instanceof Error && cause.name === 'AbortError') {
+      throw new VisionUnavailableError("L'analyse de l'image a pris trop de temps");
+    }
+    throw new VisionUnavailableError(
+      cause instanceof Error ? cause.message : 'Analyse impossible',
+    );
+  } finally {
+    clearTimeout(delai);
+  }
+}

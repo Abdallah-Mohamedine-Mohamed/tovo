@@ -30,11 +30,15 @@ const schema = z.object({
   WHATSAPP_GRAPH_VERSION: z.string().default('v21.0'),
 
   GEMINI_API_KEY: z.string().optional(),
-  GEMINI_MODEL: z.string().default('gemini-2.5-flash'),
+  // Version explicite, jamais un alias comme `gemini-flash-latest` : un
+  // alias change de modèle sans prévenir, et le comportement du function
+  // calling se décale un matin sans que rien dans le dépôt ne l'explique.
+  GEMINI_MODEL: z.string().default('gemini-3.5-flash-lite'),
   OPENAI_API_KEY: z.string().optional(),
   EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
 
   REDIS_URL: z.string().optional(),
+  SENTRY_DSN: z.string().optional(),
   FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
 });
 
