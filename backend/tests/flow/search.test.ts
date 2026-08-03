@@ -73,7 +73,7 @@ describe('Recherche hybride', () => {
     await cleanup();
   });
 
-  async function chercher(requete: string) {
+  async function chercher(requete: string, limite = 8) {
     const vecteur = await embed(requete, 'query');
     const { data, error } = await client.db.rpc('search_products', {
       query_text: requete,
@@ -82,17 +82,37 @@ describe('Recherche hybride', () => {
       origin_lng: position.lng,
       radius_m: 5000,
       filter_category: null,
-      match_count: 8,
+      match_count: limite,
     });
     expect(error, `recherche « ${requete} » : ${error?.message ?? ''}`).toBeNull();
     return (data ?? []) as Array<{ name: string; price: number }>;
   }
 
+  /**
+   * La recherche restreinte aux produits créés par ce test.
+   *
+   * La base de staging porte aussi le catalogue réel migré depuis 6ammart —
+   * plus de deux mille produits. Exiger qu'un plat du test arrive en tête
+   * du classement général reviendrait à tester le catalogue, pas la
+   * recherche : un vrai produit nommé « pâte de Mil sauce » répond mieux au
+   * mot à mot que « Tuo zaafi », et il a raison.
+   *
+   * Ce que ces tests doivent vérifier est le classement RELATIF de trois
+   * plats connus, indépendamment de ce que contient la base par ailleurs.
+   * D'où la fenêtre large : sur huit résultats, les trois plats du test se
+   * font simplement sortir par de vrais produits mieux placés.
+   */
+  async function chercherLesNotres(requete: string) {
+    const resultats = await chercher(requete, 200);
+    return resultats.filter((r) => r.name.includes(marqueur));
+  }
+
   it('trouve par le SENS, sans le mot exact', async () => {
     // Le client ne connaît pas le nom du plat, il décrit ce qu'il veut.
     // C'est la moitié vectorielle qui doit répondre : « pâte de mil »
-    // n'apparaît nulle part dans le nom du produit.
-    const resultats = await chercher('pâte de mil avec de la sauce');
+    // n'apparaît nulle part dans le nom du produit, et la requête ne porte
+    // aucun marqueur — le trigramme n'a donc rien à quoi se raccrocher.
+    const resultats = await chercherLesNotres('pâte de mil avec de la sauce');
     expect(resultats.length).toBeGreaterThan(0);
     expect(resultats[0]?.name).toContain('Tuo zaafi');
   }, 60_000);
@@ -111,7 +131,8 @@ describe('Recherche hybride', () => {
   }, 60_000);
 
   it('distingue les plats entre eux', async () => {
-    const resultats = await chercher('poulet grillé au feu de bois');
+    const resultats = await chercherLesNotres('poulet grillé au feu de bois');
+    expect(resultats.length).toBeGreaterThan(0);
     expect(resultats[0]?.name).toContain('Poulet');
   }, 60_000);
 

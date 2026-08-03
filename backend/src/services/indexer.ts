@@ -41,6 +41,28 @@ export async function indexProducts(limite = 50): Promise<IndexOutcome> {
   return indexerChacun((data ?? []) as ProduitAIndexer[]);
 }
 
+/**
+ * Tronque sans couper un caractère en deux.
+ *
+ * `slice` compte en unités UTF-16, et un emoji en occupe deux. Couper entre
+ * les deux laisse une moitié orpheline : `JSON.stringify` l'accepte, mais le
+ * corps de la requête encodé en UTF-8 devient invalide et PostgREST la
+ * refuse avec « Empty or invalid json ».
+ *
+ * Vu en migration sur une description finissant par 🍎🥭✨ : le produit
+ * n'était jamais indexé, donc jamais trouvable, et l'indexeur le reprenait à
+ * chaque passage. Un boutiquier met un emoji dans sa description sans y
+ * penser — il suffit qu'il tombe au mauvais endroit.
+ */
+export function tronquer(texte: string, maximum: number): string {
+  if (texte.length <= maximum) return texte;
+
+  const coupe = texte.slice(0, maximum);
+  const dernier = coupe.charCodeAt(maximum - 1);
+  // Moitié haute d'une paire de substitution : sa moitié basse est tombée.
+  return dernier >= 0xd800 && dernier <= 0xdbff ? coupe.slice(0, -1) : coupe;
+}
+
 async function indexerChacun(produits: ProduitAIndexer[]): Promise<IndexOutcome> {
   const db = serviceClient();
   let indexed = 0;
@@ -52,16 +74,21 @@ async function indexerChacun(produits: ProduitAIndexer[]): Promise<IndexOutcome>
     try {
       const vecteur = await embed(texte, 'document');
 
-      await db
+      const { error: erreurEcriture } = await db
         .from('products')
         .update({
           embedding: vecteur,
           embedded_at: new Date().toISOString(),
           // On conserve le texte indexé : sans lui, impossible de savoir
           // pourquoi un produit ne remonte pas dans une recherche.
-          embedding_source: texte.slice(0, 500),
+          embedding_source: tronquer(texte, 500),
         })
         .eq('id', produit.id);
+
+      // Sans ce contrôle, un échec d'écriture se compte comme un succès : le
+      // produit reste invisible à la recherche, l'indexeur le reprend à
+      // chaque passage, et les compteurs affichent zéro échec.
+      if (erreurEcriture) throw erreurEcriture;
 
       indexed++;
     } catch (cause) {

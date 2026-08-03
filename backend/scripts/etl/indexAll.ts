@@ -1,4 +1,5 @@
 import { indexProducts } from '../../src/services/indexer.js';
+import { serviceClient } from '../../src/services/supabase.js';
 
 /**
  * Indexation de rattrapage après la migration.
@@ -16,11 +17,32 @@ import { indexProducts } from '../../src/services/indexer.js';
  */
 
 const LOT = 50;
+const db = serviceClient();
 
 let examines = 0;
 let indexes = 0;
 let echecs = 0;
 const debut = Date.now();
+
+/**
+ * Nombre de produits restant à indexer, mesuré indépendamment de l'indexeur.
+ *
+ * Sans ce contrôle, une régression comme celle du trigger `updated_at` passe
+ * inaperçue : l'indexeur annonce des milliers de succès en réindexant sans
+ * fin le même lot, pendant que le reste du catalogue reste introuvable. Le
+ * compteur qui compte vraiment est celui des produits jamais indexés.
+ */
+async function restants(): Promise<number> {
+  const { count, error } = await db
+    .from('products')
+    .select('*', { count: 'exact', head: true })
+    .is('embedded_at', null);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+let precedent = await restants();
+console.log(`${precedent} produits à indexer.`);
 
 for (;;) {
   const bilan = await indexProducts(LOT);
@@ -33,6 +55,18 @@ for (;;) {
 
   // Plus rien à indexer : la file est vide, on a fini.
   if (bilan.examined === 0) break;
+
+  // Un lot entier traité sans succès ni échec fait reculer le reste de zéro :
+  // l'indexeur tourne alors sur des produits déjà faits.
+  const reste = await restants();
+  if (bilan.indexed > 0 && reste >= precedent) {
+    console.error(
+      `\n✗ ${bilan.indexed} produits annoncés indexés, mais il en reste toujours ${reste}.` +
+        `\n  L'indexeur reprend les mêmes : arrêt avant d'épuiser le quota pour rien.`,
+    );
+    process.exit(1);
+  }
+  precedent = reste;
 
   // Un lot entièrement en échec signifie une panne côté API, pas des
   // produits fautifs. Continuer ne ferait qu'épuiser le quota en boucle.

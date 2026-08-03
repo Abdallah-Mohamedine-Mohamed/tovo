@@ -374,8 +374,15 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _appeler_(Object? telephone) async {
-    final numero = '${telephone ?? ''}'.replaceAll(' ', '');
+    var numero = '${telephone ?? ''}'.replaceAll(RegExp(r'[^\d+]'), '');
     if (numero.isEmpty) return;
+
+    // Supabase Auth retire le « + » en enregistrant le numéro : la base
+    // contient « 22790626927 ». Composé tel quel, le téléphone y voit un
+    // numéro local de 11 chiffres — au Niger ils en font 8 — et l'appel
+    // n'aboutit pas. Le livreur ne peut alors pas joindre son client.
+    if (!numero.startsWith('+') && numero.length > 8) numero = '+$numero';
+
     await launchUrl(Uri.parse('tel:$numero'));
   }
 

@@ -181,8 +181,14 @@ if (db) {
       .not('phone', 'is', null)
       .range(debut, debut + 999);
     if (error) fatal('relecture des téléphones', error);
+    // Supabase Auth enregistre le numéro sans « + » : la base contient
+    // « 22790626927 » là où le dump donne « +22790626927 ». Comparer les deux
+    // formes ne correspond jamais, et les collisions passent le contrôle pour
+    // n'être refusées qu'au moment de la création — le compte n'est pas créé
+    // en double, mais le rapport annonce une panne d'authentification là où
+    // il devrait annoncer un doublon attendu.
     const lignes = (data ?? []) as unknown as { phone: string; role: string }[];
-    for (const r of lignes) telephonesPris.set(r.phone, r.role);
+    for (const r of lignes) telephonesPris.set(`+${r.phone.replace(/^\+/, '')}`, r.role);
     if (lignes.length < 1000) break;
   }
 
