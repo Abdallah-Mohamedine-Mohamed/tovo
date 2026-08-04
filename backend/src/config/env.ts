@@ -7,6 +7,17 @@ import { z } from 'zod';
  * planter à la première requête en production. Les variables des phases
  * suivantes (IA, paiement) sont optionnelles tant que leur module n'existe pas.
  */
+/**
+ * Une variable absente et une variable vide veulent dire la même chose.
+ *
+ * `.optional()` n'accepte que l'absence : une ligne `NITA_BASE_URL=` laissée
+ * dans un `.env` ou une variable Railway vidée sans être supprimée devient
+ * une chaîne vide, que `.url()` rejette — et le process refuse de démarrer
+ * pour une variable qui n'était même pas censée être utilisée.
+ */
+const vide = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (v === '' ? undefined : v), schema.optional());
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -27,6 +38,15 @@ const schema = z.object({
   WHATSAPP_ACCESS_TOKEN: z.string().optional(),
   WHATSAPP_TEMPLATE_NAME: z.string().default('tovo_otp'),
   WHATSAPP_TEMPLATE_LOCALE: z.string().default('fr'),
+  /**
+   * Bouton du modèle, à accorder avec celui approuvé chez Meta.
+   *
+   * Un modèle d'authentification porte un bouton « copier le code » ; un
+   * modèle utilitaire n'en a généralement aucun. Envoyer un composant bouton
+   * à un modèle qui n'en a pas fait échouer l'envoi — et le message n'est
+   * jamais parti, donc personne ne se connecte.
+   */
+  WHATSAPP_TEMPLATE_BUTTON: z.enum(['none', 'copy_code', 'url']).default('none'),
   WHATSAPP_GRAPH_VERSION: z.string().default('v21.0'),
 
   GEMINI_API_KEY: z.string().optional(),
@@ -34,12 +54,24 @@ const schema = z.object({
   // alias change de modèle sans prévenir, et le comportement du function
   // calling se décale un matin sans que rien dans le dépôt ne l'explique.
   GEMINI_MODEL: z.string().default('gemini-3.5-flash-lite'),
-  OPENAI_API_KEY: z.string().optional(),
-  EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
 
   REDIS_URL: z.string().optional(),
   SENTRY_DSN: z.string().optional(),
   FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
+
+  // URL publique de ce backend, telle que Nita doit la rappeler. Sans elle,
+  // aucun callback n'est demandé et le paiement n'est constaté que par la
+  // vérification périodique — plus lent, mais toujours correct.
+  PUBLIC_BASE_URL: vide(z.string().url()),
+
+  NITA_BASE_URL: vide(z.string().url()),
+  NITA_API_KEY: vide(z.string().min(1)),
+  NITA_USERNAME: vide(z.string().min(1)),
+  NITA_PASSWORD: vide(z.string().min(1)),
+  // Nita ne signe pas son callback : ce secret voyage dans l'URL de rappel
+  // pour écarter les appels d'inconnus. Il ne remplace pas la vérification du
+  // statut auprès de Nita, il évite seulement d'aller la faire pour rien.
+  NITA_WEBHOOK_SECRET: vide(z.string().min(1)),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -52,6 +84,19 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+/**
+ * Peut-on ouvrir un achat en ligne chez Nita ?
+ *
+ * Le paiement mobile reste proposable même quand la réponse est non : la
+ * commande part, et le livreur encaisse à l'arrivée comme pour les espèces.
+ * Ce drapeau ne décide donc pas si le client peut choisir Nita, seulement si
+ * le système sait lui donner un code à régler d'avance et constater ce
+ * règlement tout seul.
+ */
+export const paiementMobileActif = Boolean(
+  env.NITA_BASE_URL && env.NITA_API_KEY && env.NITA_USERNAME && env.NITA_PASSWORD,
+);
 
 /**
  * En production, livrer l'OTP dans les logs serait une faille : le code de

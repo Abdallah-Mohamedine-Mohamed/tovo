@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { List, useTable, DateField } from '@refinedev/antd';
-import { Table, Tag, Typography } from 'antd';
+import { Button, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { useInvalidate, useNotification } from '@refinedev/core';
+import { supabaseClient } from '../supabaseClient';
 
 /**
  * Suivi des commandes.
@@ -37,7 +40,57 @@ const LIBELLES: Record<string, string> = {
 const xof = (v: unknown) =>
   `${Number(v ?? 0).toLocaleString('fr-FR').replace(/ | /g, ' ')} F`;
 
+/**
+ * Ce que dit l'état d'un paiement, et ce qu'il ne dit pas.
+ *
+ * « En attente » sur du mobile money ne signifie pas que le client n'a pas
+ * payé : il a pu envoyer l'argent directement par Nita au lieu de régler
+ * l'achat en ligne, auquel cas aucune API ne peut le voir. C'est tout
+ * l'objet du bouton de confirmation.
+ */
+const PAIEMENT: Record<string, { couleur: string; libelle: string }> = {
+  pending: { couleur: 'gold', libelle: 'En attente' },
+  paid: { couleur: 'green', libelle: 'Payé' },
+  failed: { couleur: 'red', libelle: 'Échec' },
+  refunded: { couleur: 'purple', libelle: 'Remboursé' },
+};
+
 export const OrderList = () => {
+  const { open } = useNotification();
+  const invalider = useInvalidate();
+  const [enCours, setEnCours] = useState<string | null>(null);
+
+  /**
+   * L'admin déclare avoir constaté le paiement.
+   *
+   * Le recours quand aucun livreur n'est encore assigné : un client appelle
+   * pour dire qu'il a payé, et personne d'autre ne peut l'enregistrer. La
+   * fonction en base trace qui l'a déclaré — il s'agit d'argent.
+   */
+  const confirmerPaiement = async (orderId: string) => {
+    setEnCours(orderId);
+    const { data, error } = await supabaseClient.rpc('confirm_payment_received', {
+      p_order_id: orderId,
+    });
+    setEnCours(null);
+
+    if (error) {
+      open?.({
+        type: 'error',
+        message: 'Confirmation refusée',
+        description: error.message,
+      });
+      return;
+    }
+    if (data !== true) {
+      open?.({ type: 'error', message: 'Ce paiement était déjà réglé' });
+      return;
+    }
+
+    open?.({ type: 'success', message: 'Encaissement enregistré à votre nom' });
+    invalider({ resource: 'orders', invalidates: ['list'] });
+  };
+
   const { tableProps } = useTable({
     resource: 'orders',
     sorters: { initial: [{ field: 'placed_at', order: 'desc' }] },
@@ -104,9 +157,59 @@ export const OrderList = () => {
           )}
         />
         <Table.Column
-          dataIndex="payment_method"
           title="Paiement"
-          render={(v) => (v === 'cash' ? 'Espèces' : 'Mobile money')}
+          render={(_, r: Record<string, unknown>) => {
+            const espece = r.payment_method === 'cash';
+            const etat = PAIEMENT[String(r.payment_status)] ?? {
+              couleur: 'default',
+              libelle: String(r.payment_status ?? '—'),
+            };
+
+            // En espèces, le paiement se fait à la livraison : afficher un
+            // état « en attente » y serait un faux signal permanent.
+            if (espece) return <span>Espèces</span>;
+
+            return (
+              <Space size={4}>
+                <span>Nita</span>
+                <Tooltip
+                  title={
+                    r.payment_confirmed_by
+                      ? 'Constaté par un livreur ou un admin'
+                      : r.payment_status === 'paid'
+                        ? 'Constaté automatiquement chez Nita'
+                        : undefined
+                  }
+                >
+                  <Tag color={etat.couleur}>{etat.libelle}</Tag>
+                </Tooltip>
+              </Space>
+            );
+          }}
+        />
+        <Table.Column
+          title=""
+          align="right"
+          render={(_, r: Record<string, unknown>) => {
+            const aConfirmer =
+              r.payment_method === 'mobile_money' &&
+              (r.payment_status === 'pending' || r.payment_status === 'failed');
+            if (!aConfirmer) return null;
+
+            return (
+              <Popconfirm
+                title="Le client a-t-il payé ?"
+                description="Votre nom sera enregistré comme ayant constaté cet encaissement."
+                okText="Oui, il a payé"
+                cancelText="Annuler"
+                onConfirm={() => confirmerPaiement(String(r.id))}
+              >
+                <Button size="small" loading={enCours === r.id}>
+                  Marquer payé
+                </Button>
+              </Popconfirm>
+            );
+          }}
         />
       </Table>
     </List>

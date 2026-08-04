@@ -1,6 +1,8 @@
 import { serviceClient } from './supabase.js';
 import { dispatchOrder } from './dispatch.js';
 import { getQueue, registerProcessor, startWorker } from './queue.js';
+import { paiementMobileActif } from '../config/env.js';
+import { verifierPaiementsEnAttente } from './payments.js';
 
 /**
  * Filet de sécurité du dispatch.
@@ -71,7 +73,30 @@ export async function sweepReadyOrders(): Promise<SweepOutcome> {
   return { examined: orphelines.length, dispatched };
 }
 
-const processor = async (): Promise<SweepOutcome> => sweepReadyOrders();
+/**
+ * Le balayage rattrape aussi les paiements dont le rappel n'est pas venu.
+ *
+ * Nita rappelle notre serveur quand un client règle son achat, mais ce
+ * rappel peut se perdre : redéploiement en cours, réseau coupé, ou panne
+ * chez eux. Sans reprise, un client qui a payé au guichet resterait
+ * indéfiniment sans commande, et le boutiquier n'en saurait jamais rien.
+ *
+ * Un échec ici ne doit pas empêcher le balayage des commandes orphelines,
+ * qui est l'autre moitié du travail et ne dépend d'aucun service tiers.
+ */
+const processor = async (): Promise<SweepOutcome> => {
+  const resultat = await sweepReadyOrders();
+
+  if (paiementMobileActif) {
+    try {
+      await verifierPaiementsEnAttente({ adresseIp: '0.0.0.0' });
+    } catch {
+      /* repris au prochain passage */
+    }
+  }
+
+  return resultat;
+};
 
 export function registerSweepProcessor(): void {
   registerProcessor(SWEEP_QUEUE, processor);

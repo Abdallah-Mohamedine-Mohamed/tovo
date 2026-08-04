@@ -161,6 +161,17 @@ class SyncAction {
         createdAt: DateTime.now(),
       );
 
+  /// Le livreur déclare avoir constaté le paiement du client.
+  ///
+  /// Passe par la file comme le reste : un livreur dans une cour sans
+  /// couverture doit pouvoir l'enregistrer sur-le-champ. Sinon il note le
+  /// montant sur un papier, ou l'oublie.
+  factory SyncAction.paiementRecu(String orderId) => SyncAction(
+        kind: SyncKind.payment,
+        path: '/orders/$orderId/payment-received',
+        createdAt: DateTime.now(),
+      );
+
   factory SyncAction.status(String orderId, String status) => SyncAction(
         kind: SyncKind.status,
         path: '/orders/$orderId/status',
@@ -246,10 +257,11 @@ class SyncAction {
         SyncKind.accept => 'Acceptation de course',
         SyncKind.status => 'Changement de statut',
         SyncKind.proof => 'Photo de livraison',
+        SyncKind.payment => 'Encaissement constaté',
       };
 }
 
-enum SyncKind { accept, status, proof }
+enum SyncKind { accept, status, proof, payment }
 
 @immutable
 class SyncFailure {

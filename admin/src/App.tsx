@@ -15,6 +15,7 @@ import '@refinedev/antd/dist/reset.css';
 import { authProvider } from './authProvider';
 import { supabaseClient } from './supabaseClient';
 import { OrderList } from './pages/orders';
+import { OfferList } from './pages/offers';
 import { DispatchList } from './pages/dispatch';
 import { MerchantList } from './pages/merchants';
 import { CashList, DriverList } from './pages/drivers';
@@ -82,6 +83,11 @@ export const App = () => (
               meta: { label: 'Collectes' },
             },
             {
+              name: 'external_offers',
+              list: '/offers',
+              meta: { label: 'Prix concurrents' },
+            },
+            {
               name: 'platform_settings',
               edit: '/settings',
               meta: { label: 'Paramètres' },
@@ -104,6 +110,7 @@ export const App = () => (
               <Route path="/merchants" element={<MerchantList />} />
               <Route path="/drivers" element={<DriverList />} />
               <Route path="/cash" element={<CashList />} />
+              <Route path="/offers" element={<OfferList />} />
               <Route path="/settings" element={<SettingsEdit />} />
               <Route path="*" element={<ErrorComponent />} />
             </Route>

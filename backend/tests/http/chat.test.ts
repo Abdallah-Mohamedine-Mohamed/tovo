@@ -256,4 +256,49 @@ describe('Conversation', () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  it('refuse un corps qui mélange parole et texte', async () => {
+    // Un seul canal par tour : deux demandes dans le même message
+    // laisseraient le modèle arbitrer, et il choisirait au hasard.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/chat',
+      headers: auth(client),
+      payload: {
+        client_message_id: randomUUID(),
+        text: 'bonjour',
+        audio: { mime: 'audio/mp4', data: 'AAAA' },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('refuse un enregistrement démesuré', async () => {
+    // Dix minutes d'audio se factureraient au prix fort et mettraient une
+    // éternité à revenir. L'app coupe à 60 s ; ce plafond arrête ce qui ne
+    // vient pas d'elle.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/chat',
+      headers: auth(client),
+      payload: {
+        client_message_id: randomUUID(),
+        audio: { mime: 'audio/mp4', data: 'A'.repeat(700_001) },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('refuse un format audio que le modèle ne lit pas', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/chat',
+      headers: auth(client),
+      payload: {
+        client_message_id: randomUUID(),
+        audio: { mime: 'audio/amr', data: 'AAAA' },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
 });

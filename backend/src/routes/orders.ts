@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { toHttpFailure } from '../lib/errors.js';
 import { envelope, orderTracking } from '../components/builders.js';
 import { notifierBoutique } from '../services/orderNotifications.js';
+import { ouvrirPaiement } from '../services/payments.js';
+import { paiementMobileActif } from '../config/env.js';
 
 /**
  * Commandes — sans tour LLM, et c'est délibéré.
@@ -87,11 +89,31 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // La notification la plus critique du système : tant que le boutiquier
-    // ne l'a pas vue, rien n'avance et le client attend.
+    // ne l'a pas vue, rien n'avance et le client attend. Elle part quel que
+    // soit le mode de paiement — le règlement ne doit rien retenir.
     if (body.data.type === 'delivery') {
       notifierBoutique(orderId as string).catch((cause) => {
         request.log.error({ cause, orderId }, 'notification boutique impossible');
       });
+    }
+
+    // Paiement mobile : on ouvre un achat chez Nita pour que le client puisse
+    // régler d'avance, et pour que le système puisse constater ce règlement
+    // tout seul. Un échec ici n'empêche rien : le client peut toujours
+    // envoyer l'argent directement par Nita, et le livreur le constatera à la
+    // livraison. Retenir la commande pour ça la ferait arriver froide.
+    let codeAchat: string | null = null;
+    if (body.data.payment_method === 'mobile_money' && paiementMobileActif) {
+      try {
+        const achat = await ouvrirPaiement(orderId as string, {
+          adresseIp: request.ip,
+          lat: String(body.data.dropoff.lat),
+          lng: String(body.data.dropoff.lng),
+        });
+        codeAchat = achat.codeAchat;
+      } catch (cause) {
+        request.log.error({ cause, orderId }, 'ouverture du paiement Nita impossible');
+      }
     }
 
     const suivi = await db.rpc('order_tracking', { p_order_id: orderId });
@@ -100,11 +122,22 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(failure.status).send(failure.body);
     }
 
+    // La commande est déjà partie ; le code sert à régler d'avance plutôt
+    // qu'à la débloquer. On le dit dans ces termes, sinon le client croit
+    // devoir payer avant que la boutique ne commence.
+    const message = codeAchat
+      ? `Commande enregistrée, la boutique la prépare. Vous pouvez régler dès maintenant ` +
+        `avec le code ${codeAchat} depuis MYNITA, ou payer à la livraison.`
+      : 'Commande enregistrée. Je vous tiens au courant.';
+
     return reply
       .code(201)
       .send(
-        envelope('Commande enregistrée. Je vous tiens au courant.', [
-          orderTracking(suivi.data as Record<string, unknown>),
+        envelope(message, [
+          orderTracking({
+            ...(suivi.data as Record<string, unknown>),
+            ...(codeAchat ? { payment_code: codeAchat } : {}),
+          }),
         ]),
       );
   });

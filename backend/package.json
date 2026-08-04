@@ -19,7 +19,9 @@
     "migrate:dry": "tsx --env-file=.env scripts/etl/load.ts",
     "migrate:apply": "tsx --env-file=.env scripts/etl/load.ts",
     "migrate:index": "tsx --env-file=.env scripts/etl/indexAll.ts",
-    "migrate:verify": "tsx --env-file=.env scripts/etl/verify.ts"
+    "migrate:verify": "tsx --env-file=.env scripts/etl/verify.ts",
+    "otp:test": "tsx --env-file=.env scripts/sendTestOtp.ts",
+    "hook:test": "tsx --env-file=.env scripts/testAuthHook.ts"
   },
   "dependencies": {
     "@sentry/node": "^10.69.0",

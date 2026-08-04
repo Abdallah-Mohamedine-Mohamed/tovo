@@ -1,4 +1,5 @@
 import { env } from '../config/env.js';
+import { cacheDuPrompt, oublierCache } from './promptCache.js';
 
 /**
  * Abstraction du modèle de langage.
@@ -39,13 +40,29 @@ export interface LlmTurn {
   content: string;
   toolName?: string;
   toolCalls?: LlmToolCall[];
+  /**
+   * Parole de l'utilisateur, transmise telle quelle au modèle.
+   *
+   * Gemini comprend l'audio directement : pas de transcription intermédiaire,
+   * donc pas de second appel, pas de latence ajoutée, et pas de service tiers
+   * à qui confier la voix des clients. Le `content` accompagne l'audio et
+   * porte le contexte (position, consignes) comme pour un message écrit.
+   */
+  audio?: { mime: string; data: string };
 }
 
 export interface LlmResponse {
   text: string;
   toolCalls: LlmToolCall[];
-  /** Tokens consommés, pour le suivi de coût. */
-  usage?: { input: number; output: number };
+  /**
+   * Tokens consommés, pour le suivi de coût.
+   *
+   * `cached` est la part d'`input` servie depuis le cache de prompt, donc
+   * facturée bien moins cher. La suivre est le seul moyen de savoir que la
+   * mise en cache fonctionne : sans ce chiffre, un cache silencieusement
+   * inopérant coûte le prix fort sans que rien ne l'indique.
+   */
+  usage?: { input: number; output: number; cached?: number };
 }
 
 export interface LlmRequest {
@@ -72,6 +89,7 @@ export class LlmUnavailableError extends Error {
 
 interface GeminiPart {
   text?: string;
+  inlineData?: { mimeType: string; data: string };
   thoughtSignature?: string;
   functionCall?: { name: string; args?: Record<string, unknown> };
   functionResponse?: { name: string; response: Record<string, unknown> };
@@ -110,6 +128,19 @@ function versGemini(history: LlmTurn[]): GeminiContent[] {
       };
     }
 
+    if (tour.audio) {
+      // L'audio d'abord, le texte ensuite : le modèle traite les parties
+      // dans l'ordre, et le contexte doit encadrer la demande, pas la
+      // précéder au point de l'orienter.
+      return {
+        role: 'user' as const,
+        parts: [
+          { inlineData: { mimeType: tour.audio.mime, data: tour.audio.data } },
+          { text: tour.content },
+        ],
+      };
+    }
+
     return {
       role: tour.role === 'model' ? ('model' as const) : ('user' as const),
       parts: [{ text: tour.content }],
@@ -131,20 +162,47 @@ export class GeminiClient implements LlmClient {
     readonly model: string = env.GEMINI_MODEL,
   ) {}
 
-  async generate({ system, history, tools }: LlmRequest): Promise<LlmResponse> {
+  async generate(requete: LlmRequest): Promise<LlmResponse> {
+    // Un cache absent n'est pas une erreur : on repart alors sur le prompt
+    // en clair, exactement comme avant qu'il existe.
+    const cache = await cacheDuPrompt(requete.system, requete.tools, this.model);
+
+    try {
+      return await this.appeler(requete, cache);
+    } catch (cause) {
+      // Un cache peut disparaître chez Gemini avant l'heure annoncée. Le
+      // client, lui, attend sa réponse : on rejoue sans cache plutôt que de
+      // lui afficher une panne.
+      if (cache && cause instanceof LlmUnavailableError) {
+        oublierCache(cache);
+        return this.appeler(requete, null);
+      }
+      throw cause;
+    }
+  }
+
+  private async appeler(
+    { system, history, tools }: LlmRequest,
+    cache: string | null,
+  ): Promise<LlmResponse> {
     const url =
       `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`;
 
+    // Le prompt et les outils sont DANS le cache : les renvoyer en plus
+    // ferait refuser la requête, et paierait deux fois ce qu'on cherche à
+    // économiser.
     const corps = {
-      systemInstruction: { parts: [{ text: system }] },
+      ...(cache
+        ? { cachedContent: cache }
+        : {
+            systemInstruction: { parts: [{ text: system }] },
+            tools: tools.length > 0 ? [{ functionDeclarations: tools.map((t) => ({
+              name: t.name,
+              description: t.description,
+              parameters: t.parameters,
+            })) }] : undefined,
+          }),
       contents: versGemini(history),
-      tools: tools.length > 0
-        ? [{ functionDeclarations: tools.map((t) => ({
-            name: t.name,
-            description: t.description,
-            parameters: t.parameters,
-          })) }]
-        : undefined,
       generationConfig: {
         temperature: 0.3,
         maxOutputTokens: 1024,
@@ -181,7 +239,11 @@ export class GeminiClient implements LlmClient {
 
       const json = (await reponse.json()) as {
         candidates?: Array<{ content?: { parts?: GeminiPart[] } }>;
-        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+        usageMetadata?: {
+          promptTokenCount?: number;
+          candidatesTokenCount?: number;
+          cachedContentTokenCount?: number;
+        };
       };
 
       const parts = json.candidates?.[0]?.content?.parts ?? [];
@@ -201,6 +263,7 @@ export class GeminiClient implements LlmClient {
         usage: {
           input: json.usageMetadata?.promptTokenCount ?? 0,
           output: json.usageMetadata?.candidatesTokenCount ?? 0,
+          cached: json.usageMetadata?.cachedContentTokenCount ?? 0,
         },
       };
     } catch (cause) {

@@ -4,6 +4,8 @@ import { toHttpFailure } from '../lib/errors.js';
 import { envelope, orderTracking } from '../components/builders.js';
 import { queueDispatch } from '../services/dispatch.js';
 import { notifierClient } from '../services/orderNotifications.js';
+import { paiementMobileActif } from '../config/env.js';
+import { verifierPaiement } from '../services/payments.js';
 
 /**
  * Exécution d'une commande — boutiquier et livreur.
@@ -137,6 +139,59 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
       ]),
     );
   });
+
+  /**
+   * Le livreur (ou l'admin) déclare avoir constaté le paiement.
+   *
+   * Le dernier recours, et le plus important en pratique : le client a pu
+   * envoyer l'argent directement par Nita au lieu de régler l'achat en ligne.
+   * Aucune API ne peut le voir — seul celui qui encaisse le sait.
+   *
+   * On revérifie d'abord auprès de Nita. Si le client avait bien réglé son
+   * achat en ligne, le paiement se solde tout seul et l'encaissement est
+   * attribué à Nita plutôt qu'au livreur : ça évite de lui imputer un
+   * versement qu'il n'a jamais reçu.
+   */
+  app.post(
+    '/orders/:orderId/payment-received',
+    { preHandler: app.requireAuth },
+    async (request, reply) => {
+      const params = z.object({ orderId: z.string().uuid() }).safeParse(request.params);
+      if (!params.success) return reply.code(400).send({ error: 'identifiant invalide' });
+
+      if (paiementMobileActif) {
+        try {
+          const etat = await verifierPaiement(params.data.orderId, { adresseIp: request.ip });
+          if (etat === 'paid') {
+            return reply.send(
+              envelope('Ce paiement était déjà enregistré chez Nita. Rien à encaisser.', []),
+            );
+          }
+        } catch (cause) {
+          // Nita injoignable : ce n'est pas une raison pour bloquer le
+          // livreur devant son client. On passe au constat manuel.
+          request.log.warn({ cause, orderId: params.data.orderId }, 'Nita injoignable');
+        }
+      }
+
+      const { data, error } = await request.supabase!.rpc('confirm_payment_received', {
+        p_order_id: params.data.orderId,
+      });
+
+      if (error) {
+        const failure = toHttpFailure(error);
+        return reply.code(failure.status).send(failure.body);
+      }
+
+      if (data !== true) {
+        return reply
+          .code(409)
+          .send({ error: 'paiement déjà réglé', code: 'ALREADY_SETTLED' });
+      }
+
+      return reply.send(envelope('Encaissement enregistré à votre nom.', []));
+    },
+  );
 
   /**
    * Ping de position.

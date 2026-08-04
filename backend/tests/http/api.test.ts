@@ -237,6 +237,53 @@ describe('API — parcours de commande', () => {
     expect(rejeu.json().components[0].data.order_id).toBe(composant.data.order_id);
   }, 60_000);
 
+  it('le paiement mobile ne retient pas la commande', async () => {
+    // Le règlement ne doit rien freiner : la commande part chez le
+    // boutiquier même si le client n'a pas encore payé. Il pourra régler
+    // depuis MYNITA, envoyer l'argent directement, ou payer au livreur — et
+    // c'est le livreur qui tranchera à la livraison.
+    await admin.from('carts').delete().eq('user_id', client.id);
+    await app.inject({
+      method: 'POST',
+      url: '/cart/items',
+      headers: auth(client),
+      payload: {
+        product_id: opts.productId,
+        quantity: 1,
+        // L'option obligatoire : sans elle l'ajout échoue, le panier reste
+        // vide et la commande part en 404 pour une raison sans rapport.
+        selections: [{ option_id: opts.portionOptionId, value_ids: [opts.portionDouble] }],
+      },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orders',
+      headers: auth(client),
+      payload: {
+        type: 'delivery',
+        client_order_id: randomUUID(),
+        dropoff_hint: 'Plateau, immeuble bleu',
+        dropoff,
+        payment_method: 'mobile_money',
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const suivi = res.json().components[0];
+    expect(suivi.type).toBe('order_tracking');
+
+    // La commande existe et attend son règlement, sans être bloquée.
+    const { data } = await admin
+      .from('orders')
+      .select('payment_method, payment_status, status')
+      .eq('id', suivi.data.order_id)
+      .single();
+    expect(data?.payment_method).toBe('mobile_money');
+    expect(data?.payment_status).toBe('pending');
+    expect(data?.status).toBe('pending');
+  }, 30_000);
+
   it('une course coursier passe sans panier', async () => {
     const res = await app.inject({
       method: 'POST',

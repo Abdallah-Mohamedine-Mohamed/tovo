@@ -455,6 +455,50 @@ const suivreCommande: Executor = async (args, ctx) => {
   };
 };
 
+/**
+ * Les adresses enregistrées du client.
+ *
+ * À Niamey il n'y a pas d'adresse postale : on se repère par des indices,
+ * et « Yantala, derrière la pharmacie Al Nour » est pénible à retaper sur un
+ * clavier de téléphone à chaque commande. Que l'assistant puisse demander
+ * « je livre chez vous ? » supprime cette friction.
+ *
+ * Le repère complet part dans le résumé destiné au modèle, mais les réponses
+ * rapides n'affichent que le libellé : « Livrer à Maison » tient dans un
+ * bouton, pas l'indice en entier.
+ */
+const mesAdresses: Executor = async (_args, ctx) => {
+  const { data } = await ctx.db.rpc('my_addresses');
+  const adresses = (data ?? []) as Array<{
+    id: string;
+    label: string;
+    text_hint: string;
+    is_default: boolean;
+  }>;
+
+  if (adresses.length === 0) return { summary: { adresses: 0 }, components: [] };
+
+  return {
+    summary: {
+      adresses: adresses.map((a) => ({
+        id: a.id,
+        libelle: a.label,
+        repere: a.text_hint,
+        par_defaut: a.is_default,
+      })),
+    },
+    components: [
+      quickReplies([
+        ...adresses.slice(0, 3).map((a) => ({
+          label: `Livrer à ${a.label}`,
+          value: `adresse:${a.id}`,
+        })),
+        { label: 'Ailleurs', value: 'adresse:nouvelle' },
+      ]),
+    ],
+  };
+};
+
 const historiqueCommandes: Executor = async (args, ctx) => {
   const limite = Math.min(nombre(args, 'limite') ?? 5, 10);
 
@@ -684,6 +728,15 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
     },
   },
   {
+    name: 'mes_adresses',
+    description:
+      "Les adresses de livraison enregistrées par le client, la sienne par défaut en tête. " +
+      "À appeler AVANT de proposer de commander, pour demander « je livre chez vous, à … ? » " +
+      "au lieu de faire retaper le repère. Ne renvoie rien si le client n'en a aucune : " +
+      "dans ce cas, laisser le formulaire de commande demander la position.",
+    parameters: { type: 'object', properties: {} },
+  },
+  {
     name: 'preparer_course',
     description:
       "Prépare une course coursier : colis d'un point à un autre, sans boutique. Renvoie une estimation dès que les deux points sont connus. Ne valide jamais l'envoi.",
@@ -718,5 +771,6 @@ export const EXECUTORS: Record<string, Executor> = {
   retirer_du_panier: retirerDuPanier,
   suivre_commande: suivreCommande,
   historique_commandes: historiqueCommandes,
+  mes_adresses: mesAdresses,
   preparer_course: preparerCourse,
 };

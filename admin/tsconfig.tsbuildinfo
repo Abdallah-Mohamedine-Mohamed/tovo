@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/authprovider.ts","./src/main.tsx","./src/supabaseclient.ts","./src/pages/dispatch.tsx","./src/pages/drivers.tsx","./src/pages/merchants.tsx","./src/pages/orders.tsx","./src/pages/settings.tsx"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/authprovider.ts","./src/backend.ts","./src/main.tsx","./src/supabaseclient.ts","./src/pages/dispatch.tsx","./src/pages/drivers.tsx","./src/pages/merchants.tsx","./src/pages/offers.tsx","./src/pages/orders.tsx","./src/pages/settings.tsx"],"version":"5.9.3"}

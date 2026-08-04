@@ -34,6 +34,14 @@ export interface OrchestrateInput {
   message: string;
   /** Généré par Flutter avant l'envoi : c'est la clé d'idempotence. */
   clientMessageId: string;
+  /**
+   * Message vocal, transmis au modèle et jamais conservé.
+   *
+   * Contrairement à la photo de recherche, qui transite par Storage et peut
+   * resservir, la voix d'un client est une donnée personnelle sans usage
+   * ultérieur : elle traverse la requête et disparaît avec elle.
+   */
+  audio?: { mime: string; data: string } | undefined;
   position?: { lat: number; lng: number } | undefined;
 }
 
@@ -41,7 +49,7 @@ export interface OrchestrateOutput extends ChatEnvelope {
   messageId: string | null;
   /** Rejets du validateur — un pic signale un prompt qui dérive. */
   rejected: string[];
-  usage: { input: number; output: number; cycles: number };
+  usage: { input: number; output: number; cached: number; cycles: number };
 }
 
 export class ChatUnavailableError extends Error {
@@ -77,6 +85,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   let texteFinal = '';
   let entree = 0;
   let sortie = 0;
+  let misEnCache = 0;
   let cycles = 0;
 
   for (; cycles < MAX_CYCLES; cycles++) {
@@ -91,6 +100,9 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
 
     entree += reponse.usage?.input ?? 0;
     sortie += reponse.usage?.output ?? 0;
+    // Part servie depuis le cache de prompt. Sans ce compteur, un cache
+    // devenu inopérant se paierait au prix fort en silence.
+    misEnCache += reponse.usage?.cached ?? 0;
 
     if (reponse.text) texteFinal = reponse.text;
 
@@ -154,7 +166,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     ...envelope(texteFinal, components),
     messageId,
     rejected,
-    usage: { input: entree, output: sortie, cycles: cycles + 1 },
+    usage: { input: entree, output: sortie, cached: misEnCache, cycles: cycles + 1 },
   };
 }
 

@@ -24,6 +24,19 @@ try {
   }
 }
 
+// Les tests ne parlent JAMAIS à Nita par accident.
+//
+// Un achat en ligne créé pendant un test est un vrai achat sur le compte
+// Nita de Tovo : il apparaît dans les relevés, il reste payable, et une suite
+// de tests lancée dix fois en laisse dix. Les identifiants sont donc retirés
+// de l'environnement de test, ce qui suffit à désactiver le paiement mobile.
+// `NITA_LIVE_TEST=1` les rétablit, pour une vérification manuelle assumée.
+if (!process.env.NITA_LIVE_TEST) {
+  for (const cle of ['NITA_USERNAME', 'NITA_PASSWORD', 'NITA_API_KEY', 'NITA_BASE_URL']) {
+    delete process.env[cle];
+  }
+}
+
 export default defineConfig({
   test: {
     environment: 'node',

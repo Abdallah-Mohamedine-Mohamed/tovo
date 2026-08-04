@@ -9,6 +9,10 @@ import { fulfillmentRoutes } from './routes/fulfillment.js';
 import { chatRoutes } from './routes/chat.js';
 import { merchantCatalogRoutes } from './routes/merchantCatalog.js';
 import { orderRoutes } from './routes/orders.js';
+import { nitaWebhookRoutes } from './routes/nitaWebhook.js';
+import { addressRoutes } from './routes/addresses.js';
+import { reviewRoutes } from './routes/reviews.js';
+import { externalOfferRoutes } from './routes/externalOffers.js';
 import { CONTRACT_VERSION } from './components/builders.js';
 import { registerDispatchProcessor } from './services/dispatch.js';
 import { registerSweepProcessor } from './services/sweep.js';
@@ -93,6 +97,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(fulfillmentRoutes);
   await app.register(chatRoutes);
   await app.register(merchantCatalogRoutes);
+  await app.register(nitaWebhookRoutes);
+  await app.register(addressRoutes);
+  await app.register(reviewRoutes);
+  await app.register(externalOfferRoutes);
 
   return app;
 }

@@ -16,6 +16,7 @@ describe('Recherche hybride', () => {
   let client: TestUser;
   let merchantId: string;
   let idTuoZaafi: string;
+  let categorieId: string;
 
   // Yantala, là où seedShop place la boutique.
   const position = { lat: 13.529, lng: 2.087 };
@@ -30,6 +31,22 @@ describe('Recherche hybride', () => {
     ]);
     ({ merchantId } = await seedShop(boutiquier.id, zoneId));
 
+    // Une catégorie qui n'appartient qu'à cette exécution.
+    //
+    // La base de staging porte le catalogue réel migré depuis 6ammart. Sans
+    // cloisonnement, ces tests mesureraient le catalogue et non la recherche :
+    // `search_products` ne retient que 40 candidats sémantiques avant la
+    // fusion, et trois plats de test noyés dans deux mille produits y entrent
+    // ou non selon le jour. `filter_category` restreint le vivier en amont de
+    // cette limite, ce qui rend le classement reproductible.
+    const { data: categorie, error: erreurCategorie } = await admin
+      .from('categories')
+      .insert({ name: `Test recherche ${marqueur}`, slug: `test-recherche-${marqueur}` })
+      .select('id')
+      .single();
+    expect(erreurCategorie, erreurCategorie?.message).toBeNull();
+    categorieId = categorie!.id as string;
+
     // Un catalogue réaliste : des plats locaux dont les noms sont rares sur
     // le web, avec des descriptions qui portent le sens.
     const { data: crees } = await admin
@@ -38,6 +55,7 @@ describe('Recherche hybride', () => {
       {
         merchant_id: merchantId,
         name: `Tuo zaafi ${marqueur}`,
+        category_id: categorieId,
         description: 'Pâte de mil épaisse servie avec une sauce arachide maison',
         price: 1500,
         is_available: true,
@@ -45,6 +63,7 @@ describe('Recherche hybride', () => {
       {
         merchant_id: merchantId,
         name: `Dèguè ${marqueur}`,
+        category_id: categorieId,
         description: 'Couscous de mil au lait caillé sucré, servi frais',
         price: 800,
         is_available: true,
@@ -52,6 +71,7 @@ describe('Recherche hybride', () => {
       {
         merchant_id: merchantId,
         name: `Poulet braisé ${marqueur}`,
+        category_id: categorieId,
         description: 'Poulet grillé au feu de bois, accompagné de frites',
         price: 4500,
         is_available: true,
@@ -70,10 +90,11 @@ describe('Recherche hybride', () => {
 
   afterAll(async () => {
     await admin.from('products').delete().eq('merchant_id', merchantId);
+    await admin.from('categories').delete().eq('id', categorieId);
     await cleanup();
   });
 
-  async function chercher(requete: string, limite = 8) {
+  async function chercher(requete: string, limite = 8, categorie: string | null = null) {
     const vecteur = await embed(requete, 'query');
     const { data, error } = await client.db.rpc('search_products', {
       query_text: requete,
@@ -81,7 +102,7 @@ describe('Recherche hybride', () => {
       origin_lat: position.lat,
       origin_lng: position.lng,
       radius_m: 5000,
-      filter_category: null,
+      filter_category: categorie,
       match_count: limite,
     });
     expect(error, `recherche « ${requete} » : ${error?.message ?? ''}`).toBeNull();
@@ -99,12 +120,9 @@ describe('Recherche hybride', () => {
    *
    * Ce que ces tests doivent vérifier est le classement RELATIF de trois
    * plats connus, indépendamment de ce que contient la base par ailleurs.
-   * D'où la fenêtre large : sur huit résultats, les trois plats du test se
-   * font simplement sortir par de vrais produits mieux placés.
    */
   async function chercherLesNotres(requete: string) {
-    const resultats = await chercher(requete, 200);
-    return resultats.filter((r) => r.name.includes(marqueur));
+    return chercher(requete, 8, categorieId);
   }
 
   it('trouve par le SENS, sans le mot exact', async () => {

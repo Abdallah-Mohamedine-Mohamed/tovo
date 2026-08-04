@@ -24,12 +24,34 @@ const interactionSchema = z.object({
   payload: z.record(z.unknown()).default({}),
 });
 
+/**
+ * Message vocal.
+ *
+ * Plafonné à 700 000 caractères de base64, soit environ 512 Ko — deux
+ * minutes d'AAC à 32 kbit/s, largement au-delà des 60 s que l'app autorise.
+ * Ce plafond protège des requêtes qui ne viennent pas d'elle : un
+ * enregistrement de dix minutes se facturerait au prix fort et mettrait
+ * longtemps à revenir.
+ *
+ * L'enregistrement DOIT être compressé. Mesuré : six secondes de WAV pèsent
+ * 286 Ko, là où une minute d'AAC en fait 240. Un client sur réseau nigérien
+ * n'enverra jamais du WAV dans un délai acceptable.
+ *
+ * Formats acceptés : ceux que Gemini comprend nativement, et ceux qu'un
+ * téléphone produit sans transcodage.
+ */
+const audioSchema = z.object({
+  mime: z.enum(['audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/aac', 'audio/wav', 'audio/webm']),
+  data: z.string().min(1).max(700_000),
+});
+
 const chatSchema = z
   .object({
     conversation_id: z.string().uuid().optional(),
     client_message_id: z.string().uuid(),
     text: z.string().min(1).max(2000).optional(),
     interaction: interactionSchema.optional(),
+    audio: audioSchema.optional(),
     context: z
       .object({
         lat: z.number().min(-90).max(90),
@@ -37,9 +59,10 @@ const chatSchema = z
       })
       .optional(),
   })
-  .refine((v) => Boolean(v.text) !== Boolean(v.interaction), {
-    message: 'fournir « text » OU « interaction », pas les deux',
-  });
+  .refine(
+    (v) => [v.text, v.interaction, v.audio].filter(Boolean).length === 1,
+    { message: 'fournir « text », « interaction » OU « audio » — un seul' },
+  );
 
 /**
  * Traduit une interaction en intention lisible par le modèle.
@@ -110,9 +133,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dejaTraite = await reponseExistante(db, conversationId, body.data.client_message_id);
     if (dejaTraite) return reply.send(dejaTraite);
 
-    const message = body.data.text
-      ? body.data.text
-      : interactionEnMessage(body.data.interaction!.action, body.data.interaction!.payload);
+    // Le message vocal n'a pas de texte : la consigne qui accompagne l'audio
+    // dit au modèle quoi en faire, et sert aussi de trace dans l'historique
+    // — on ne conserve pas l'enregistrement lui-même.
+    const message = body.data.audio
+      ? "L'utilisateur a parlé. Écoute l'enregistrement et traite sa demande comme s'il l'avait écrite."
+      : body.data.text
+        ? body.data.text
+        : interactionEnMessage(body.data.interaction!.action, body.data.interaction!.payload);
 
     try {
       const resultat = await orchestrate({
@@ -121,6 +149,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         conversationId,
         message,
         clientMessageId: body.data.client_message_id,
+        ...(body.data.audio ? { audio: body.data.audio } : {}),
         position: body.data.context,
       });
 

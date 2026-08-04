@@ -371,6 +371,8 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
     final dropoff = (course['dropoff'] as Map?)?.cast<String, dynamic>() ?? const {};
     final pickup = (course['pickup'] as Map?)?.cast<String, dynamic>();
     final etape = controller.prochaineEtape;
+    final dejaPaye =
+        course['payment_method'] == 'mobile_money' && course['payment_status'] == 'paid';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -408,22 +410,56 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
                 detail: (dropoff['hint'] as String?) ?? '—',
               ),
               const Divider(height: 28),
+              // Un paiement déjà constaté ne doit surtout pas s'afficher
+              // comme « à encaisser » : le livreur réclamerait une seconde
+              // fois de l'argent que le client a déjà versé.
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'À encaisser',
-                    style: TextStyle(fontSize: 13, color: TovoTheme.muted),
+                  Text(
+                    dejaPaye ? 'Déjà payé' : 'À encaisser',
+                    style: const TextStyle(fontSize: 13, color: TovoTheme.muted),
                   ),
                   Text(
                     Money.format((course['total'] as num?)?.toInt() ?? 0),
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: dejaPaye ? TovoTheme.success : null,
+                      decoration: dejaPaye ? TextDecoration.lineThrough : null,
+                    ),
                   ),
                 ],
               ),
+              if (dejaPaye)
+                const Padding(
+                  padding: EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Réglé par Nita. Ne rien réclamer au client.',
+                    style: TextStyle(fontSize: 12, color: TovoTheme.success),
+                  ),
+                ),
             ],
           ),
         ),
+        // Le client a annoncé payer par Nita mais rien n'est constaté : il a
+        // pu envoyer l'argent directement, hors de l'achat en ligne. Aucune
+        // API ne peut le voir — seul le livreur, devant lui, le sait.
+        if (controller.paiementNitaADemander) ...[
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(52),
+              foregroundColor: TovoTheme.teal,
+            ),
+            onPressed: controller.confirmerPaiement,
+            icon: const Icon(Icons.check_circle_outline, size: 20),
+            label: const Text(
+              'Le client a payé par Nita',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
         // La photo n’est proposée qu’au dernier geste, et reste
         // facultative : un livreur sous la pluie, de nuit, dans une cour
         // sans lumière, ne doit pas être bloqué par un appareil photo.

@@ -22,6 +22,13 @@ export const EMBEDDING_DIMENSIONS = 1536;
 // Modèle MULTIMODAL : texte et images atterrissent dans le même espace
 // vectoriel. C'est ce qui permet de chercher un produit à partir d'une
 // photo sans passer par une description écrite — voir embedImage().
+//
+// Volontairement une constante et non une variable d'environnement : la
+// dimension du vecteur (1536), la colonne `vector(1536)` et l'index HNSW en
+// dépendent. Rendre le modèle configurable laisserait croire qu'on peut en
+// changer à chaud, alors qu'un modèle de dimension différente produirait des
+// vecteurs incomparables aux 2 000 déjà indexés — sans la moindre erreur, la
+// recherche renverrait simplement n'importe quoi.
 const MODELE = 'gemini-embedding-2';
 
 /**

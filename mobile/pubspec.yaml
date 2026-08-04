@@ -41,6 +41,13 @@ dependencies:
   # Ouvrir une offre externe du comparateur, appeler un livreur.
   url_launcher: ^6.3.1
 
+  # Message vocal. Beaucoup de clients parlent bien mieux le français
+  # qu'ils ne l'écrivent sur un clavier de téléphone ; dicter sa commande
+  # supprime une vraie barrière. L'enregistrement est compressé en AAC :
+  # mesuré, six secondes de WAV pèsent 286 Ko contre 240 Ko pour une minute
+  # d'AAC, et le réseau nigérien ne pardonne pas la différence.
+  record: ^6.2.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

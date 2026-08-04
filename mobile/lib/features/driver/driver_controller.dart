@@ -212,6 +212,27 @@ class DriverController extends ChangeNotifier {
     await refresh();
   }
 
+  /// Le client a-t-il choisi Nita sans que le paiement soit constaté ?
+  ///
+  /// Nita permet aussi d'envoyer l'argent directement, sans passer par
+  /// l'achat en ligne : le système ne peut alors rien voir. C'est au livreur
+  /// de trancher, puisque c'est lui qui est devant le client.
+  bool get paiementNitaADemander =>
+      course?['payment_method'] == 'mobile_money' && course?['payment_status'] == 'pending';
+
+  /// Le livreur déclare avoir constaté le paiement.
+  ///
+  /// Le serveur revérifie d'abord auprès de Nita : si le client avait déjà
+  /// réglé son achat en ligne, l'encaissement est attribué à Nita et non au
+  /// livreur — on ne lui impute pas un versement qu'il n'a pas reçu.
+  Future<void> confirmerPaiement() async {
+    final id = courseId;
+    if (id == null) return;
+
+    await queue.submit(SyncAction.paiementRecu(id));
+    await refresh();
+  }
+
   /// Étape suivante du parcours, ou `null` si la course est terminée.
   String? get prochaineEtape => switch (statut) {
         'assigned' => 'picked_up',

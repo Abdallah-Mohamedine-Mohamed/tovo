@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import '../../components/registry.dart';
 import '../../core/api.dart';
 import '../../core/location.dart';
 import '../../core/theme.dart';
+import '../../core/voix.dart';
 
 /// Le fil conversationnel.
 ///
@@ -31,6 +33,18 @@ class ChatScreen extends StatefulWidget {
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
+}
+
+/// Où livrer, une fois le choix fait.
+///
+/// Le repère écrit compte autant que les coordonnées : c'est lui que le
+/// livreur lit quand le GPS le pose au milieu du quartier.
+class _Destination {
+  const _Destination({required this.repere, required this.lat, required this.lng});
+
+  final String repere;
+  final double lat;
+  final double lng;
 }
 
 class _Tour {
@@ -59,6 +73,10 @@ class _ChatScreenState extends State<ChatScreen> {
   /// le MÊME identifiant, sinon l'idempotence ne sert à rien.
   String? _idCommandeEnCours;
 
+  bool _enregistreLaVoix = false;
+  DateTime? _debutParole;
+  Timer? _minuterieParole;
+
   @override
   void initState() {
     super.initState();
@@ -67,6 +85,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _minuterieParole?.cancel();
+    unawaited(VoixTovo.annuler());
+    unawaited(VoixTovo.liberer());
     _scroll.dispose();
     _saisie.dispose();
     super.dispose();
@@ -107,6 +128,72 @@ class _ChatScreenState extends State<ChatScreen> {
           if (_position != null)
             'context': {'lat': _position!.$1, 'lng': _position!.$2},
         }));
+  }
+
+  // ------------------------------------------------------------------
+  // Message vocal
+  // ------------------------------------------------------------------
+
+  Future<void> _demarrerLaParole() async {
+    final autorise = await VoixTovo.demarrer();
+    if (!mounted) return;
+
+    if (!autorise) {
+      setState(() {
+        _tours.add(_Tour(
+          deLAssistant: true,
+          contenu: "Je n'ai pas accès au micro. Autorisez-le dans les réglages "
+              'du téléphone, ou écrivez votre demande.',
+          enErreur: true,
+        ));
+      });
+      _versLeBas();
+      return;
+    }
+
+    setState(() {
+      _enregistreLaVoix = true;
+      _debutParole = DateTime.now();
+    });
+
+    // Un doigt qui reste posé — poche, distraction — enverrait des minutes
+    // de silence à facturer. On coupe et on envoie ce qui a été dit.
+    _minuterieParole = Timer(VoixTovo.dureeMax, () {
+      if (mounted && _enregistreLaVoix) unawaited(_envoyerLaParole());
+    });
+  }
+
+  Future<void> _envoyerLaParole() async {
+    if (!_enregistreLaVoix) return;
+    _minuterieParole?.cancel();
+
+    final duree = DateTime.now().difference(_debutParole ?? DateTime.now());
+    setState(() => _enregistreLaVoix = false);
+
+    // Appui trop bref : c'est un geste manqué, pas une demande. Envoyer
+    // coûterait un appel au modèle pour du silence.
+    if (duree < VoixTovo.dureeMin) {
+      await VoixTovo.annuler();
+      return;
+    }
+
+    final audio = await VoixTovo.arreter();
+    if (!mounted || audio == null) return;
+
+    _ajouterTourUtilisateur('🎤 Message vocal');
+    await _appeler(() => widget.api.post('/chat', {
+          'client_message_id': _nouvelIdentifiant(),
+          if (_conversationId != null) 'conversation_id': _conversationId,
+          'audio': {'mime': audio.mime, 'data': audio.data},
+          if (_position != null)
+            'context': {'lat': _position!.$1, 'lng': _position!.$2},
+        }));
+  }
+
+  Future<void> _annulerLaParole() async {
+    _minuterieParole?.cancel();
+    if (mounted) setState(() => _enregistreLaVoix = false);
+    await VoixTovo.annuler();
   }
 
   /// Dernière position connue, envoyée à l'assistant pour les recherches de
@@ -173,6 +260,11 @@ class _ChatScreenState extends State<ChatScreen> {
       case 'submit_courier':
         _envoyerColis(p);
 
+      // Envoi silencieux : la carte affiche déjà le remerciement, et faire
+      // répondre l'assistant après une note serait du bavardage.
+      case 'rate_order':
+        _noter('${p['order_id'] ?? ''}', (p['rating'] as num?)?.toInt() ?? 0);
+
       // --- interprétation nécessaire : l'assistant -------------------
       case 'select_merchant':
         _parler(interaction: {'action': 'select_merchant', 'payload': p});
@@ -190,6 +282,11 @@ class _ChatScreenState extends State<ChatScreen> {
           _appeler(() => widget.api.delete('/cart'));
         } else if (valeur == 'garder_panier') {
           _appeler(() => widget.api.get('/cart'));
+        } else if (valeur.startsWith('adresse:')) {
+          // L'assistant a proposé « je livre chez vous, à … ? » et le client
+          // a répondu. Redemander la destination juste après serait lui
+          // reposer la question à laquelle il vient de répondre.
+          _commander(adresseChoisie: valeur.substring('adresse:'.length));
         } else {
           _parler(interaction: {'action': 'quick_reply', 'payload': p});
         }
@@ -271,29 +368,205 @@ class _ChatScreenState extends State<ChatScreen> {
   // Commande
   // ------------------------------------------------------------------
 
-  Future<void> _commander() async {
-    final position = await TovoLocation.current();
-    if (!mounted) return;
+  /// Passe la commande du panier courant.
+  ///
+  /// [adresseChoisie] vient de la réponse rapide de l'assistant : le client
+  /// a déjà dit où livrer, on ne le lui redemande pas. La valeur
+  /// `nouvelle` signifie « ailleurs » et retombe sur la position actuelle.
+  Future<void> _commander({String? adresseChoisie}) async {
+    // Les adresses d'abord : à Niamey il n'y a pas d'adresse postale, et
+    // retaper « Yantala, derrière la pharmacie Al Nour » à chaque commande
+    // est la friction la plus évitable de l'application.
+    final destination = await _choisirDestination(adresseChoisie: adresseChoisie);
+    if (!mounted || destination == null) return;
 
-    if (position == null) {
-      _erreurLocalisation();
-      return;
-    }
-
-    final repere = await _demanderLeRepere('Où livrer ?');
-    if (!mounted || repere == null) return;
+    final paiement = await _choisirPaiement();
+    if (!mounted || paiement == null) return;
 
     _idCommandeEnCours ??= _nouvelIdentifiant();
 
     await _appeler(() => widget.api.post('/orders', {
           'type': 'delivery',
           'client_order_id': _idCommandeEnCours,
-          'dropoff_hint': repere,
-          'dropoff': {'lat': position.latitude, 'lng': position.longitude},
-          'payment_method': 'cash',
+          'dropoff_hint': destination.repere,
+          'dropoff': {'lat': destination.lat, 'lng': destination.lng},
+          'payment_method': paiement,
         }));
 
     _idCommandeEnCours = null;
+  }
+
+  /// Où livrer : une adresse déjà connue, ou la position actuelle.
+  ///
+  /// Renvoie `null` si le client renonce — annuler à cette étape ne doit
+  /// jamais passer commande.
+  Future<_Destination?> _choisirDestination({String? adresseChoisie}) async {
+    List<Map<String, dynamic>> connues = const [];
+    try {
+      final reponse = await widget.api.get('/addresses');
+      connues = ((reponse.raw['addresses'] as List?) ?? const [])
+          .map((a) => (a as Map).cast<String, dynamic>())
+          .toList();
+    } catch (_) {
+      // Hors ligne ou route indisponible : on retombe sur la saisie
+      // manuelle plutôt que d'empêcher de commander.
+    }
+
+    if (!mounted) return null;
+
+    // Choix déjà exprimé auprès de l'assistant : on l'honore tel quel.
+    // Une adresse entre-temps supprimée retombe sur la feuille de choix
+    // plutôt que de faire échouer la commande.
+    if (adresseChoisie != null && adresseChoisie != 'nouvelle') {
+      final connue = connues.where((a) => a['id'] == adresseChoisie).firstOrNull;
+      if (connue != null) {
+        return _Destination(
+          repere: connue['text_hint'] as String,
+          lat: (connue['lat'] as num).toDouble(),
+          lng: (connue['lng'] as num).toDouble(),
+        );
+      }
+    }
+
+    if (connues.isNotEmpty && adresseChoisie != 'nouvelle') {
+      final choix = await _feuilleAdresses(connues);
+      if (!mounted || choix == null) return null;
+      if (choix != _nouvelleAdresse) {
+        final a = connues.firstWhere((x) => x['id'] == choix);
+        return _Destination(
+          repere: a['text_hint'] as String,
+          lat: (a['lat'] as num).toDouble(),
+          lng: (a['lng'] as num).toDouble(),
+        );
+      }
+    }
+
+    final position = await TovoLocation.current();
+    if (!mounted) return null;
+    if (position == null) {
+      _erreurLocalisation();
+      return null;
+    }
+
+    final repere = await _demanderLeRepere('Où livrer ?');
+    if (!mounted || repere == null) return null;
+
+    // Enregistrer se fait en tâche de fond : un échec ne doit pas empêcher
+    // la commande, qui est ce que le client est venu faire.
+    unawaited(widget.api.post('/addresses', {
+      'label': 'Adresse',
+      'text_hint': repere,
+      'lat': position.latitude,
+      'lng': position.longitude,
+    }));
+
+    return _Destination(
+      repere: repere,
+      lat: position.latitude,
+      lng: position.longitude,
+    );
+  }
+
+  static const String _nouvelleAdresse = '__nouvelle__';
+
+  Future<String?> _feuilleAdresses(List<Map<String, dynamic>> adresses) {
+    return showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text(
+                'Où livrer ?',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+            ),
+            for (final a in adresses)
+              ListTile(
+                leading: Icon(
+                  a['is_default'] == true ? Icons.home_rounded : Icons.place_outlined,
+                  color: TovoTheme.teal,
+                ),
+                title: Text(a['label'] as String? ?? 'Adresse'),
+                subtitle: Text(
+                  a['text_hint'] as String? ?? '',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () => Navigator.pop(context, a['id'] as String),
+              ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.add_location_alt_outlined),
+              title: const Text('Livrer ailleurs'),
+              subtitle: const Text('Utiliser ma position actuelle'),
+              onTap: () => Navigator.pop(context, _nouvelleAdresse),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Espèces ou Nita.
+  ///
+  /// Choisir Nita ne retient rien : la commande part chez le boutiquier et
+  /// le client règle quand il veut, avant ou à la livraison. On le dit ici,
+  /// sinon il croit devoir payer d'abord.
+  Future<String?> _choisirPaiement() {
+    return showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text(
+                'Comment souhaitez-vous payer ?',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.payments_outlined, color: TovoTheme.teal),
+              title: const Text('Espèces'),
+              subtitle: const Text('Vous payez le livreur à l’arrivée'),
+              onTap: () => Navigator.pop(context, 'cash'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.phone_iphone_rounded, color: TovoTheme.teal),
+              title: const Text('Nita'),
+              subtitle: const Text('Un code à régler depuis MYNITA, ou payez au livreur'),
+              onTap: () => Navigator.pop(context, 'mobile_money'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Enregistre la note d'une commande livrée.
+  ///
+  /// Sans passer par `_appeler` : celui-ci ajoute la réponse du serveur au
+  /// fil de conversation, ce qui ferait apparaître un message pour un geste
+  /// qui se suffit à lui-même. Un échec reste silencieux — la carte a déjà
+  /// remercié, revenir dessus pour dire que ça n'a pas marché n'apporterait
+  /// rien au client, qui ne peut rien y faire.
+  Future<void> _noter(String orderId, int note) async {
+    if (orderId.isEmpty || note < 1 || note > 5) return;
+    try {
+      await widget.api.post('/orders/$orderId/review', {'rating': note});
+    } catch (cause) {
+      debugPrint('[chat] note non enregistrée : $cause');
+    }
   }
 
   Future<void> _envoyerColis(Map<String, dynamic> p) async {
@@ -305,6 +578,9 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
+    final paiement = await _choisirPaiement();
+    if (!mounted || paiement == null) return;
+
     _idCommandeEnCours ??= _nouvelIdentifiant();
 
     await _appeler(() => widget.api.post('/orders', {
@@ -315,7 +591,7 @@ class _ChatScreenState extends State<ChatScreen> {
           'dropoff_hint': arrivee!['hint'],
           'dropoff': {'lat': arrivee['lat'], 'lng': arrivee['lng']},
           'parcel': p['parcel'] ?? 'small',
-          'payment_method': 'cash',
+          'payment_method': paiement,
         }));
 
     _idCommandeEnCours = null;
@@ -468,6 +744,10 @@ class _ChatScreenState extends State<ChatScreen> {
             controller: _saisie,
             onSend: _envoyer,
             onCamera: () => _chercherParPhoto(ImageSource.camera),
+            enregistre: _enregistreLaVoix,
+            onParoleDebut: _demarrerLaParole,
+            onParoleFin: _envoyerLaParole,
+            onParoleAnnulee: _annulerLaParole,
           ),
         ],
       ),
@@ -537,11 +817,52 @@ class _BarreDeSaisie extends StatelessWidget {
     required this.controller,
     required this.onSend,
     required this.onCamera,
+    required this.enregistre,
+    required this.onParoleDebut,
+    required this.onParoleFin,
+    required this.onParoleAnnulee,
   });
 
   final TextEditingController controller;
   final VoidCallback onSend;
   final VoidCallback onCamera;
+
+  /// Vrai pendant l'enregistrement : la barre change entièrement d'aspect,
+  /// sinon l'utilisateur ne sait pas que le micro l'écoute.
+  final bool enregistre;
+  final VoidCallback onParoleDebut;
+  final VoidCallback onParoleFin;
+  final VoidCallback onParoleAnnulee;
+
+  /// Ce que voit l'utilisateur pendant qu'il parle.
+  ///
+  /// La barre change entièrement : sans signal clair, on ne sait pas si le
+  /// micro écoute, et on relâche trop tôt ou on parle dans le vide.
+  Widget _enEcoute() {
+    return Row(
+      children: [
+        const SizedBox(width: 8),
+        Container(
+          width: 10,
+          height: 10,
+          decoration: const BoxDecoration(color: TovoTheme.danger, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 12),
+        const Expanded(
+          child: Text(
+            'Je vous écoute… relâchez pour envoyer',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+        ),
+        Container(
+          width: 40,
+          height: 40,
+          decoration: const BoxDecoration(color: TovoTheme.teal, shape: BoxShape.circle),
+          child: const Icon(Icons.mic, size: 20, color: Colors.white),
+        ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -553,7 +874,7 @@ class _BarreDeSaisie extends StatelessWidget {
           color: Colors.white,
           border: Border(top: BorderSide(color: TovoTheme.line)),
         ),
-        child: Row(
+        child: enregistre ? _enEcoute() : Row(
           children: [
             // La recherche par photo est ce que Tovo fait de mieux et que
             // personne ne fait ici. Elle mérite un bouton permanent, pas
@@ -583,18 +904,47 @@ class _BarreDeSaisie extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            InkWell(
-              borderRadius: BorderRadius.circular(999),
-              onTap: onSend,
-              child: Container(
-                width: 40,
-                height: 40,
-                decoration: const BoxDecoration(
-                  color: TovoTheme.teal,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.arrow_upward, size: 18, color: Colors.white),
-              ),
+            // Micro tant que rien n'est écrit, envoi dès qu'il y a du texte :
+            // deux boutons côte à côte encombreraient une barre déjà chargée,
+            // et l'un des deux serait toujours inutile.
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: controller,
+              builder: (context, valeur, _) {
+                final vide = valeur.text.trim().isEmpty;
+                if (!vide) {
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(999),
+                    onTap: onSend,
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: const BoxDecoration(
+                        color: TovoTheme.teal,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.arrow_upward, size: 18, color: Colors.white),
+                    ),
+                  );
+                }
+
+                // Maintenir pour parler, relâcher pour envoyer. Le geste est
+                // celui de WhatsApp, que tout le monde connaît ici — un
+                // appui-relâche à apprendre ferait échouer le premier essai.
+                return GestureDetector(
+                  onLongPressStart: (_) => onParoleDebut(),
+                  onLongPressEnd: (_) => onParoleFin(),
+                  onLongPressCancel: onParoleAnnulee,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: const BoxDecoration(
+                      color: TovoTheme.teal,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.mic_none_rounded, size: 20, color: Colors.white),
+                  ),
+                );
+              },
             ),
           ],
         ),

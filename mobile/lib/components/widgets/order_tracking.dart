@@ -36,6 +36,11 @@ class _OrderTrackingState extends State<OrderTracking> {
   Map<String, dynamic>? _livreur;
   DateTime? _dernierePosition;
 
+  /// Note déposée pendant cette session, pour remplacer aussitôt les étoiles
+  /// par un remerciement. Sans ça le client ne sait pas si son geste a porté
+  /// et note une deuxième fois.
+  int? _note;
+
   static const _termine = {'delivered', 'cancelled'};
 
   @override
@@ -205,6 +210,23 @@ class _OrderTrackingState extends State<OrderTracking> {
               TovoInteraction('call_driver', {'phone': _livreur!['phone'] ?? ''}),
             ),
           ),
+          // La notation apparaît au moment où elle a du sens, dans la carte
+          // que le client regarde déjà. Un écran séparé qu'il faudrait aller
+          // ouvrir ne serait jamais visité, et les boutiques resteraient
+          // toutes à 5,0 sans que personne ne l'ait décidé.
+          if (_statut == 'delivered')
+            _BlocNotation(
+              noteDeposee: _note,
+              onNoter: (note) {
+                setState(() => _note = note);
+                widget.onInteraction(
+                  TovoInteraction('rate_order', {
+                    'order_id': widget.component.str('order_id'),
+                    'rating': note,
+                  }),
+                );
+              },
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
             child: Column(
@@ -228,6 +250,70 @@ class _OrderTrackingState extends State<OrderTracking> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Cinq étoiles, et rien d'autre.
+///
+/// Pas de champ de commentaire ici : demander à écrire au moment où le
+/// client vient d'être livré fait abandonner la plupart des gens, et une
+/// note sans commentaire vaut mieux que pas de note du tout. Le commentaire
+/// reste possible par l'API pour qui veut le laisser.
+class _BlocNotation extends StatelessWidget {
+  const _BlocNotation({required this.noteDeposee, required this.onNoter});
+
+  final int? noteDeposee;
+  final ValueChanged<int> onNoter;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: TovoTheme.surface,
+        borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
+      ),
+      child: noteDeposee != null
+          ? Row(
+              children: [
+                const Icon(Icons.favorite_rounded, size: 16, color: TovoTheme.teal),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Merci, votre note est enregistrée.',
+                    style: const TextStyle(fontSize: 12, color: TovoTheme.ink),
+                  ),
+                ),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Comment s’est passée cette commande ?',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    for (var etoile = 1; etoile <= 5; etoile++)
+                      IconButton(
+                        onPressed: () => onNoter(etoile),
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                        icon: const Icon(
+                          Icons.star_rounded,
+                          size: 26,
+                          color: TovoTheme.line,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
     );
   }
 }
