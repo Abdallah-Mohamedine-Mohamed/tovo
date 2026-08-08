@@ -56,17 +56,22 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # La maquette utilise DM Sans. Déposer les fichiers .ttf dans
-  # assets/fonts/ puis décommenter — sans eux, Flutter retombe sur la police
-  # système, ce qui reste lisible mais ne correspond pas au design.
+  # DM Sans, embarquée et non chargée à l'exécution.
   #
-  # fonts:
-  #   - family: DM Sans
-  #     fonts:
-  #       - asset: assets/fonts/DMSans-Regular.ttf
-  #       - asset: assets/fonts/DMSans-Medium.ttf
-  #         weight: 500
-  #       - asset: assets/fonts/DMSans-Bold.ttf
-  #         weight: 700
-  #       - asset: assets/fonts/DMSans-ExtraBold.ttf
-  #         weight: 800
+  # Le paquet google_fonts télécharge la police au premier lancement : sur un
+  # réseau nigérien, ça donne une seconde de texte en police système avant
+  # qu'il ne saute à autre chose sous les yeux du client. Les cinq fichiers
+  # pèsent 390 Ko au total, une fois pour toutes.
+  fonts:
+    - family: DM Sans
+      fonts:
+        - asset: assets/fonts/DMSans-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/DMSans-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/DMSans-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/DMSans-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/DMSans-ExtraBold.ttf
+          weight: 800

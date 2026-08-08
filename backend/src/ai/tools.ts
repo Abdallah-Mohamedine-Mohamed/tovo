@@ -80,6 +80,7 @@ function versProductRow(ligne: Record<string, unknown>): ProductRow {
     is_available: (ligne.is_available as boolean) ?? true,
     merchant_id: ligne.merchant_id as string,
     merchant_name: (ligne.merchant_name as string | null) ?? null,
+    merchant_open: (ligne.merchant_open as boolean | null) ?? null,
     distance_m: (ligne.distance_m as number | null) ?? null,
   };
 }
@@ -100,14 +101,16 @@ function resumeProduit(p: ProductRow) {
 // =====================================================================
 
 const listerCategories: Executor = async (_args, ctx) => {
-  const { data } = await ctx.db
-    .from('categories')
-    .select('id, name, icon, image_url')
-    .is('parent_id', null)
-    .eq('is_active', true)
-    .order('sort_order');
+  // Seulement celles qui mènent à des produits : proposer une catégorie
+  // vide fait croire au client que l'application l'est aussi.
+  const { data } = await ctx.db.rpc('browsable_categories');
 
-  const items = data ?? [];
+  const items = (data ?? []) as Array<{
+    id: string;
+    name: string;
+    icon: string | null;
+    image_url: string | null;
+  }>;
   if (items.length === 0) return vide;
 
   return {
@@ -456,6 +459,62 @@ const suivreCommande: Executor = async (args, ctx) => {
 };
 
 /**
+ * Le catalogue d'une boutique.
+ *
+ * Sans cet outil, le modèle n'avait aucun moyen d'honorer « montre-moi ce
+ * que propose cette boutique » : il repliait sur `rechercher_produits` avec
+ * l'identifiant comme texte, ne trouvait rien, et répondait qu'il n'avait
+ * rien trouvé. Le client concluait que la boutique était vide.
+ */
+const produitsDeBoutique: Executor = async (args, ctx) => {
+  const merchantId = texte(args, 'merchant_id');
+  if (!merchantId) return { summary: { erreur: 'identifiant manquant' }, components: [] };
+
+  const limite = Math.min(nombre(args, 'limite') ?? 12, 30);
+
+  const { data: boutique } = await ctx.db
+    .from('merchants')
+    .select('name, is_open')
+    .eq('id', merchantId)
+    .maybeSingle();
+
+  const { data } = await ctx.db
+    .from('products')
+    .select('id, name, description, image_url, price, is_available, merchant_id, merchants(name)')
+    .eq('merchant_id', merchantId)
+    .eq('is_available', true)
+    .order('name')
+    .limit(limite);
+
+  const lignes = (data ?? []) as Array<Record<string, unknown>>;
+  const nom = (boutique?.name as string | null) ?? 'Cette boutique';
+
+  if (lignes.length === 0) {
+    return { summary: { boutique: nom, produits: 0 }, components: [] };
+  }
+
+  const items = lignes.map((p) => ({
+    id: p['id'] as string,
+    name: p['name'] as string,
+    description: (p['description'] as string | null) ?? null,
+    image_url: (p['image_url'] as string | null) ?? null,
+    price: p['price'] as number,
+    is_available: p['is_available'] as boolean,
+    merchant_id: p['merchant_id'] as string,
+    merchant_name: (p['merchants'] as { name?: string } | null)?.name ?? null,
+  }));
+
+  return {
+    summary: {
+      boutique: nom,
+      ouverte: boutique?.is_open ?? null,
+      produits: items.map((i) => ({ id: i.id, nom: i.name, prix: i.price })),
+    },
+    components: [productCarousel(items, nom)],
+  };
+};
+
+/**
  * Les adresses enregistrées du client.
  *
  * À Niamey il n'y a pas d'adresse postale : on se repère par des indices,
@@ -728,6 +787,22 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
     },
   },
   {
+    name: 'produits_de_boutique',
+    description:
+      "Le catalogue d'une boutique précise. À utiliser dès qu'on parle d'une " +
+      "boutique identifiée — après boutiques_proches, ou quand le client la " +
+      "nomme. Ne jamais chercher une boutique par son identifiant avec " +
+      'rechercher_produits : cet outil-là cherche des PRODUITS.',
+    parameters: {
+      type: 'object',
+      properties: {
+        merchant_id: S.string('Identifiant de la boutique'),
+        limite: S.number('Nombre de produits, 12 par défaut'),
+      },
+      required: ['merchant_id'],
+    },
+  },
+  {
     name: 'mes_adresses',
     description:
       "Les adresses de livraison enregistrées par le client, la sienne par défaut en tête. " +
@@ -771,6 +846,7 @@ export const EXECUTORS: Record<string, Executor> = {
   retirer_du_panier: retirerDuPanier,
   suivre_commande: suivreCommande,
   historique_commandes: historiqueCommandes,
+  produits_de_boutique: produitsDeBoutique,
   mes_adresses: mesAdresses,
   preparer_course: preparerCourse,
 };

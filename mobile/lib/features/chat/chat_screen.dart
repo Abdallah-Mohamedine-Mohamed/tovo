@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -134,22 +135,65 @@ class _ChatScreenState extends State<ChatScreen> {
   // Message vocal
   // ------------------------------------------------------------------
 
+  /// Appui court sur le micro.
+  ///
+  /// Sans lui, toucher le bouton ne produisait rien du tout : ni son, ni
+  /// message, ni vibration. On en concluait que la fonction était cassée —
+  /// alors qu'elle attendait simplement un appui maintenu.
+  ///
+  /// C'est aussi ici qu'on demande l'accès au micro, jamais pendant l'appui
+  /// long : la boîte de dialogue Android interromprait le geste, et
+  /// l'enregistrement démarrerait après coup, sans personne pour l'arrêter.
+  Future<void> _toucherLeMicro() async {
+    if (await VoixTovo.autorisation()) {
+      if (!mounted) return;
+      _messageAssistant('Maintenez le bouton pour parler, relâchez pour envoyer.');
+      return;
+    }
+
+    if (!mounted) return;
+    _messageAssistant(
+      "Je n'ai pas accès au micro. Autorisez-le dans les réglages du "
+      'téléphone, ou écrivez votre demande.',
+      enErreur: true,
+    );
+  }
+
+  void _messageAssistant(String texte, {bool enErreur = false}) {
+    setState(() {
+      _tours.add(_Tour(deLAssistant: true, contenu: texte, enErreur: enErreur));
+    });
+    _versLeBas();
+  }
+
   Future<void> _demarrerLaParole() async {
+    // L'autorisation est réglée par l'appui court : si elle manque encore,
+    // on ne l'ouvre pas ici, on explique. Ouvrir la boîte de dialogue
+    // pendant l'appui long laisserait un enregistrement orphelin.
+    if (!await VoixTovo.autorisation()) {
+      if (!mounted) return;
+      _messageAssistant(
+        "Je n'ai pas accès au micro. Autorisez-le dans les réglages du "
+        'téléphone, ou écrivez votre demande.',
+        enErreur: true,
+      );
+      return;
+    }
+
     final autorise = await VoixTovo.demarrer();
     if (!mounted) return;
 
     if (!autorise) {
-      setState(() {
-        _tours.add(_Tour(
-          deLAssistant: true,
-          contenu: "Je n'ai pas accès au micro. Autorisez-le dans les réglages "
-              'du téléphone, ou écrivez votre demande.',
-          enErreur: true,
-        ));
-      });
-      _versLeBas();
+      _messageAssistant(
+        "Je n'arrive pas à démarrer l'enregistrement. Écrivez votre demande.",
+        enErreur: true,
+      );
       return;
     }
+
+    // Le doigt couvre le bouton pendant l'appui long : sans vibration, on
+    // ne sait pas si le micro a démarré, et on parle dans le vide.
+    unawaited(HapticFeedback.mediumImpact());
 
     setState(() {
       _enregistreLaVoix = true;
@@ -180,6 +224,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final audio = await VoixTovo.arreter();
     if (!mounted || audio == null) return;
 
+    unawaited(HapticFeedback.lightImpact());
     _ajouterTourUtilisateur('🎤 Message vocal');
     await _appeler(() => widget.api.post('/chat', {
           'client_message_id': _nouvelIdentifiant(),
@@ -231,9 +276,18 @@ class _ChatScreenState extends State<ChatScreen> {
 
     switch (interaction.action) {
       // --- déterministe : REST, sans modèle -------------------------
+      // Une catégorie mène aux BOUTIQUES, pas à un tas de produits.
+      // « Restaurants » regroupe 31 enseignes : en déverser les plats
+      // mélangés ne correspond ni à la structure des données ni à la façon
+      // dont on choisit — on décide d'abord où, puis quoi.
       case 'select_category':
         _ajouterTourUtilisateur('Voir cette catégorie');
-        _appeler(() => widget.api.get('/categories/${p['category_id']}/products'));
+        _appeler(() => widget.api.get(
+              '/categories/${p['category_id']}/merchants',
+              query: _position == null
+                  ? null
+                  : {'lat': _position!.$1, 'lng': _position!.$2},
+            ));
 
       case 'select_product':
         _appeler(() => widget.api.get('/products/${p['product_id']}'));
@@ -265,9 +319,14 @@ class _ChatScreenState extends State<ChatScreen> {
       case 'rate_order':
         _noter('${p['order_id'] ?? ''}', (p['rating'] as num?)?.toInt() ?? 0);
 
-      // --- interprétation nécessaire : l'assistant -------------------
+      // Ouvrir une boutique est déterministe : on sait exactement quoi
+      // afficher. Ça passait par l'assistant, qui n'avait aucun outil pour
+      // le faire et répondait « je n'ai rien trouvé » — un aller-retour au
+      // modèle, facturé, pour une réponse fausse.
       case 'select_merchant':
-        _parler(interaction: {'action': 'select_merchant', 'payload': p});
+        _appeler(() => widget.api.get('/merchants/${p['merchant_id']}/products'));
+
+      // --- interprétation nécessaire : l'assistant -------------------
 
       case 'compare_price':
         _ajouterTourUtilisateur('Comparer les prix pour ${p['query']}');
@@ -383,6 +442,8 @@ class _ChatScreenState extends State<ChatScreen> {
     final paiement = await _choisirPaiement();
     if (!mounted || paiement == null) return;
 
+    // Le geste qui engage de l'argent mérite un retour franc.
+    unawaited(HapticFeedback.mediumImpact());
     _idCommandeEnCours ??= _nouvelIdentifiant();
 
     await _appeler(() => widget.api.post('/orders', {
@@ -562,6 +623,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// rien au client, qui ne peut rien y faire.
   Future<void> _noter(String orderId, int note) async {
     if (orderId.isEmpty || note < 1 || note > 5) return;
+    unawaited(HapticFeedback.selectionClick());
     try {
       await widget.api.post('/orders/$orderId/review', {'rating': note});
     } catch (cause) {
@@ -663,12 +725,54 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _envoyer() {
+    unawaited(HapticFeedback.selectionClick());
     final texte = _saisie.text.trim();
     if (texte.isEmpty) return;
     _saisie.clear();
     _ajouterTourUtilisateur(texte);
     _rafraichirPosition();
-    _parler(texte: texte);
+    unawaited(_chercherPuisDemander(texte));
+  }
+
+  /// La recherche d'abord, l'assistant seulement s'il le faut.
+  ///
+  /// « tacos » est un mot-clé sans ambiguïté : le faire interpréter coûtait
+  /// 3,5 secondes et un appel au modèle facturé, là où la base répond en
+  /// 200 ms. On tente donc la recherche directe, et on ne réveille
+  /// l'assistant que si elle ne trouve rien — c'est précisément là que
+  /// l'interprétation sert, pour « quelque chose de léger pour ce soir ».
+  ///
+  /// Ce que ça coûte : l'assistant ne voit pas passer les recherches
+  /// abouties, donc un « le deuxième » qui suit ne trouvera pas de contexte.
+  /// Le compromis vaut la peine tant que la lenteur reste le premier reproche.
+  Future<void> _chercherPuisDemander(String texte) async {
+    setState(() => _charge = true);
+
+    final recherche = await widget.api.get('/search', query: {
+      'q': texte,
+      if (_position != null) 'lat': _position!.$1,
+      if (_position != null) 'lng': _position!.$2,
+    });
+
+    if (!mounted) return;
+
+    // Des résultats : on s'arrête là, sans appel au modèle.
+    if (recherche.ok && recherche.components.isNotEmpty) {
+      setState(() {
+        _charge = false;
+        _tours.add(_Tour(
+          deLAssistant: true,
+          contenu: recherche.content,
+          composants: recherche.components,
+        ));
+      });
+      _versLeBas();
+      return;
+    }
+
+    // Rien trouvé, ou route indisponible : l'assistant prend le relais.
+    setState(() => _charge = false);
+    await _parler(texte: texte);
   }
 
   static String _nouvelIdentifiant() {
@@ -730,21 +834,31 @@ class _ChatScreenState extends State<ChatScreen> {
               controller: _scroll,
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               itemCount: _tours.length,
-              itemBuilder: (context, i) =>
-                  _TourVue(tour: _tours[i], onInteraction: _interaction),
+              itemBuilder: (context, i) => _TourVue(
+                key: ValueKey(_tours[i]),
+                tour: _tours[i],
+                onInteraction: _interaction,
+                // Seul le dernier message s'anime. Animer toute la liste la
+                // ferait frémir à chaque défilement, et le client croirait
+                // que quelque chose se recharge.
+                anime: i == _tours.length - 1,
+              ),
             ),
           ),
-          if (_charge)
-            const LinearProgressIndicator(
-              minHeight: 2,
-              color: TovoTheme.teal,
-              backgroundColor: TovoTheme.line,
-            ),
+          // Un trait de progression ne dit rien de ce qui se passe. Trois
+          // points qui respirent disent « je réfléchis », ce qui est la
+          // vérité et ce que le client comprend sans y penser.
+          AnimatedSize(
+            duration: TovoTheme.normal,
+            curve: TovoTheme.courbe,
+            child: _charge ? const _EnReflexion() : const SizedBox.shrink(),
+          ),
           _BarreDeSaisie(
             controller: _saisie,
             onSend: _envoyer,
             onCamera: () => _chercherParPhoto(ImageSource.camera),
             enregistre: _enregistreLaVoix,
+            onParoleTouche: _toucherLeMicro,
             onParoleDebut: _demarrerLaParole,
             onParoleFin: _envoyerLaParole,
             onParoleAnnulee: _annulerLaParole,
@@ -755,14 +869,123 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 }
 
-class _TourVue extends StatelessWidget {
-  const _TourVue({required this.tour, required this.onInteraction});
+/// Trois points qui respirent pendant que l'assistant travaille.
+///
+/// Remplace le trait de progression : celui-ci indiquait qu'il se passait
+/// quelque chose, sans dire quoi. Ici la forme dit d'elle-même « je
+/// réfléchis », et l'attente devient lisible plutôt que vide.
+class _EnReflexion extends StatefulWidget {
+  const _EnReflexion();
+
+  @override
+  State<_EnReflexion> createState() => _EnReflexionState();
+}
+
+class _EnReflexionState extends State<_EnReflexion>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
+      child: Row(
+        children: [
+          for (var i = 0; i < 3; i++)
+            AnimatedBuilder(
+              animation: _c,
+              builder: (context, _) {
+                // Chaque point est décalé d'un tiers de cycle : l'onde va de
+                // gauche à droite au lieu de les faire clignoter ensemble.
+                final phase = (_c.value + i / 3) % 1.0;
+                final montee = (sin(phase * 2 * pi) + 1) / 2;
+                return Container(
+                  width: 6,
+                  height: 6,
+                  margin: const EdgeInsets.only(right: 5),
+                  decoration: BoxDecoration(
+                    color: Color.lerp(TovoTheme.line, TovoTheme.teal, montee),
+                    shape: BoxShape.circle,
+                  ),
+                );
+              },
+            ),
+          const SizedBox(width: 4),
+          const Text(
+            'Je réfléchis…',
+            style: TextStyle(fontSize: 12, color: TovoTheme.muted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TourVue extends StatefulWidget {
+  const _TourVue({
+    super.key,
+    required this.tour,
+    required this.onInteraction,
+    this.anime = false,
+  });
 
   final _Tour tour;
   final InteractionCallback onInteraction;
 
+  /// Le message vient d'arriver : il glisse et se révèle. Les précédents
+  /// s'affichent directement, sinon la liste frémirait à chaque défilement.
+  final bool anime;
+
+  @override
+  State<_TourVue> createState() => _TourVueState();
+}
+
+class _TourVueState extends State<_TourVue> {
+  double _opacite = 1;
+  double _decalage = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!widget.anime) return;
+
+    _opacite = 0;
+    _decalage = 12;
+    // Une image plus tard : poser l'état initial puis le changer dans la
+    // même image ne déclencherait aucune transition.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() { _opacite = 1; _decalage = 0; });
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    return AnimatedSlide(
+      offset: Offset(0, _decalage / 100),
+      duration: TovoTheme.normal,
+      curve: TovoTheme.courbe,
+      child: AnimatedOpacity(
+        opacity: _opacite,
+        duration: TovoTheme.normal,
+        curve: TovoTheme.courbe,
+        child: _contenu(context),
+      ),
+    );
+  }
+
+  Widget _contenu(BuildContext context) {
+    final tour = widget.tour;
+    final onInteraction = widget.onInteraction;
+
     if (!tour.deLAssistant) {
       return Align(
         alignment: Alignment.centerRight,
@@ -818,6 +1041,7 @@ class _BarreDeSaisie extends StatelessWidget {
     required this.onSend,
     required this.onCamera,
     required this.enregistre,
+    required this.onParoleTouche,
     required this.onParoleDebut,
     required this.onParoleFin,
     required this.onParoleAnnulee,
@@ -830,6 +1054,8 @@ class _BarreDeSaisie extends StatelessWidget {
   /// Vrai pendant l'enregistrement : la barre change entièrement d'aspect,
   /// sinon l'utilisateur ne sait pas que le micro l'écoute.
   final bool enregistre;
+  /// Appui court : explique le geste, ou demande l'accès au micro.
+  final VoidCallback onParoleTouche;
   final VoidCallback onParoleDebut;
   final VoidCallback onParoleFin;
   final VoidCallback onParoleAnnulee;
@@ -931,6 +1157,10 @@ class _BarreDeSaisie extends StatelessWidget {
                 // celui de WhatsApp, que tout le monde connaît ici — un
                 // appui-relâche à apprendre ferait échouer le premier essai.
                 return GestureDetector(
+                  // Un appui court doit répondre quelque chose. Sans `onTap`,
+                  // toucher le micro ne produisait rien — ni son, ni message,
+                  // ni vibration — et on en concluait que c'était cassé.
+                  onTap: onParoleTouche,
                   onLongPressStart: (_) => onParoleDebut(),
                   onLongPressEnd: (_) => onParoleFin(),
                   onLongPressCancel: onParoleAnnulee,

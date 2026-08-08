@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/push.dart';
 import '../../core/theme.dart';
 import 'auth_screen.dart';
+import 'name_screen.dart';
 
 /// Porte d'entrée des trois apps.
 ///
@@ -52,6 +53,14 @@ class _AuthGateState extends State<AuthGate> {
   String? _role;
   bool _verificationEnCours = true;
 
+  /// Un compte sans nom n'entre pas.
+  ///
+  /// La session naît dès le code validé. Fermer l'app à cet instant précis
+  /// laissait donc entrer, à la relance, un client dont le livreur ne
+  /// connaîtrait jamais le nom. Le contrôle se fait ici et non dans l'écran
+  /// de connexion, parce que c'est ici que passe TOUTE entrée dans l'app.
+  bool _nomManquant = false;
+
   @override
   void initState() {
     super.initState();
@@ -84,15 +93,17 @@ class _AuthGateState extends State<AuthGate> {
     // Le rôle vit dans `profiles`, jamais dans le jeton : un utilisateur ne
     // doit pas pouvoir se promouvoir en modifiant ses métadonnées.
     try {
+      // Le nom voyage avec le rôle : une seule requête au démarrage.
       final data = await Supabase.instance.client
           .from('profiles')
-          .select('role')
+          .select('role, full_name')
           .eq('id', Supabase.instance.client.auth.currentUser!.id)
           .maybeSingle();
 
       if (!mounted) return;
       setState(() {
         _role = data?['role'] as String? ?? 'client';
+        _nomManquant = ((data?['full_name'] as String?) ?? '').trim().isEmpty;
         _verificationEnCours = false;
       });
 
@@ -105,6 +116,9 @@ class _AuthGateState extends State<AuthGate> {
       // qui ne lui est pas permis, et l'app affichera ses propres messages.
       setState(() {
         _role = 'client';
+        // Réseau muet : on ne réclame pas un nom qu'on n'a pas pu lire. Le
+        // contrôle repassera au prochain démarrage.
+        _nomManquant = false;
         _verificationEnCours = false;
       });
     }
@@ -125,6 +139,14 @@ class _AuthGateState extends State<AuthGate> {
     final requis = widget.roleRequis;
     if (requis != null && _role != requis && _role != 'admin') {
       return _MauvaisRole(role: _role ?? 'client', requis: requis);
+    }
+
+    // Avant l'app, jamais après : un client sans nom passe commande et le
+    // livreur cherche une porte sans savoir qui demander.
+    if (_nomManquant) {
+      return DemandeDeNom(
+        onEnregistre: () => setState(() => _nomManquant = false),
+      );
     }
 
     return widget.child();

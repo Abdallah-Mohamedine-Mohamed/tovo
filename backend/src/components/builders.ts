@@ -60,6 +60,14 @@ export interface ProductRow {
   is_available: boolean;
   merchant_id: string;
   merchant_name?: string | null;
+  /**
+   * La boutique sert-elle en ce moment ?
+   *
+   * Affiché plutôt que filtré : à 8 h du matin presque tout est fermé à
+   * Niamey, et une recherche qui ne renverrait rien ferait croire que Tovo
+   * est vide. Mieux vaut montrer et dire.
+   */
+  merchant_open?: boolean | null;
   distance_m?: number | null;
 }
 

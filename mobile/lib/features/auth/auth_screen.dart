@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/marque.dart';
 import '../../core/theme.dart';
 
 /// Connexion par téléphone.
@@ -36,6 +38,7 @@ class _AuthScreenState extends State<AuthScreen> {
   final _code = TextEditingController();
 
   _Etape _etape = _Etape.numero;
+
   bool _occupe = false;
   String? _erreur;
   int _secondesAvantRenvoi = 0;
@@ -69,6 +72,7 @@ class _AuthScreenState extends State<AuthScreen> {
       setState(() => _erreur = 'Numéro incomplet.');
       return;
     }
+
 
     setState(() {
       _occupe = true;
@@ -112,6 +116,8 @@ class _AuthScreenState extends State<AuthScreen> {
         type: OtpType.sms,
       );
       if (!mounted) return;
+      // Un habitué est chez lui : son nom est déjà en base. Un nouveau se
+      // le verra demander par AuthGate, une seule fois, juste après.
       widget.onConnecte?.call();
     } on AuthException catch (e) {
       if (!mounted) return;
@@ -151,73 +157,125 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Le clavier mange la moitié de l'écran : on rétrécit le fond au lieu de
+    // pousser le formulaire hors champ. Sans ça, le champ disparaît sous le
+    // clavier au moment précis où l'on tape dedans.
+    final clavier = MediaQuery.of(context).viewInsets.bottom > 0;
+
     return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 40),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    widget.titre,
-                    style: const TextStyle(
-                      fontSize: 30,
-                      fontWeight: FontWeight.w800,
-                      color: TovoTheme.teal,
-                      letterSpacing: -1,
-                    ),
+      // Le fond se prolonge derrière le formulaire : la carte blanche glisse
+      // par-dessus, elle ne le découpe pas.
+      resizeToAvoidBottomInset: true,
+      body: Column(
+        children: [
+          Expanded(
+            flex: clavier ? 2 : 5,
+            child: FondAnime(
+              child: SafeArea(
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const MarqueTovo(taille: 64, couleur: Colors.white),
+                      const SizedBox(height: 18),
+                      Text(
+                        widget.titre,
+                        style: const TextStyle(
+                          fontSize: 38,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                          letterSpacing: -1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 40),
+                        child: Text(
+                          widget.sousTitre,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 13,
+                            height: 1.5,
+                            color: Colors.white.withValues(alpha: 0.85),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    widget.sousTitre,
-                    style: const TextStyle(fontSize: 13, color: TovoTheme.muted),
-                  ),
-                  const SizedBox(height: 40),
-                  if (_etape == _Etape.numero) ..._etapeNumero() else ..._etapeCode(),
-                  if (_erreur != null) ...[
-                    const SizedBox(height: 14),
-                    Text(
-                      _erreur!,
-                      style: const TextStyle(fontSize: 12, color: TovoTheme.danger),
-                    ),
-                  ],
-                ],
+                ),
               ),
             ),
           ),
-        ),
+          Container(
+            width: double.infinity,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_etape == _Etape.numero) ..._etapeNumero() else ..._etapeCode(),
+                      if (_erreur != null) ...[
+                        const SizedBox(height: 14),
+                        Text(
+                          _erreur!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 12, color: TovoTheme.danger),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   List<Widget> _etapeNumero() => [
         const Text(
-          'Votre numéro de téléphone',
-          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          'Bienvenue',
+          style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
+        const Text(
+          'Commençons par votre numéro de téléphone.',
+          style: TextStyle(fontSize: 13, color: TovoTheme.muted),
+        ),
+        const SizedBox(height: 22),
         TextField(
           controller: _numero,
           keyboardType: TextInputType.phone,
           autofocus: true,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _envoyerCode(),
+          // Chiffres, « + » et espaces. Le « \d » compte : sans lui, la
+          // classe n'autorise que la lettre d, le plus et l'espace — le champ
+          // refuse alors tout chiffre, et personne ne peut se connecter.
           inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d+ ]'))],
           decoration: _decoration('+227 90 00 00 00'),
-          style: const TextStyle(fontSize: 18, letterSpacing: 1),
+          style: const TextStyle(fontSize: 19, letterSpacing: 1, fontWeight: FontWeight.w600),
         ),
-        const SizedBox(height: 10),
-        const Text(
-          'Vous recevrez un code sur WhatsApp.',
-          style: TextStyle(fontSize: 12, color: TovoTheme.muted),
-        ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(54)),
           onPressed: _occupe ? null : _envoyerCode,
           child: _occupe
               ? const _Attente()
-              : const Text('Recevoir le code', style: TextStyle(fontWeight: FontWeight.w600)),
+              : const Text(
+                  'Commencer',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                ),
         ),
       ];
 

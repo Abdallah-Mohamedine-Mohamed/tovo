@@ -9,8 +9,15 @@
         android:label="@string/app_name"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- Nom COMPLET, jamais « .MainActivity ».
+             Android résout un nom relatif à partir de l'applicationId, qui
+             diffère pour chacun des trois flavors — com.unique.tovo.user,
+             com.tovo.delivery, com.tovo.store. Or la classe vit dans
+             com.tovoapp.tovo, qui n'est l'identifiant d'aucun d'eux : les
+             trois apps se fermaient à l'instant du lancement, sur un
+             ClassNotFoundException que rien n'annonçait à la compilation. -->
         <activity
-            android:name=".MainActivity"
+            android:name="com.tovoapp.tovo.MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""

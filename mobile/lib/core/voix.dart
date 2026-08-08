@@ -30,7 +30,16 @@ class VoixTovo {
 
   static bool get enregistreEnCours => _fichier != null;
 
-  /// Demande l'accès au micro et démarre. Renvoie faux si l'accès est refusé.
+  /// L'accès au micro est-il accordé ?
+  ///
+  /// `hasPermission` OUVRE la boîte de dialogue Android s'il ne l'est pas
+  /// encore. C'est pour ça qu'on l'appelle séparément, jamais pendant un
+  /// appui long : le doigt se lève pour lire la question, le geste se
+  /// termine, et l'enregistrement démarrerait après coup sans que rien ne
+  /// puisse l'arrêter.
+  static Future<bool> autorisation() => _enregistreur.hasPermission();
+
+  /// Démarre l'enregistrement. Renvoie faux si l'accès est refusé.
   static Future<bool> demarrer() async {
     if (!await _enregistreur.hasPermission()) return false;
 

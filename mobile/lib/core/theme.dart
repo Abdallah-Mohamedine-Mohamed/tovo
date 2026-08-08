@@ -17,14 +17,40 @@ class TovoTheme {
   static const Color success = Color(0xFF10B981);
   static const Color danger = Color(0xFFE74C3C);
 
-  /// Tant que les .ttf ne sont pas déposés dans assets/fonts/, Flutter
-  /// retombe silencieusement sur la police système. C'est volontairement
-  /// centralisé ici pour que l'ajout soit une seule ligne.
-  static const String? fontFamily = null; // 'DM Sans'
+  /// Déclarée dans pubspec.yaml et embarquée dans l'app.
+  ///
+  /// Une seule police pour les trois flavors : le client, le livreur et le
+  /// boutiquier doivent avoir l'air de venir du même endroit.
+  static const String fontFamily = 'DM Sans';
 
   static const double radiusCard = 16;
   static const double radiusChip = 12;
   static const double gap = 12;
+
+  // -------------------------------------------------------------------
+  // Mouvement
+  // -------------------------------------------------------------------
+  // Trois durées et deux courbes pour toute l'application. Ce qui distingue
+  // une interface soignée d'une interface bricolée n'est presque jamais la
+  // richesse des animations : c'est leur cohérence. Des durées choisies au
+  // cas par cas donnent une impression de désordre que personne ne sait
+  // nommer.
+
+  /// Réaction immédiate à un geste : appui, bascule, couleur qui change.
+  static const Duration vif = Duration(milliseconds: 150);
+
+  /// Apparition d'un élément, glissement d'une carte.
+  static const Duration normal = Duration(milliseconds: 260);
+
+  /// Transition qui porte un changement d'état important.
+  static const Duration ample = Duration(milliseconds: 420);
+
+  /// Entrées et sorties. Démarre franchement, finit en douceur — c'est ce
+  /// qui donne l'impression que l'élément a du poids.
+  static const Curve courbe = Curves.easeOutCubic;
+
+  /// Pour ce qui doit attirer l'œil sans brusquer : un léger dépassement.
+  static const Curve courbeAccueil = Curves.easeOutBack;
 
   static ThemeData build() {
     final base = ThemeData.light(useMaterial3: true);
