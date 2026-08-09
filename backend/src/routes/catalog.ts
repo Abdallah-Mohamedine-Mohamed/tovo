@@ -179,8 +179,35 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
 
     const nom = (categorie?.name as string | null) ?? 'Cette catégorie';
 
+    // Aucune boutique : c'est presque toujours qu'on vise une catégorie
+    // FEUILLE — « Pizza », « Boissons » — et non un module. Les boutiques ne
+    // sont rattachées qu'aux racines ; une feuille, elle, porte des produits.
+    //
+    // Répondre « aucune boutique dans Pizza » serait faux : il y en a
+    // quarante derrière. On bascule donc sur les produits plutôt que
+    // d'exiger de l'appelant qu'il sache à quel niveau il se trouve.
     if (boutiques.length === 0) {
-      return reply.send(envelope(`Aucune boutique dans ${nom} pour le moment.`));
+      const { data: produits } = await db(request).rpc('category_products', {
+        p_category_id: params.data.categoryId,
+        p_limite: 20,
+      });
+
+      const items: ProductRow[] = ((produits ?? []) as Record<string, unknown>[]).map((p) => ({
+        id: p['id'] as string,
+        name: p['name'] as string,
+        description: (p['description'] as string | null) ?? null,
+        image_url: (p['image_url'] as string | null) ?? null,
+        price: p['price'] as number,
+        is_available: p['is_available'] as boolean,
+        merchant_id: p['merchant_id'] as string,
+        merchant_name: (p['merchant_name'] as string | null) ?? null,
+      }));
+
+      if (items.length > 0) {
+        return reply.send(envelope(nom, [productCarousel(items, nom)]));
+      }
+
+      return reply.send(envelope(`Rien dans ${nom} pour le moment.`));
     }
 
     const ouvertes = boutiques.filter((b) => b.is_open).length;

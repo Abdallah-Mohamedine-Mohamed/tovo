@@ -5,7 +5,7 @@ import {
   ThemedLayoutV2,
   useNotificationProvider,
 } from '@refinedev/antd';
-import routerProvider, { NavigateToResource } from '@refinedev/react-router';
+import routerProvider, { CatchAllNavigate, NavigateToResource } from '@refinedev/react-router';
 import { dataProvider, liveProvider } from '@refinedev/supabase';
 import { BrowserRouter, Outlet, Route, Routes } from 'react-router';
 import { ConfigProvider, App as AntdApp } from 'antd';
@@ -95,9 +95,14 @@ export const App = () => (
           ]}
         >
           <Routes>
+            {/* Le repli mène à la CONNEXION, pas à une ressource.
+                `NavigateToResource` renvoyait un visiteur non connecté vers
+                /orders — une route elle-même protégée, qui le renvoyait
+                encore. Boucle infinie, écran blanc, et la page de connexion
+                jamais atteinte alors qu'elle existait. */}
             <Route
               element={
-                <Authenticated key="protege" fallback={<NavigateToResource />}>
+                <Authenticated key="protege" fallback={<CatchAllNavigate to="/login" />}>
                   <ThemedLayoutV2>
                     <Outlet />
                   </ThemedLayoutV2>

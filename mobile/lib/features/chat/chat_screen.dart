@@ -12,6 +12,7 @@ import '../../core/api.dart';
 import '../../core/location.dart';
 import '../../core/theme.dart';
 import '../../core/voix.dart';
+import 'conversations_drawer.dart';
 
 /// Le fil conversationnel.
 ///
@@ -899,9 +900,57 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ------------------------------------------------------------------
 
+  /// Ouvre une conversation enregistrée.
+  Future<void> _ouvrirConversation(String id) async {
+    setState(() {
+      _tours.clear();
+      _charge = true;
+      _conversationId = id;
+    });
+
+    final reponse = await widget.api.get('/conversations/$id');
+    if (!mounted) return;
+
+    setState(() {
+      _charge = false;
+      for (final m in ((reponse.raw['messages'] as List?) ?? const [])
+          .whereType<Map<String, dynamic>>()) {
+        _tours.add(_Tour(
+          deLAssistant: m['role'] != 'user',
+          contenu: '${m['content'] ?? ''}',
+          composants: ((m['components'] as List?) ?? const [])
+              .whereType<Map<String, dynamic>>()
+              .map(TovoComponent.fromJson)
+              .where((c) => c.type.isNotEmpty)
+              .toList(),
+        ));
+      }
+    });
+    _versLeBas();
+  }
+
+  /// Repart de zéro.
+  ///
+  /// On oublie simplement l'identifiant : la conversation précédente reste
+  /// en base et dans le tiroir. Le prochain message en ouvrira une nouvelle
+  /// côté serveur.
+  void _nouvelleConversation() {
+    setState(() {
+      _tours.clear();
+      _conversationId = null;
+    });
+    unawaited(_appeler(() => widget.api.get('/categories')));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: TiroirConversations(
+        api: widget.api,
+        conversationCourante: _conversationId,
+        onOuvrir: (id) => unawaited(_ouvrirConversation(id)),
+        onNouvelle: _nouvelleConversation,
+      ),
       appBar: AppBar(
         titleSpacing: 16,
         title: Column(

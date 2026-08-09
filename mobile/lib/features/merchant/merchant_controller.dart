@@ -89,12 +89,18 @@ class MerchantController extends ChangeNotifier {
     }
 
     try {
-      // La RLS restreint déjà aux boutiques dont on est propriétaire :
-      // inutile de filtrer sur owner_id, ce serait redondant et faux le jour
-      // où un compte gérera deux boutiques.
+      // Filtrer sur le propriétaire est INDISPENSABLE, malgré la RLS.
+      //
+      // Elle restreint bien un boutiquier à ses propres boutiques — mais un
+      // ADMIN les voit toutes. Sans ce filtre, `limit(1)` en attrapait une au
+      // hasard, et l'admin se retrouvait à piloter la boutique d'un autre en
+      // croyant ouvrir la sienne.
+      final moi = Supabase.instance.client.auth.currentUser?.id;
       final boutiques = await _db
           .from('merchants')
           .select('id, name, is_open, prep_time_min, address_hint')
+          .eq('owner_id', moi ?? '')
+          .order('name')
           .limit(1);
 
       boutique = boutiques.isNotEmpty ? boutiques.first : null;

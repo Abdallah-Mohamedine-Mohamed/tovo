@@ -104,6 +104,53 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
    * dit la veille devenait invisible. Il repartait de zéro sans comprendre
    * pourquoi l'assistant ne se souvenait de rien.
    */
+  /** Les conversations du client, pour la barre latérale. */
+  app.get('/conversations', { preHandler: app.requireAuth }, async (request, reply) => {
+    const { data, error } = await request.supabase!.rpc('my_conversations', {
+      p_limite: 30,
+    });
+
+    if (error) {
+      const failure = toHttpFailure(error);
+      return reply.code(failure.status).send(failure.body);
+    }
+    return reply.send({ conversations: data ?? [] });
+  });
+
+  /**
+   * Les messages d'une conversation précise.
+   *
+   * La RLS suffit à en limiter l'accès : `conversations` et `messages` sont
+   * filtrées sur `auth.uid()`. Demander celle d'un autre renvoie une liste
+   * vide, jamais une erreur qui confirmerait son existence.
+   */
+  app.get('/conversations/:id', { preHandler: app.requireAuth }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'identifiant invalide' });
+
+    const { data, error } = await request.supabase!
+      .from('messages')
+      .select('role, content, components, created_at')
+      .eq('conversation_id', params.data.id)
+      .in('role', ['user', 'assistant'])
+      .order('created_at', { ascending: true })
+      .limit(50);
+
+    if (error) {
+      const failure = toHttpFailure(error);
+      return reply.code(failure.status).send(failure.body);
+    }
+
+    return reply.send({
+      conversation_id: params.data.id,
+      messages: (data ?? []).map((m) => ({
+        role: m.role as string,
+        content: (m.content as string | null) ?? '',
+        components: (m.components as unknown[] | null) ?? [],
+      })),
+    });
+  });
+
   app.get('/conversations/last', { preHandler: app.requireAuth }, async (request, reply) => {
     const db = request.supabase!;
 

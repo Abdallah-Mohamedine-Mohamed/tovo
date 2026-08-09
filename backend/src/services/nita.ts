@@ -63,6 +63,21 @@ function reussi(corps: Enveloppe<unknown>): boolean {
 let jetonCourant: string | null = null;
 
 /**
+ * Jusqu'à quand ne pas retenter de s'authentifier.
+ *
+ * Nita compte les échecs et suspend le compte au bout de quelques-uns. Sans
+ * ce repos, un mot de passe erroné dans la configuration provoque une
+ * tentative à CHAQUE commande payée en mobile : quelques clients suffisent
+ * à faire suspendre le compte, et il faut alors appeler Nita pour le
+ * rouvrir.
+ *
+ * Vu en production : un mot de passe collé avec ses apostrophes sur Railway,
+ * et chaque commande relançait l'échec.
+ */
+let reposApresRefus = 0;
+const REPOS_MS = 600_000;
+
+/**
  * Le jeton est mis en cache et renouvelé à la première requête refusée.
  *
  * Nita ne documente pas sa durée de validité et le corps du jeton n'est pas
@@ -71,6 +86,15 @@ let jetonCourant: string | null = null;
  * compte côté Nita — s'authentifier en boucle finirait par le suspendre.
  */
 async function authentifier(): Promise<string> {
+  if (Date.now() < reposApresRefus) {
+    throw new NitaError(
+      'Identifiants Nita refusés récemment : nouvelle tentative suspendue pour ' +
+        'protéger le compte. Vérifiez NITA_USERNAME et NITA_PASSWORD.',
+      401,
+      false,
+    );
+  }
+
   const r = await fetch(`${env.NITA_BASE_URL}${CHEMIN_AUTH}`, {
     method: 'POST',
     headers: {
@@ -89,7 +113,12 @@ async function authentifier(): Promise<string> {
 
   // Un mot de passe refusé n'est pas à réessayer : chaque échec consomme une
   // tentative, et le compte est suspendu au bout de quelques-unes.
+  //
+  // Nita répond HTTP 200 même pour un refus — le verdict est dans `status`,
+  // pas dans le code HTTP. Un `statut: 200` accompagné d'un refus est donc
+  // la signature d'identifiants erronés, et non d'une panne.
   if (!reussi(corps) || !corps.data?.token) {
+    reposApresRefus = Date.now() + REPOS_MS;
     throw new NitaError(
       `Authentification Nita refusée : ${corps.message ?? r.status}`,
       r.status,
@@ -97,6 +126,7 @@ async function authentifier(): Promise<string> {
     );
   }
 
+  reposApresRefus = 0;
   jetonCourant = corps.data.token;
   return jetonCourant;
 }

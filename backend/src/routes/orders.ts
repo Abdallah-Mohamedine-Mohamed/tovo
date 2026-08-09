@@ -112,7 +112,18 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
         });
         codeAchat = achat.codeAchat;
       } catch (cause) {
-        request.log.error({ cause, orderId }, 'ouverture du paiement Nita impossible');
+        // Le MESSAGE explicitement : `message` n'est pas énumérable sur une
+        // Error, donc journaliser l'objet ne montre que son nom et son
+        // statut. On y lisait « NitaError, statut 200 » sans jamais savoir
+        // que Nita disait « nom ou mot de passe incorrect ».
+        request.log.error(
+          {
+            orderId,
+            erreur: cause instanceof Error ? cause.message : String(cause),
+            statut: (cause as { statut?: number }).statut,
+          },
+          'ouverture du paiement Nita impossible',
+        );
       }
     }
 

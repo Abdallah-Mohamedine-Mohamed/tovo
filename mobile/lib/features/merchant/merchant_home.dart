@@ -4,6 +4,7 @@ import '../../components/registry.dart';
 import '../../core/api.dart';
 import '../../core/theme.dart';
 import 'merchant_controller.dart';
+import 'hours_editor.dart';
 import 'product_editor.dart';
 
 /// Écran du boutiquier.
@@ -58,6 +59,17 @@ class _MerchantHomeState extends State<MerchantHome> {
     if (modifie == true) await _c.refresh();
   }
 
+  Future<void> _ouvrirHoraires() async {
+    final id = _c.boutiqueId;
+    if (id == null) return;
+
+    final modifie = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => EditeurHoraires(merchantId: id)),
+    );
+    // Recharger : l'état « ouverte » affiché en haut dépend des horaires.
+    if (modifie == true) await _c.refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
     final enAttente = _c.aTraiter.length;
@@ -84,6 +96,14 @@ class _MerchantHomeState extends State<MerchantHome> {
           ],
         ),
         actions: [
+          // Les horaires décident autant que l'interrupteur : une boutique
+          // dont l'interrupteur est levé reste fermée aux clients hors de
+          // ses heures. Le réglage doit donc être à portée de main.
+          IconButton(
+            tooltip: 'Horaires',
+            icon: const Icon(Icons.schedule_outlined),
+            onPressed: _c.boutiqueId == null ? null : _ouvrirHoraires,
+          ),
           Switch(
             value: _c.ouverte,
             activeThumbColor: TovoTheme.success,

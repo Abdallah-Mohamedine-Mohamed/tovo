@@ -1,15 +1,23 @@
 import { useState } from 'react';
 import { List, useTable, DateField } from '@refinedev/antd';
-import { Button, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Button, Input, Popconfirm, Segmented, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { useInvalidate, useNotification } from '@refinedev/core';
 import { supabaseClient } from '../supabaseClient';
+import { ETAPES, etapeDe, FicheCommande, statutSuivant } from './orderDetail';
 
 /**
  * Suivi des commandes.
  *
- * L'écran que l'admin regarde en continu. Il ne sert pas à modifier une
- * commande — les transitions appartiennent au boutiquier et au livreur, et
- * le trigger en base les fait respecter — mais à voir ce qui bloque.
+ * L'écran que l'admin regarde en continu, et par lequel il DÉBLOQUE.
+ *
+ * Le parcours normal appartient au boutiquier et au livreur, et le trigger
+ * `guard_status_transition` le fait respecter. Mais l'admin en est exempté :
+ * quand une commande se bloque un vendredi soir — boutiquier injoignable,
+ * livreur qui a coupé son app — quelqu'un doit pouvoir la dénouer sans
+ * attendre lundi.
+ *
+ * L'écran propose donc l'étape SUIVANTE, pas une liste de neuf statuts :
+ * c'est presque toujours ce qu'on cherche à faire.
  */
 
 const COULEURS: Record<string, string> = {
@@ -24,17 +32,17 @@ const COULEURS: Record<string, string> = {
   cancelled: 'red',
 };
 
-const LIBELLES: Record<string, string> = {
-  pending: 'En attente',
-  confirmed: 'Acceptée',
-  preparing: 'En préparation',
-  ready: 'Prête',
-  assigned: 'Livreur assigné',
-  picked_up: 'Récupérée',
-  delivering: 'En livraison',
-  delivered: 'Livrée',
-  cancelled: 'Annulée',
-};
+/**
+ * Ce que lit un humain, et non les neuf statuts internes.
+ *
+ * « Prête », « Récupérée », « En livraison » disent la même chose à qui
+ * regarde un tableau : le livreur s'en occupe. La distinction sert au
+ * dispatch, pas à l'œil.
+ */
+function libelleEtape(statut: string): string {
+  if (statut === 'cancelled') return 'Annulée';
+  return ETAPES[etapeDe(statut)]?.libelle ?? statut;
+}
 
 /** Les montants sont des entiers XOF : ni décimale, ni conversion. */
 const xof = (v: unknown) =>
@@ -55,10 +63,17 @@ const PAIEMENT: Record<string, { couleur: string; libelle: string }> = {
   refunded: { couleur: 'purple', libelle: 'Remboursé' },
 };
 
+/**
+ * Le parcours normal d'une commande.
+ *
+ * Sert à proposer l'étape SUIVANTE plutôt qu'une liste de neuf statuts :
+ * l'admin cherche presque toujours à débloquer, pas à choisir librement.
+ */
 export const OrderList = () => {
   const { open } = useNotification();
   const invalider = useInvalidate();
   const [enCours, setEnCours] = useState<string | null>(null);
+  const [fiche, setFiche] = useState<string | null>(null);
 
   /**
    * L'admin déclare avoir constaté le paiement.
@@ -91,7 +106,7 @@ export const OrderList = () => {
     invalider({ resource: 'orders', invalidates: ['list'] });
   };
 
-  const { tableProps } = useTable({
+  const { tableProps, setFilters } = useTable({
     resource: 'orders',
     sorters: { initial: [{ field: 'placed_at', order: 'desc' }] },
     filters: {
@@ -100,9 +115,88 @@ export const OrderList = () => {
     pagination: { pageSize: 25 },
   });
 
+  /**
+   * Fait avancer une commande, d'autorité.
+   *
+   * L'admin est exempté de `guard_status_transition` : il peut ramener une
+   * commande à n'importe quel état. C'est voulu — quand une commande se
+   * bloque un vendredi soir, quelqu'un doit pouvoir la dénouer sans attendre
+   * que le boutiquier rouvre son application.
+   */
+  const avancer = async (orderId: string, statut: string) => {
+    setEnCours(orderId);
+    const { error } = await supabaseClient.rpc('advance_order_status', {
+      p_order_id: orderId,
+      p_status: statut,
+      p_note: 'Modifié depuis l’administration',
+    });
+    setEnCours(null);
+
+    if (error) {
+      open?.({ type: 'error', message: 'Changement refusé', description: error.message });
+      return;
+    }
+    open?.({ type: 'success', message: `Commande passée à « ${libelleEtape(statut)} »` });
+    invalider({ resource: 'orders', invalidates: ['list'] });
+  };
+
+  /** Recherche sur le repère de livraison — ce que l'admin a sous les yeux. */
+  const chercher = (texte: string) => {
+    setFilters(
+      texte.trim()
+        ? [{ field: 'dropoff_hint', operator: 'contains', value: texte.trim() }]
+        : [],
+      'replace',
+    );
+  };
+
+  const filtrerStatut = (valeur: string) => {
+    setFilters(
+      valeur === 'en_cours'
+        ? [{ field: 'status', operator: 'ne', value: 'delivered' }]
+        : valeur === 'toutes'
+          ? []
+          : [{ field: 'status', operator: 'eq', value: valeur }],
+      'replace',
+    );
+  };
+
   return (
     <List title="Commandes">
-      <Table {...tableProps} rowKey="id" size="small" scroll={{ x: 1100 }}>
+      <Space style={{ marginBottom: 16 }} wrap>
+        <Input.Search
+          placeholder="Chercher un repère de livraison…"
+          allowClear
+          style={{ width: 320 }}
+          onSearch={chercher}
+          onChange={(e) => {
+            if (e.target.value === '') chercher('');
+          }}
+        />
+        <Segmented
+          defaultValue="en_cours"
+          onChange={(v) => filtrerStatut(String(v))}
+          options={[
+            { label: 'En cours', value: 'en_cours' },
+            { label: 'Livrées', value: 'delivered' },
+            { label: 'Annulées', value: 'cancelled' },
+            { label: 'Toutes', value: 'toutes' },
+          ]}
+        />
+      </Space>
+
+      <Table
+        {...tableProps}
+        rowKey="id"
+        size="small"
+        scroll={{ x: 1300 }}
+        // Toute la ligne ouvre la fiche : chercher un bouton « voir » sur
+        // une ligne de tableau est un réflexe qu'on n'a pas.
+        onRow={(r: Record<string, unknown>) => ({
+          onClick: () => setFiche(String(r.id)),
+          style: { cursor: 'pointer' },
+        })}
+      >
         <Table.Column
           dataIndex="placed_at"
           title="Passée le"
@@ -117,7 +211,7 @@ export const OrderList = () => {
           dataIndex="status"
           title="Statut"
           render={(v: string) => (
-            <Tag color={COULEURS[v] ?? 'default'}>{LIBELLES[v] ?? v}</Tag>
+            <Tag color={COULEURS[v] ?? 'default'}>{libelleEtape(v)}</Tag>
           )}
         />
         <Table.Column dataIndex="dropoff_hint" title="Livraison" ellipsis />
@@ -188,6 +282,39 @@ export const OrderList = () => {
           }}
         />
         <Table.Column
+          title="Faire avancer"
+          render={(_, r: Record<string, unknown>) => {
+            const statut = String(r.status);
+            const suivant = statutSuivant(statut);
+            if (!suivant || statut === 'cancelled') return null;
+
+            return (
+              <Space size={4} onClick={(e) => e.stopPropagation()}>
+                <Button
+                  size="small"
+                  type="primary"
+                  ghost
+                  loading={enCours === r.id}
+                  onClick={() => void avancer(String(r.id), suivant)}
+                >
+                  → {libelleEtape(suivant)}
+                </Button>
+                <Popconfirm
+                  title="Annuler cette commande ?"
+                  description="Le client et la boutique en seront avertis."
+                  okText="Annuler la commande"
+                  cancelText="Non"
+                  onConfirm={() => void avancer(String(r.id), 'cancelled')}
+                >
+                  <Button size="small" danger>
+                    Annuler
+                  </Button>
+                </Popconfirm>
+              </Space>
+            );
+          }}
+        />
+        <Table.Column
           title=""
           align="right"
           render={(_, r: Record<string, unknown>) => {
@@ -212,6 +339,12 @@ export const OrderList = () => {
           }}
         />
       </Table>
+
+      <FicheCommande
+        orderId={fiche}
+        onFerme={() => setFiche(null)}
+        onChange={() => invalider({ resource: 'orders', invalidates: ['list'] })}
+      />
     </List>
   );
 };
