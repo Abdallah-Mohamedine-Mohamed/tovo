@@ -1,5 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
-import { env, isProduction } from './config/env.js';
+import { env, isProduction, paiementMobileActif } from './config/env.js';
 import { registerAuth } from './plugins/auth.js';
 import { attachObservability, initObservability } from './lib/observability.js';
 import { authHookRoutes } from './routes/authHook.js';
@@ -88,7 +88,31 @@ export async function buildApp(): Promise<FastifyInstance> {
     );
   }
 
-  app.get('/health', async () => ({ status: 'ok', contract: CONTRACT_VERSION }));
+  /**
+   * État du service et de ses raccordements.
+   *
+   * Les drapeaux `services` disent quelles intégrations sont réellement
+   * actives — jamais leurs valeurs. Sans eux, une variable oubliée sur
+   * Railway ne se voit qu'au moment où un client choisit le paiement mobile
+   * et où rien n'arrive : le code se comporte comme prévu, la fonctionnalité
+   * est simplement absente, et rien ne le dit.
+   *
+   * Aucun secret ici : uniquement des booléens.
+   */
+  app.get('/health', async () => ({
+    status: 'ok',
+    contract: CONTRACT_VERSION,
+    services: {
+      paiement_nita: paiementMobileActif,
+      callback_nita: Boolean(env.NITA_WEBHOOK_SECRET && env.PUBLIC_BASE_URL),
+      whatsapp: env.OTP_CHANNEL === 'whatsapp',
+      hook_auth: Boolean(env.AUTH_HOOK_SECRET),
+      assistant: Boolean(env.GEMINI_API_KEY),
+      notifications: Boolean(env.FCM_SERVICE_ACCOUNT_JSON),
+      file_taches: Boolean(env.REDIS_URL),
+      suivi_erreurs: Boolean(env.SENTRY_DSN),
+    },
+  }));
 
   await app.register(authHookRoutes);
   await app.register(catalogRoutes);

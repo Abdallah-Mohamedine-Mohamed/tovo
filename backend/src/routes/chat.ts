@@ -96,6 +96,55 @@ function interactionEnMessage(action: string, payload: Record<string, unknown>):
 }
 
 export async function chatRoutes(app: FastifyInstance): Promise<void> {
+  /**
+   * La dernière conversation, pour la reprendre à l'ouverture.
+   *
+   * Les échanges étaient enregistrés depuis toujours et jamais relus : chaque
+   * lancement ouvrait une conversation neuve, et tout ce que le client avait
+   * dit la veille devenait invisible. Il repartait de zéro sans comprendre
+   * pourquoi l'assistant ne se souvenait de rien.
+   */
+  app.get('/conversations/last', { preHandler: app.requireAuth }, async (request, reply) => {
+    const db = request.supabase!;
+
+    const { data: conversation } = await db
+      .from('conversations')
+      .select('id')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!conversation) return reply.send({ conversation_id: null, messages: [] });
+
+    const conversationId = (conversation as { id: string }).id;
+
+    // Les dix derniers, remis dans l'ordre de lecture. Au-delà, le fil
+    // s'allonge sans rien apporter et l'ouverture ralentit.
+    const { data, error } = await db
+      .from('messages')
+      .select('role, content, components, created_at')
+      .eq('conversation_id', conversationId)
+      .in('role', ['user', 'assistant'])
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    if (error) {
+      const failure = toHttpFailure(error);
+      return reply.code(failure.status).send(failure.body);
+    }
+
+    const messages = (data ?? [])
+      .reverse()
+      .map((m) => ({
+        role: m.role as string,
+        content: (m.content as string | null) ?? '',
+        components: (m.components as unknown[] | null) ?? [],
+      }))
+      .filter((m) => m.content.length > 0 || m.components.length > 0);
+
+    return reply.send({ conversation_id: conversationId, messages });
+  });
+
   app.post('/chat', { preHandler: app.requireAuth }, async (request, reply) => {
     if (!llmEnabled) {
       return reply.code(503).send({

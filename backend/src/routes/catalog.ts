@@ -251,7 +251,7 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
     if (!params.success) return reply.code(400).send({ error: 'identifiant invalide' });
 
     const query = z
-      .object({ limit: z.coerce.number().int().min(1).max(30).default(12) })
+      .object({ category: z.string().uuid().optional() })
       .safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: 'requête invalide' });
 
@@ -261,50 +261,79 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       .eq('id', params.data.merchantId)
       .maybeSingle();
 
-    // La RLS masque les boutiques non approuvées : une réponse vide ici veut
+    // La RLS masque les boutiques non approuvées : une réponse vide veut
     // dire « pas pour vous » autant que « inexistante », et on ne distingue
     // pas les deux — la différence renseignerait un curieux.
-    if (!boutique) {
-      return reply.code(404).send({ error: 'boutique introuvable' });
+    if (!boutique) return reply.code(404).send({ error: 'boutique introuvable' });
+
+    const nom = (boutique.name as string | null) ?? 'Cette boutique';
+    // Le fait qu'une boutique soit fermée se dit ici, pas à la commande :
+    // découvrir au moment de payer que personne ne prépare est bien pire.
+    const suffixe = boutique.is_open === false ? ' — fermée' : '';
+
+    // Sans rayon demandé, on regarde d'abord comment la boutique est
+    // organisée. GALAXIE a 131 produits en 9 rayons : les déverser d'un bloc
+    // n'est pas plus utilisable que les tronquer à douze, ce que l'app
+    // faisait sans le dire.
+    if (!query.data.category) {
+      const { data: rayons } = await db(request).rpc('merchant_categories', {
+        p_merchant_id: params.data.merchantId,
+      });
+
+      const sections = ((rayons ?? []) as Record<string, unknown>[]).map((c) => ({
+        id: c['id'] as string,
+        name: c['name'] as string,
+        icon: (c['icon'] as string | null) ?? null,
+        image_url: (c['image_url'] as string | null) ?? null,
+        merchant_id: params.data.merchantId,
+        produits: (c['produits'] as number | null) ?? null,
+      }));
+
+      const total = sections.reduce((n, s) => n + (s.produits ?? 0), 0);
+
+      // Un détour par les rayons ne se justifie que s'il y a de quoi s'y
+      // perdre. Pour une boutique de six articles, c'est un geste de plus
+      // pour rien.
+      if (sections.length > 1 && total > 12) {
+        return reply.send(
+          envelope(
+            `${nom}${suffixe} — ${total} produits`,
+            [categoryGrid(sections, 'Que cherchez-vous ici ?')],
+          ),
+        );
+      }
     }
 
-    const { data, error } = await db(request)
-      .from('products')
-      .select('id, name, description, image_url, price, is_available, merchant_id, merchants(name)')
-      .eq('merchant_id', params.data.merchantId)
-      .eq('is_available', true)
-      .order('name')
-      .limit(query.data.limit);
+    const { data, error } = await db(request).rpc('merchant_products', {
+      p_merchant_id: params.data.merchantId,
+      p_category_id: query.data.category ?? null,
+      p_limite: 40,
+    });
 
     if (error) {
       const failure = toHttpFailure(error);
       return reply.code(failure.status).send(failure.body);
     }
 
-    const items: ProductRow[] = (data ?? []).map((p) => ({
-      id: p.id as string,
-      name: p.name as string,
-      description: p.description as string | null,
-      image_url: p.image_url as string | null,
-      price: p.price as number,
-      is_available: p.is_available as boolean,
-      merchant_id: p.merchant_id as string,
-      merchant_name: (p.merchants as { name?: string } | null)?.name ?? null,
+    const items: ProductRow[] = ((data ?? []) as Record<string, unknown>[]).map((p) => ({
+      id: p['id'] as string,
+      name: p['name'] as string,
+      description: (p['description'] as string | null) ?? null,
+      image_url: (p['image_url'] as string | null) ?? null,
+      price: p['price'] as number,
+      is_available: p['is_available'] as boolean,
+      merchant_id: p['merchant_id'] as string,
+      merchant_name: (p['merchant_name'] as string | null) ?? null,
+      merchant_open: boutique.is_open as boolean,
     }));
 
-    const nom = (boutique.name as string | null) ?? 'Cette boutique';
-
     if (items.length === 0) {
-      return reply.send(
-        envelope(`${nom} n'a rien de disponible en ce moment.`),
-      );
+      return reply.send(envelope(`${nom} n'a rien de disponible en ce moment.`));
     }
 
-    // Le fait qu'une boutique soit fermée se dit ici, pas à la commande :
-    // découvrir au moment de payer que personne ne prépare est bien pire.
-    const titre = boutique.is_open === false ? `${nom} — fermée` : nom;
-
-    return reply.send(envelope(titre, [productCarousel(items, nom)]));
+    return reply.send(
+      envelope(`${nom}${suffixe}`, [productCarousel(items, nom)]),
+    );
   });
 
   /**

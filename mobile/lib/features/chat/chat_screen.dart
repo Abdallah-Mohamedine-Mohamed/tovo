@@ -94,29 +94,114 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  Future<void> _accueil() => _appeler(() => widget.api.get('/categories'));
+  /// Ce qu'on montre à l'ouverture.
+  ///
+  /// Une commande en cours passe AVANT tout le reste : c'est la seule chose
+  /// que le client a en tête en rouvrant l'app. Jusqu'ici il retombait sur
+  /// la grille des catégories et devait demander où en était sa livraison.
+  Future<void> _accueil() async {
+    final commandes = await widget.api.get('/orders', query: {'limit': 5});
+
+    if (commandes.ok) {
+      final liste = (commandes.raw['orders'] as List?) ?? const [];
+      final enCours = liste.cast<Map<String, dynamic>>().where((o) {
+        final s = '${o['status']}';
+        return s != 'delivered' && s != 'cancelled';
+      }).toList();
+
+      if (enCours.isNotEmpty && mounted) {
+        await _appeler(() => widget.api.get('/orders/${enCours.first['id']}'));
+        return;
+      }
+    }
+
+    if (!mounted) return;
+    if (await _reprendreLaConversation()) return;
+    if (mounted) await _appeler(() => widget.api.get('/categories'));
+  }
+
+  /// Recharge la dernière conversation. Vrai s'il y avait quelque chose.
+  ///
+  /// Les échanges étaient enregistrés depuis toujours et jamais relus :
+  /// chaque lancement ouvrait un fil neuf, et ce que le client avait dit la
+  /// veille disparaissait. Il repartait de zéro sans comprendre pourquoi
+  /// l'assistant ne se souvenait de rien.
+  Future<bool> _reprendreLaConversation() async {
+    final reponse = await widget.api.get('/conversations/last');
+    if (!reponse.ok || !mounted) return false;
+
+    final id = reponse.raw['conversation_id'];
+    final messages = (reponse.raw['messages'] as List?) ?? const [];
+    if (id is! String || messages.isEmpty) return false;
+
+    setState(() {
+      _conversationId = id;
+      for (final m in messages.cast<Map<String, dynamic>>()) {
+        _tours.add(_Tour(
+          deLAssistant: m['role'] != 'user',
+          contenu: '${m['content'] ?? ''}',
+          composants: ((m['components'] as List?) ?? const [])
+              .whereType<Map<String, dynamic>>()
+              .map(TovoComponent.fromJson)
+              .where((c) => c.type.isNotEmpty)
+              .toList(),
+        ));
+      }
+    });
+    _versLeBas();
+    return true;
+  }
 
   // ------------------------------------------------------------------
   // Échanges
   // ------------------------------------------------------------------
 
-  Future<void> _appeler(Future<TovoResponse> Function() requete) async {
+  /// @param remplaceLeDernier met à jour le dernier tour au lieu d'en
+  ///        ajouter un. Sans ça, changer une quantité empilait un panier de
+  ///        plus à chaque appui : on croyait avoir ajouté un produit, et on
+  ///        perdait de vue celui qu'on venait de modifier.
+  Future<void> _appeler(
+    Future<TovoResponse> Function() requete, {
+    bool remplaceLeDernier = false,
+  }) async {
     setState(() => _charge = true);
     final reponse = await requete();
     if (!mounted) return;
 
+    final tour = _Tour(
+      deLAssistant: true,
+      contenu: reponse.content,
+      composants: reponse.components,
+      enErreur: !reponse.ok,
+    );
+
     setState(() {
       _charge = false;
-      _tours.add(_Tour(
-        deLAssistant: true,
-        contenu: reponse.content,
-        composants: reponse.components,
-        enErreur: !reponse.ok,
-      ));
+      // On ne remplace que si le dernier tour montre bien la même chose :
+      // écraser un message d'erreur ou une réponse de l'assistant ferait
+      // disparaître une information que l'utilisateur n'a pas encore lue.
+      final peutRemplacer = remplaceLeDernier &&
+          _tours.isNotEmpty &&
+          reponse.ok &&
+          _memeNature(_tours.last, tour);
+
+      if (peutRemplacer) {
+        _tours[_tours.length - 1] = tour;
+      } else {
+        _tours.add(tour);
+      }
+
       final id = reponse.raw['conversation_id'];
       if (id is String) _conversationId = id;
     });
-    _versLeBas();
+
+    if (!remplaceLeDernier) _versLeBas();
+  }
+
+  /// Deux tours montrent-ils le même composant ?
+  static bool _memeNature(_Tour a, _Tour b) {
+    if (a.composants.isEmpty || b.composants.isEmpty) return false;
+    return a.composants.first.type == b.composants.first.type;
   }
 
   /// Parle à l'assistant. Texte libre ou interaction à interpréter.
@@ -281,13 +366,24 @@ class _ChatScreenState extends State<ChatScreen> {
       // mélangés ne correspond ni à la structure des données ni à la façon
       // dont on choisit — on décide d'abord où, puis quoi.
       case 'select_category':
-        _ajouterTourUtilisateur('Voir cette catégorie');
-        _appeler(() => widget.api.get(
-              '/categories/${p['category_id']}/merchants',
-              query: _position == null
-                  ? null
-                  : {'lat': _position!.$1, 'lng': _position!.$2},
-            ));
+        // Un rayon de boutique porte son `merchant_id` : il mène aux
+        // produits de CETTE boutique, pas à toutes les boutiques de la
+        // catégorie.
+        final boutique = p['merchant_id'] as String?;
+        if (boutique != null) {
+          _appeler(() => widget.api.get(
+                '/merchants/$boutique/products',
+                query: {'category': p['category_id']},
+              ));
+        } else {
+          _ajouterTourUtilisateur('Voir cette catégorie');
+          _appeler(() => widget.api.get(
+                '/categories/${p['category_id']}/merchants',
+                query: _position == null
+                    ? null
+                    : {'lat': _position!.$1, 'lng': _position!.$2},
+              ));
+        }
 
       case 'select_product':
         _appeler(() => widget.api.get('/products/${p['product_id']}'));
@@ -299,14 +395,22 @@ class _ChatScreenState extends State<ChatScreen> {
               'selections': p['selections'] ?? const [],
             }));
 
+      // Ces trois gestes changent un panier déjà à l'écran : ils le
+      // mettent à jour sur place au lieu d'en empiler une copie plus bas.
       case 'update_qty':
-        _appeler(() => widget.api.patch(
-              '/cart/items/${p['item_id']}',
-              {'quantity': p['quantity']},
-            ));
+        _appeler(
+          () => widget.api.patch(
+            '/cart/items/${p['item_id']}',
+            {'quantity': p['quantity']},
+          ),
+          remplaceLeDernier: true,
+        );
 
       case 'remove_from_cart':
-        _appeler(() => widget.api.delete('/cart/items/${p['item_id']}'));
+        _appeler(
+          () => widget.api.delete('/cart/items/${p['item_id']}'),
+          remplaceLeDernier: true,
+        );
 
       case 'place_order':
         _commander();

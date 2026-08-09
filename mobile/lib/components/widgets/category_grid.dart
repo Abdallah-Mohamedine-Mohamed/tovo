@@ -54,8 +54,16 @@ class CategoryGrid extends StatelessWidget {
               borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
               onTap: id == null
                   ? null
+                  // `merchant_id` distingue un RAYON de boutique d'une
+                  // catégorie du catalogue. Sans lui, toucher « Boissons »
+                  // chez GALAXIE renverrait vers toutes les boissons de
+                  // Niamey au lieu des siennes.
                   : () => onInteraction(
-                        TovoInteraction('select_category', {'category_id': id}),
+                        TovoInteraction('select_category', {
+                          'category_id': id,
+                          if (item['merchant_id'] != null)
+                            'merchant_id': item['merchant_id'],
+                        }),
                       ),
               child: Container(
                 decoration: BoxDecoration(

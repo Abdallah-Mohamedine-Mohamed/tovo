@@ -34,6 +34,15 @@ export interface CategoryRow {
   name: string;
   icon: string | null;
   image_url: string | null;
+  /**
+   * Boutique dont cette entrée est un RAYON, si c'en est un.
+   *
+   * La même grille sert aux catégories du catalogue et aux rayons d'une
+   * boutique. Sans cette distinction, toucher « Boissons » chez GALAXIE
+   * renverrait vers toutes les boissons de Niamey.
+   */
+  merchant_id?: string | null;
+  produits?: number | null;
 }
 
 export function categoryGrid(items: CategoryRow[], title = 'Que cherchez-vous ?'): Component {
@@ -46,6 +55,8 @@ export function categoryGrid(items: CategoryRow[], title = 'Que cherchez-vous ?'
         name: c.name,
         icon: c.icon,
         image_url: c.image_url,
+        ...(c.merchant_id ? { merchant_id: c.merchant_id } : {}),
+        ...(c.produits != null ? { produits: c.produits } : {}),
       })),
     },
   };

@@ -425,20 +425,95 @@ const retirerDuPanier: Executor = async (args, ctx) => {
   return panierCourant(ctx);
 };
 
-const suivreCommande: Executor = async (args, ctx) => {
-  let orderId = texte(args, 'order_id');
+/**
+ * La dernière commande en cours du client, ou une chaîne vide.
+ *
+ * Sans identifiant, « où est ma commande ? » et « annule » désignent la
+ * même chose dans presque tous les cas : la dernière qui n'est ni livrée ni
+ * annulée.
+ */
+async function commandeEnCours(ctx: ToolContext, fourni: string): Promise<string> {
+  if (fourni) return fourni;
 
-  // Sans identifiant, on prend la dernière commande en cours : c'est ce que
-  // « où est ma commande ? » veut dire dans 99 % des cas.
-  if (!orderId) {
-    const { data } = await ctx.db
-      .from('orders')
-      .select('id')
-      .not('status', 'in', '("delivered","cancelled")')
-      .order('placed_at', { ascending: false })
-      .limit(1);
-    orderId = (data?.[0]?.id as string | undefined) ?? '';
+  const { data } = await ctx.db
+    .from('orders')
+    .select('id')
+    .not('status', 'in', '("delivered","cancelled")')
+    .order('placed_at', { ascending: false })
+    .limit(1);
+
+  return (data?.[0]?.id as string | undefined) ?? '';
+}
+
+/**
+ * Annulation par le client.
+ *
+ * La décision appartient entièrement à la base : cancel_my_order vérifie
+ * qu'aucun livreur n'est parti et que rien n'a été encaissé, puis renvoie un
+ * motif lisible en cas de refus. Le modèle ne fait que le transmettre.
+ *
+ * S'il arbitrait lui-même, il finirait par annuler une commande déjà payée
+ * parce que le client aura insisté — et l'argent serait perdu pour le
+ * boutiquier.
+ */
+const annulerCommande: Executor = async (args, ctx) => {
+  const orderId = await commandeEnCours(ctx, texte(args, 'order_id'));
+  if (!orderId) return { summary: { commandes_en_cours: 0 }, components: [] };
+
+  const { data, error } = await ctx.db.rpc('cancel_my_order', {
+    p_order_id: orderId,
+    p_motif: texte(args, 'motif') || null,
+  });
+
+  if (error) return { summary: { erreur: error.message }, components: [] };
+
+  const refus = data as string | null;
+  if (refus) return { summary: { annulee: false, raison: refus }, components: [] };
+
+  // Le suivi remis à jour montre la commande annulée. Sans lui, l'ancienne
+  // carte resterait à l'écran avec un statut périmé.
+  const { data: suivi } = await ctx.db.rpc('order_tracking', { p_order_id: orderId });
+
+  return {
+    summary: { annulee: true, order_id: orderId },
+    components: suivi ? [orderTracking(suivi as Record<string, unknown>)] : [],
+  };
+};
+
+/**
+ * De quoi appeler le livreur.
+ *
+ * Le numéro vient de order_tracking, qui ne le donne qu'aux personnes
+ * concernées par la commande. On ne le lit jamais dans profiles : ce serait
+ * exposer le téléphone d'un livreur à qui saurait le demander.
+ */
+const appelerLivreur: Executor = async (args, ctx) => {
+  const orderId = await commandeEnCours(ctx, texte(args, 'order_id'));
+  if (!orderId) return { summary: { commandes_en_cours: 0 }, components: [] };
+
+  const { data } = await ctx.db.rpc('order_tracking', { p_order_id: orderId });
+  if (!data) return { summary: { erreur: 'commande introuvable' }, components: [] };
+
+  const suivi = data as Record<string, unknown>;
+  const livreur = suivi['driver'] as { name?: string; phone?: string } | null;
+
+  if (!livreur?.phone) {
+    return {
+      summary: { livreur_assigne: false, statut: suivi['status'] },
+      components: [],
+    };
   }
+
+  return {
+    summary: { livreur_assigne: true, nom: livreur.name ?? null },
+    // La carte de suivi porte déjà le bouton d'appel : la renvoyer évite
+    // d'inventer un composant pour un geste qui existe.
+    components: [orderTracking(suivi)],
+  };
+};
+
+const suivreCommande: Executor = async (args, ctx) => {
+  const orderId = await commandeEnCours(ctx, texte(args, 'order_id'));
 
   if (!orderId) return { summary: { commandes_en_cours: 0 }, components: [] };
 
@@ -787,6 +862,32 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
     },
   },
   {
+    name: 'annuler_commande',
+    description:
+      "Annule une commande du client. Possible tant qu'aucun livreur n'est en " +
+      "route, et si elle n'a pas déjà été payée. Sans identifiant, prend la " +
+      "dernière commande en cours. N'arbitre jamais toi-même : l'outil refuse " +
+      'et explique pourquoi quand il ne peut pas.',
+    parameters: {
+      type: 'object',
+      properties: {
+        order_id: S.string('Identifiant de commande'),
+        motif: S.string('Raison donnée par le client, si elle est dite'),
+      },
+    },
+  },
+  {
+    name: 'appeler_livreur',
+    description:
+      'Donne au client de quoi appeler le livreur de sa commande. Pour ' +
+      "« appelle le livreur », « je veux lui parler ». Ne donne rien tant " +
+      "qu'aucun livreur n'est assigné.",
+    parameters: {
+      type: 'object',
+      properties: { order_id: S.string('Identifiant de commande') },
+    },
+  },
+  {
     name: 'produits_de_boutique',
     description:
       "Le catalogue d'une boutique précise. À utiliser dès qu'on parle d'une " +
@@ -846,6 +947,8 @@ export const EXECUTORS: Record<string, Executor> = {
   retirer_du_panier: retirerDuPanier,
   suivre_commande: suivreCommande,
   historique_commandes: historiqueCommandes,
+  annuler_commande: annulerCommande,
+  appeler_livreur: appelerLivreur,
   produits_de_boutique: produitsDeBoutique,
   mes_adresses: mesAdresses,
   preparer_course: preparerCourse,
