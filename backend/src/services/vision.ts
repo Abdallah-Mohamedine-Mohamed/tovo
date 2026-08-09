@@ -25,15 +25,41 @@ import { serviceClient } from './supabase.js';
 // deux tombe en silence le jour où Google en retire un.
 const MODELE = env.GEMINI_MODEL;
 
-const CONSIGNE = `Décris ce produit en une seule phrase française, factuelle et précise,
-destinée à retrouver l'article dans un catalogue.
+/**
+ * Des MOTS-CLÉS, et surtout pas une description.
+ *
+ * La consigne demandait « une seule phrase factuelle et précise ». Le modèle
+ * la rendait fidèlement — « Une souris d'ordinateur sans fil noire posée sur
+ * un bureau » — et la recherche ne trouvait rien.
+ *
+ * Mesuré sur le catalogue réel : « souris » ramène 2 articles, « souris sans
+ * fil » en ramène 5, la phrase complète en ramène ZÉRO. Sans vecteur, la
+ * recherche compare des trigrammes ; entre une phrase de dix mots et un nom
+ * de produit de trois, la similarité tombe sous le plancher de 0,70 et tout
+ * est écarté. Plus la description était riche, moins elle trouvait.
+ *
+ * On demande donc ce qu'un client taperait lui-même dans une barre de
+ * recherche, ce qui est exactement ce que le moteur sait traiter.
+ */
+const CONSIGNE = `Donne les mots-clés qui permettraient de retrouver ce produit
+dans le catalogue d'une boutique, comme si tu les tapais dans une barre de
+recherche.
 
-Mentionne : la nature de l'objet ou du plat, sa marque si elle est lisible,
-sa couleur, sa matière, son conditionnement, sa contenance.
+Trois à cinq mots maximum, séparés par des espaces. Pas de phrase, pas de
+verbe, pas d'article.
 
-Si c'est un plat ouest-africain, nomme-le si tu le reconnais.
-N'invente aucune marque ni aucun détail que tu ne vois pas.
-Ne décris ni l'arrière-plan, ni les personnes, ni le lieu.`;
+Commence par le nom de l'objet ou du plat. Ajoute ensuite, seulement si
+c'est lisible sur l'image et utile pour le distinguer : la marque, puis une
+caractéristique déterminante (sans fil, 1,5 L, rouge).
+
+Ignore l'arrière-plan, les personnes, le lieu, et tout détail qui ne servirait
+pas à le chercher. N'invente aucune marque.
+
+Exemples de bonnes réponses :
+souris sans fil
+clavier Logitech
+poulet braisé
+eau minérale 1,5 L`;
 
 export class VisionUnavailableError extends Error {
   constructor(message: string) {

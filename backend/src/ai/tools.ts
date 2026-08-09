@@ -624,7 +624,7 @@ const mesAdresses: Executor = async (_args, ctx) => {
     components: [
       quickReplies([
         ...adresses.slice(0, 3).map((a) => ({
-          label: `Livrer à ${a.label}`,
+          label: `Livrer à ${nommerAdresse(a)}`,
           value: `adresse:${a.id}`,
         })),
         { label: 'Ailleurs', value: 'adresse:nouvelle' },
@@ -632,6 +632,31 @@ const mesAdresses: Executor = async (_args, ctx) => {
     ],
   };
 };
+
+/**
+ * De quoi distinguer deux adresses sur un bouton.
+ *
+ * L'application enregistrait toute nouvelle adresse sous le libellé littéral
+ * « Adresse ». Trois adresses donnaient donc trois boutons « Livrer à
+ * Adresse » rigoureusement identiques : impossible de choisir, et le hasard
+ * décidait où la commande était livrée.
+ *
+ * Quand le libellé ne dit rien, on prend le repère — c'est le client qui l'a
+ * écrit, c'est donc lui qui lui parle. Tronqué au premier segment : « Yantala,
+ * derrière la pharmacie Al Nour » ne tient pas dans un bouton, « Yantala » si.
+ */
+function nommerAdresse(a: { label: string; text_hint: string }): string {
+  const libelle = (a.label ?? '').trim();
+  const generique = libelle === '' || /^adresses?$/i.test(libelle);
+  if (!generique) return libelle;
+
+  const repere = (a.text_hint ?? '').trim();
+  if (repere === '') return 'cette adresse';
+
+  const premier = repere.split(/[,;·]/)[0]!.trim();
+  const court = premier === '' ? repere : premier;
+  return court.length > 24 ? `${court.slice(0, 23).trimEnd()}…` : court;
+}
 
 const historiqueCommandes: Executor = async (args, ctx) => {
   const limite = Math.min(nombre(args, 'limite') ?? 5, 10);

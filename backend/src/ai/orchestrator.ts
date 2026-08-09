@@ -78,6 +78,18 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   history.push({
     role: 'user',
     content: `${contexteUtilisateur(input.position)}\n\n${input.message}`,
+    // L'ENREGISTREMENT LUI-MÊME. Il était reçu par la route, transmis
+    // jusqu'ici, déclaré dans l'interface d'entrée — et jamais attaché au
+    // tour envoyé au modèle.
+    //
+    // Gemini ne recevait donc que la consigne « écoute l'enregistrement »,
+    // sans enregistrement. N'ayant rien à écouter, il enchaînait sur ce que
+    // le contexte rendait plausible : un panier en cours devenait une
+    // question sur l'adresse de livraison, quoi qu'ait dit le client.
+    //
+    // Aucune erreur nulle part : ni exception, ni réponse vide. Juste un
+    // modèle qui répond à côté, ce qui est le plus difficile à voir.
+    ...(input.audio ? { audio: input.audio } : {}),
   });
 
   const composantsDuTour: Component[] = [];

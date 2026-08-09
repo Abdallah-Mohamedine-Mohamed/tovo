@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show File;
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -55,12 +56,27 @@ class _Tour {
     required this.contenu,
     this.composants = const [],
     this.enErreur = false,
+    this.photoLocale,
   });
 
   final bool deLAssistant;
   final String contenu;
   final List<TovoComponent> composants;
   final bool enErreur;
+
+  /// La photo que le client vient d'envoyer, telle qu'elle est sur son
+  /// téléphone.
+  ///
+  /// « 📷 Photo envoyée » ne dit pas LAQUELLE. Quand l'assistant répond qu'il
+  /// n'a rien trouvé, impossible de savoir si la photo était floue, mal
+  /// cadrée, ou si c'est la recherche qui a échoué. La revoir tranche la
+  /// question tout de suite.
+  ///
+  /// Le fichier local, et non l'URL du Storage : il est déjà là, et l'afficher
+  /// ne coûte pas un aller-retour réseau. La vignette disparaît donc quand la
+  /// conversation est rechargée depuis le serveur, ce qui est acceptable —
+  /// elle sert sur le moment.
+  final String? photoLocale;
 }
 
 class _ChatScreenState extends State<ChatScreen> {
@@ -407,8 +423,10 @@ class _ChatScreenState extends State<ChatScreen> {
     if (p != null && mounted) setState(() => _position = (p.latitude, p.longitude));
   }
 
-  void _ajouterTourUtilisateur(String texte) {
-    setState(() => _tours.add(_Tour(deLAssistant: false, contenu: texte)));
+  void _ajouterTourUtilisateur(String texte, {String? photoLocale}) {
+    setState(() => _tours.add(
+          _Tour(deLAssistant: false, contenu: texte, photoLocale: photoLocale),
+        ));
     _versLeBas();
   }
 
@@ -628,7 +646,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// emprunte exactement le même chemin : deux chemins d'envoi divergeraient
   /// au premier correctif.
   Future<void> _envoyerLaPhoto(XFile fichier) async {
-    _ajouterTourUtilisateur('📷 Photo envoyée');
+    _ajouterTourUtilisateur('📷 Photo envoyée', photoLocale: fichier.path);
     setState(() => _charge = true);
 
     try {
@@ -761,7 +779,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // Enregistrer se fait en tâche de fond : un échec ne doit pas empêcher
     // la commande, qui est ce que le client est venu faire.
     unawaited(widget.api.post('/addresses', {
-      'label': 'Adresse',
+      'label': _libelleDepuisRepere(repere),
       'text_hint': repere,
       'lat': position.latitude,
       'lng': position.longitude,
@@ -772,6 +790,22 @@ class _ChatScreenState extends State<ChatScreen> {
       lat: position.latitude,
       lng: position.longitude,
     );
+  }
+
+  /// Un nom d'adresse tiré de ce que le client a écrit.
+  ///
+  /// Toute nouvelle adresse était enregistrée sous le libellé littéral
+  /// « Adresse ». Trois adresses donnaient donc trois boutons « Livrer à
+  /// Adresse » rigoureusement identiques, et le choix se faisait au hasard —
+  /// avec une commande livrée au mauvais endroit à la clé.
+  ///
+  /// Le premier segment du repère suffit à distinguer : « Yantala, derrière
+  /// la pharmacie Al Nour » devient « Yantala ».
+  static String _libelleDepuisRepere(String repere) {
+    final premier = repere.split(RegExp(r'[,;·]')).first.trim();
+    final court = premier.isEmpty ? repere.trim() : premier;
+    if (court.isEmpty) return 'Adresse';
+    return court.length > 24 ? '${court.substring(0, 23).trimRight()}…' : court;
   }
 
   static const String _nouvelleAdresse = '__nouvelle__';
@@ -1312,19 +1346,51 @@ class _TourVueState extends State<_TourVue> {
     final onInteraction = widget.onInteraction;
 
     if (!tour.deLAssistant) {
+      final photo = tour.photoLocale;
+
       return Align(
         alignment: Alignment.centerRight,
         child: Container(
           margin: const EdgeInsets.only(bottom: 12, left: 48),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          padding: photo == null
+              ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
+              : const EdgeInsets.all(6),
           decoration: BoxDecoration(
             color: TovoTheme.teal,
             borderRadius: BorderRadius.circular(16)
                 .copyWith(bottomRight: const Radius.circular(4)),
           ),
-          child: Text(
-            tour.contenu,
-            style: const TextStyle(fontSize: 13, color: Colors.white, height: 1.5),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (photo != null)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.file(
+                    File(photo),
+                    width: 168,
+                    fit: BoxFit.cover,
+                    // Le fichier peut avoir disparu — Android nettoie ses
+                    // caches. On retombe alors sur le texte seul plutôt que
+                    // sur une icône d'image cassée.
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
+              Padding(
+                padding: photo == null
+                    ? EdgeInsets.zero
+                    : const EdgeInsets.fromLTRB(8, 6, 8, 2),
+                child: Text(
+                  tour.contenu,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Colors.white,
+                    height: 1.5,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       );
