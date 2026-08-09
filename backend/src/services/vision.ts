@@ -134,12 +134,17 @@ export async function decrireImage(
           ],
           generationConfig: {
             temperature: 0.1,
+            // Large, alors que la réponse tient en cinq mots.
+            //
+            // Les tokens de réflexion se déduisent de ce quota, et il n'y a
+            // plus moyen de les couper : `thinkingConfig.thinkingBudget = 0`
+            // est REFUSÉ par gemini-3.5-flash-lite — un 400 sur toutes les
+            // requêtes, donc plus une seule photo décrite. Vérifié : la même
+            // requête sans ce champ passe en 200.
+            //
+            // On donne donc de la marge au lieu d'interdire : le modèle
+            // réfléchit un peu et il lui reste de quoi répondre.
             maxOutputTokens: 400,
-            // Les tokens de réflexion des modèles Gemini 3 se déduisent de
-            // maxOutputTokens. Sans budget explicite, le modèle épuise son
-            // quota à réfléchir et n'émet que deux mots — observé : « Ce
-            // plat ». Décrire une photo ne demande aucun raisonnement.
-            thinkingConfig: { thinkingBudget: 0 },
           },
         }),
         signal: controleur.signal,
@@ -147,7 +152,13 @@ export async function decrireImage(
     );
 
     if (!reponse.ok) {
-      throw new VisionUnavailableError(`Vision a répondu ${reponse.status}`);
+      // Le corps, et pas seulement le code. Un 400 nu ne dit ni quel champ
+      // est en cause, ni si le modèle existe — et c'est précisément ce qu'on
+      // cherche quand la recherche par photo cesse de fonctionner.
+      const detail = (await reponse.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
+      throw new VisionUnavailableError(
+        `Vision a répondu ${reponse.status}${detail ? ` — ${detail}` : ''}`,
+      );
     }
 
     const json = (await reponse.json()) as {

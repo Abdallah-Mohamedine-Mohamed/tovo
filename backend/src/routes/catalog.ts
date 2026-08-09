@@ -49,9 +49,18 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(failure.status).send(failure.body);
     }
 
-    return reply.send(
-      envelope('Que souhaitez-vous commander ?', [categoryGrid(data ?? [])]),
-    );
+    // Ni phrase d'accompagnement, ni titre de grille.
+    //
+    // L'écran d'accueil posait la même question trois fois de suite : le
+    // salut de l'application (« Que voulez-vous commander ? »), la phrase de
+    // cette enveloppe (« Que souhaitez-vous commander ? »), puis le titre de
+    // la grille (« Que cherchez-vous ? »). Trois formulations du même
+    // besoin, empilées, qui repoussaient les catégories hors de l'écran.
+    //
+    // Le salut suffit : il est plus grand, il s'adresse au client par son
+    // nom, et il est le seul des trois à disparaître quand la conversation
+    // commence.
+    return reply.send(envelope('', [categoryGrid(data ?? [], '')]));
   });
 
   /**
