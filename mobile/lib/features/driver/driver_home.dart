@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../components/registry.dart';
 import '../../core/api.dart';
+import '../../core/deconnexion.dart';
 import '../../core/theme.dart';
 import 'driver_controller.dart';
 
@@ -71,6 +74,17 @@ class _DriverHomeState extends State<DriverHome> {
                 activeThumbColor: TovoTheme.success,
                 onChanged: (v) => _c.setOnline(v),
               ),
+            ],
+          ),
+          // Enfoui derrière un menu, et c'est voulu : à côté de
+          // l'interrupteur de disponibilité, un doigt pressé se tromperait de
+          // cible en plein service.
+          PopupMenuButton<String>(
+            onSelected: (choix) {
+              if (choix == 'sortir') unawaited(confirmerDeconnexion(context));
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'sortir', child: Text('Se déconnecter')),
             ],
           ),
         ],
@@ -370,6 +384,14 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
     final course = controller.course!;
     final dropoff = (course['dropoff'] as Map?)?.cast<String, dynamic>() ?? const {};
     final pickup = (course['pickup'] as Map?)?.cast<String, dynamic>();
+    final boutique = (course['merchant'] as Map?)?.cast<String, dynamic>();
+    final client = (course['client'] as Map?)?.cast<String, dynamic>();
+    final articles = ((course['items'] as List?) ?? const [])
+        .whereType<Map<dynamic, dynamic>>()
+        .map((a) => a.cast<String, dynamic>())
+        .toList(growable: false);
+    // Une fois parti livrer, la boutique n'est plus le sujet.
+    final enRouteVersClient = controller.statut == 'delivering';
     final etape = controller.prochaineEtape;
     final dejaPaye =
         course['payment_method'] == 'mobile_money' && course['payment_status'] == 'paid';
@@ -396,19 +418,66 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
                 ),
               ),
               const SizedBox(height: 16),
-              _Point(
+              // Les deux points de la course, chacun avec de quoi s'y rendre
+              // et joindre quelqu'un sur place. Le point ACTIF est mis en
+              // avant : un livreur en circulation ne doit pas avoir à
+              // choisir entre deux itinéraires.
+              _EtapeCourse(
                 couleur: TovoTheme.teal,
                 titre: 'Récupérer',
-                detail: (pickup?['hint'] as String?) ??
-                    (course['merchant_name'] as String?) ??
-                    '—',
+                nom: (boutique?['name'] as String?) ??
+                    (course['merchant_name'] as String?),
+                repere: (pickup?['hint'] as String?) ?? (boutique?['hint'] as String?),
+                telephone: boutique?['phone'] as String?,
+                lat: _nombre(pickup?['lat'] ?? boutique?['lat']),
+                lng: _nombre(pickup?['lng'] ?? boutique?['lng']),
+                actif: !enRouteVersClient,
               ),
               const SizedBox(height: 12),
-              _Point(
+              _EtapeCourse(
                 couleur: TovoTheme.danger,
                 titre: 'Livrer',
-                detail: (dropoff['hint'] as String?) ?? '—',
+                nom: client?['name'] as String?,
+                repere: dropoff['hint'] as String?,
+                telephone: client?['phone'] as String?,
+                lat: _nombre(dropoff['lat']),
+                lng: _nombre(dropoff['lng']),
+                actif: enRouteVersClient,
               ),
+
+              // Ce qu'il transporte. Sans cette liste, le livreur ne peut ni
+              // vérifier le sac que lui tend la boutique, ni répondre au
+              // client qui demande si son supplément a bien été mis.
+              if (articles.isNotEmpty) ...[
+                const Divider(height: 28),
+                const Text(
+                  'Contenu',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: TovoTheme.muted,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final a in articles) _LigneArticle(article: a),
+              ],
+
+              if ((course['note'] as String?)?.trim().isNotEmpty ?? false) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: TovoTheme.tealSoft,
+                    borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
+                  ),
+                  child: Text(
+                    'Note du client : ${course['note']}',
+                    style: const TextStyle(fontSize: 12, height: 1.4),
+                  ),
+                ),
+              ],
+
               const Divider(height: 28),
               // Un paiement déjà constaté ne doit surtout pas s'afficher
               // comme « à encaisser » : le livreur réclamerait une seconde
@@ -535,44 +604,201 @@ class _BoutonPreuve extends StatelessWidget {
   }
 }
 
-class _Point extends StatelessWidget {
-  const _Point({required this.couleur, required this.titre, required this.detail});
+/// Les coordonnées arrivent en `num` ou en `String` selon le chemin par
+/// lequel la commande a transité. Un `as double?` sec renvoyait `null` sur un
+/// entier — et le bouton d'itinéraire disparaissait sans explication.
+double? _nombre(dynamic valeur) => switch (valeur) {
+      num n => n.toDouble(),
+      String s => double.tryParse(s),
+      _ => null,
+    };
+
+/// Ouvre l'itinéraire dans l'application de cartes du téléphone.
+///
+/// On n'affiche PAS de carte dans l'app : le livreur utilise déjà Google Maps
+/// et le connaît par cœur. Une carte maison lui ferait perdre le guidage
+/// vocal, le trafic et les raccourcis qu'il connaît — pour afficher moins.
+Future<void> _itineraire(double lat, double lng) async {
+  final uri = Uri.parse(
+    'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
+  );
+  await launchUrl(uri, mode: LaunchMode.externalApplication);
+}
+
+Future<void> _appeler(String numero) async {
+  final propre = numero.replaceAll(RegExp(r'[^\d+]'), '');
+  await launchUrl(Uri.parse('tel:$propre'));
+}
+
+/// Un point de la course : où aller, qui appeler.
+class _EtapeCourse extends StatelessWidget {
+  const _EtapeCourse({
+    required this.couleur,
+    required this.titre,
+    required this.nom,
+    required this.repere,
+    required this.telephone,
+    required this.lat,
+    required this.lng,
+    required this.actif,
+  });
 
   final Color couleur;
   final String titre;
-  final String detail;
+  final String? nom;
+  final String? repere;
+  final String? telephone;
+  final double? lat;
+  final double? lng;
+
+  /// Le point vers lequel le livreur se dirige maintenant.
+  final bool actif;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          margin: const EdgeInsets.only(top: 5),
-          width: 9,
-          height: 9,
-          decoration: BoxDecoration(color: couleur, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                titre.toUpperCase(),
-                style: const TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  color: TovoTheme.muted,
-                  letterSpacing: 0.6,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(detail, style: const TextStyle(fontSize: 14, color: TovoTheme.ink)),
-            ],
+    final aPosition = lat != null && lng != null;
+    final aTelephone = (telephone ?? '').trim().isNotEmpty;
+
+    return Opacity(
+      // L'étape franchie s'efface sans disparaître : le livreur peut encore
+      // rappeler la boutique s'il s'aperçoit d'un oubli en chemin.
+      opacity: actif ? 1 : 0.55,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: actif ? couleur.withValues(alpha: 0.06) : Colors.transparent,
+          borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
+          border: Border.all(
+            color: actif ? couleur.withValues(alpha: 0.35) : const Color(0x14000000),
           ),
         ),
-      ],
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 9,
+                  height: 9,
+                  decoration: BoxDecoration(color: couleur, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  titre.toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: TovoTheme.muted,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            if ((nom ?? '').trim().isNotEmpty)
+              Text(
+                nom!,
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+              ),
+            if ((repere ?? '').trim().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  repere!,
+                  style: const TextStyle(fontSize: 13, height: 1.35),
+                ),
+              ),
+            if (!aPosition && !aTelephone)
+              const Padding(
+                padding: EdgeInsets.only(top: 2),
+                child: Text(
+                  'Aucun repère enregistré',
+                  style: TextStyle(fontSize: 12, color: TovoTheme.muted),
+                ),
+              ),
+            if (aPosition || aTelephone) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  if (aPosition)
+                    Expanded(
+                      child: FilledButton.tonalIcon(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(44),
+                        ),
+                        onPressed: () => _itineraire(lat!, lng!),
+                        icon: const Icon(Icons.directions, size: 18),
+                        label: const Text(
+                          'Itinéraire',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                  if (aPosition && aTelephone) const SizedBox(width: 8),
+                  if (aTelephone)
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(44),
+                          foregroundColor: TovoTheme.teal,
+                        ),
+                        onPressed: () => _appeler(telephone!),
+                        icon: const Icon(Icons.call, size: 18),
+                        label: const Text(
+                          'Appeler',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LigneArticle extends StatelessWidget {
+  const _LigneArticle({required this.article});
+
+  final Map<String, dynamic> article;
+
+  @override
+  Widget build(BuildContext context) {
+    final options = (article['selections_label'] as String?)?.trim() ?? '';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 28,
+            child: Text(
+              '${article['quantity'] ?? 1}×',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${article['product_name'] ?? ''}',
+                  style: const TextStyle(fontSize: 13),
+                ),
+                if (options.isNotEmpty)
+                  Text(
+                    options,
+                    style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

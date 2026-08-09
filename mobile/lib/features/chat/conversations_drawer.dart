@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/api.dart';
+import '../../core/deconnexion.dart';
 import '../../core/marque.dart';
 import '../../core/theme.dart';
 
@@ -178,6 +181,27 @@ class _TiroirConversationsState extends State<TiroirConversations> {
                             );
                           },
                         ),
+            ),
+
+            // En pied de panneau, sous les conversations : c'est là qu'on
+            // cherche son compte, et l'app client n'offrait jusqu'ici aucune
+            // façon d'en sortir.
+            const Divider(height: 1),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.logout, size: 18, color: TovoTheme.muted),
+              title: const Text(
+                'Se déconnecter',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: TovoTheme.muted),
+              ),
+              onTap: () {
+                // Le contexte du navigateur racine est pris AVANT de fermer :
+                // celui-ci appartient au tiroir, qui est démonté par le `pop`.
+                // La boîte de dialogue s'ouvrirait alors sur un élément mort.
+                final racine = Navigator.of(context, rootNavigator: true).context;
+                Navigator.of(context).pop();
+                unawaited(confirmerDeconnexion(racine));
+              },
             ),
           ],
         ),

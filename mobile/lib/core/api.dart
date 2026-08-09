@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -13,21 +14,74 @@ import 'config.dart';
 /// l'orchestrateur IA. L'app ne fait pas la différence, et c'est exactement
 /// ce que le contrat UI garantit.
 class TovoApi {
-  TovoApi({http.Client? client, String? Function()? tokenProvider})
-      : _client = client ?? http.Client(),
-        _token = tokenProvider ?? _tokenDepuisSupabase;
+  TovoApi({
+    http.Client? client,
+    FutureOr<String?> Function()? tokenProvider,
+    Future<bool> Function()? onRenouveler,
+  })  : _client = client ?? http.Client(),
+        _token = tokenProvider ?? _tokenDepuisSupabase,
+        // Un jeton fourni de l'extérieur appartient à l'appelant : le
+        // renouveler auprès de Supabase, que les tests n'initialisent pas,
+        // planterait au lieu d'aider. D'où le renouvellement injectable, sans
+        // quoi le second essai sur 401 ne serait vérifiable nulle part.
+        _renouveler =
+            onRenouveler ?? (tokenProvider == null ? _renouvelerSupabase : null);
 
   final http.Client _client;
 
+  final Future<bool> Function()? _renouveler;
+
   /// Injectable : sans cela, tester la file hors ligne exigerait d'initialiser
   /// Supabase, ce qui transformerait un test unitaire en test d'intégration.
-  final String? Function() _token;
+  final FutureOr<String?> Function() _token;
 
-  static String? _tokenDepuisSupabase() =>
-      Supabase.instance.client.auth.currentSession?.accessToken;
+  /// Le jeton d'accès, rafraîchi s'il est sur le point d'expirer.
+  ///
+  /// Il ne vit qu'une heure. Supabase le renouvelle tout seul — au moyen d'un
+  /// minuteur, qui ne tourne PAS pendant que le téléphone dort. Au réveil, la
+  /// session en mémoire porte donc un jeton périmé, et la première requête
+  /// partait avec : le backend répondait « session invalide » à quelqu'un qui
+  /// était pourtant bel et bien connecté, au moment précis où il commandait.
+  ///
+  /// La marge de soixante secondes couvre le trajet réseau : un jeton valide
+  /// à l'envoi peut expirer avant d'arriver.
+  ///
+  /// Publique parce que les lectures directes à Supabase — `AuthGate` lit le
+  /// rôle sans passer par le backend — souffrent exactement du même jeton
+  /// périmé, et échouaient au réveil de l'appareil.
+  static Future<String?> jetonFrais() => _tokenDepuisSupabase();
 
-  Map<String, String> get _headers {
-    final token = _token();
+  static Future<String?> _tokenDepuisSupabase() async {
+    final auth = Supabase.instance.client.auth;
+    final session = auth.currentSession;
+    if (session == null) return null;
+
+    final expire = session.expiresAt;
+    final bientot = expire != null &&
+        DateTime.now().toUtc().add(const Duration(seconds: 60)).isAfter(
+              DateTime.fromMillisecondsSinceEpoch(expire * 1000, isUtc: true),
+            );
+    if (!bientot) return session.accessToken;
+
+    try {
+      final rafraichie = await auth.refreshSession();
+      return rafraichie.session?.accessToken ?? session.accessToken;
+    } on AuthException {
+      // Le jeton de rafraîchissement est mort : rien ne le ressuscitera, et
+      // réessayer indéfiniment enfermerait l'utilisateur sur un écran qui
+      // refuse tout. La déconnexion ramène `AuthGate` à l'écran de connexion,
+      // qui lui est une action possible.
+      await auth.signOut();
+      return null;
+    } on Exception {
+      // Réseau muet : on tente le jeton en main. S'il est périmé, le 401
+      // ci-dessous provoquera un second essai.
+      return session.accessToken;
+    }
+  }
+
+  Future<Map<String, String>> get _headers async {
+    final token = await _token();
     return {
       'content-type': 'application/json',
       'x-tovo-contract': '${TovoConfig.contractVersion}',
@@ -44,16 +98,16 @@ class TovoApi {
   }
 
   Future<TovoResponse> get(String path, {Map<String, dynamic>? query}) =>
-      _send(() => _client.get(_uri(path, query), headers: _headers));
+      _send(() async => _client.get(_uri(path, query), headers: await _headers));
 
-  Future<TovoResponse> post(String path, Map<String, dynamic> body) =>
-      _send(() => _client.post(_uri(path), headers: _headers, body: jsonEncode(body)));
+  Future<TovoResponse> post(String path, Map<String, dynamic> body) => _send(
+      () async => _client.post(_uri(path), headers: await _headers, body: jsonEncode(body)));
 
-  Future<TovoResponse> patch(String path, Map<String, dynamic> body) =>
-      _send(() => _client.patch(_uri(path), headers: _headers, body: jsonEncode(body)));
+  Future<TovoResponse> patch(String path, Map<String, dynamic> body) => _send(
+      () async => _client.patch(_uri(path), headers: await _headers, body: jsonEncode(body)));
 
   Future<TovoResponse> delete(String path) =>
-      _send(() => _client.delete(_uri(path), headers: _headers));
+      _send(() async => _client.delete(_uri(path), headers: await _headers));
 
   /// Envoie, avec un second essai sur coupure réseau.
   ///
@@ -65,8 +119,25 @@ class TovoApi {
   /// mobile à Niamey — affichait « Connexion perdue » et laissait le client
   /// appuyer une deuxième fois lui-même.
   Future<TovoResponse> _send(Future<http.Response> Function() request) async {
+    var jetonRenouvele = false;
+
     for (var essai = 1; ; essai++) {
       final resultat = await _tenter(request);
+
+      // Un 401 après vérification de l'expiration veut dire que le jeton est
+      // mort pendant le trajet — horloge décalée, requête lente. Le
+      // renouveler et rejouer une fois évite d'annoncer « session expirée » à
+      // quelqu'un qu'un simple aller-retour aurait reconnecté. Une seule
+      // fois : si le second échoue aussi, la session est réellement perdue.
+      final renouveler = _renouveler;
+      if (resultat != null &&
+          resultat.statusCode == 401 &&
+          renouveler != null &&
+          !jetonRenouvele) {
+        jetonRenouvele = true;
+        if (await renouveler()) continue;
+      }
+
       if (resultat != null) return resultat;
 
       if (essai >= 2) {
@@ -77,6 +148,23 @@ class TovoApi {
         );
       }
       await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
+  }
+
+  /// Renouvelle la session de force. Vrai si un nouveau jeton est en main.
+  static Future<bool> _renouvelerSupabase() async {
+    final auth = Supabase.instance.client.auth;
+    if (auth.currentSession == null) return false;
+    try {
+      return (await auth.refreshSession()).session != null;
+    } on AuthException {
+      // Refus net du serveur : la session est perdue pour de bon. On
+      // déconnecte pour que l'écran de connexion reprenne la main, plutôt que
+      // de laisser l'app buter sur des 401 qu'aucun geste ne résoudra.
+      await auth.signOut();
+      return false;
+    } on Exception {
+      return false;
     }
   }
 

@@ -65,6 +65,27 @@ class TovoPush {
     }
   }
 
+  /// Détache l'appareil du compte, à appeler AVANT `signOut`.
+  ///
+  /// Le jeton FCM appartient au téléphone, pas à la personne. Sans cet oubli,
+  /// le boutiquier qui se déconnecte continuerait de recevoir les commandes
+  /// de sa boutique — y compris sur un téléphone prêté ou revendu. La RLS
+  /// n'autorise à supprimer que ses propres jetons : d'où l'ordre, session
+  /// encore ouverte.
+  static Future<void> oublier() async {
+    if (!_initialise) return;
+    try {
+      final jeton = await FirebaseMessaging.instance.getToken();
+      if (jeton == null) return;
+      await Supabase.instance.client.from('push_tokens').delete().eq('token', jeton);
+    } on Exception catch (cause) {
+      // Un échec ici ne doit pas empêcher de se déconnecter : rester
+      // connecté contre son gré est pire que recevoir une notification de
+      // trop, que la purge côté serveur finira par éliminer.
+      debugPrint('[push] jeton non oublié : $cause');
+    }
+  }
+
   static Future<void> _envoyer(String jeton, String app) async {
     try {
       await Supabase.instance.client.rpc('register_push_token', params: {

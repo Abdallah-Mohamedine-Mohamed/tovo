@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -28,7 +30,7 @@ class OrderTracking extends StatefulWidget {
   State<OrderTracking> createState() => _OrderTrackingState();
 }
 
-class _OrderTrackingState extends State<OrderTracking> {
+class _OrderTrackingState extends State<OrderTracking> with WidgetsBindingObserver {
   RealtimeChannel? _canalCommande;
   RealtimeChannel? _canalLivreur;
 
@@ -48,13 +50,58 @@ class _OrderTrackingState extends State<OrderTracking> {
     super.initState();
     _statut = widget.component.str('status', 'pending');
     _livreur = widget.component.data['driver'] as Map<String, dynamic>?;
+    WidgetsBinding.instance.addObserver(this);
+    _relire();
     _abonner();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _desabonner();
     super.dispose();
+  }
+
+  /// Relit l'état réel de la commande.
+  ///
+  /// Le statut affiché venait du composant enregistré dans le message — une
+  /// PHOTO prise au moment où le backend a répondu. Le temps réel ne rattrape
+  /// que ce qui bouge pendant que l'écran est ouvert et abonné : tout ce qui
+  /// s'est passé app fermée, écran éteint ou réseau coupé était perdu pour
+  /// de bon. Le client rouvrait Tovo sur « en attente de confirmation » alors
+  /// que son repas était devant sa porte.
+  ///
+  /// D'où cette relecture à chaque montage, et à chaque retour au premier
+  /// plan : c'est elle qui rattrape le passé, l'abonnement ne fait que
+  /// suivre le présent.
+  Future<void> _relire() async {
+    if (_orderId.isEmpty) return;
+
+    try {
+      final etat = await Supabase.instance.client
+          .rpc('order_tracking', params: {'p_order_id': _orderId});
+
+      if (!mounted || etat is! Map) return;
+      final statut = etat['status'] as String?;
+      if (statut == null) return;
+
+      setState(() {
+        _statut = statut;
+        _livreur = (etat['driver'] as Map?)?.cast<String, dynamic>() ?? _livreur;
+      });
+
+      // Livrée pendant l'absence : plus rien à écouter, et l'abonnement
+      // ouvert coûterait de la batterie pour un événement qui ne viendra pas.
+      if (_termine.contains(statut)) _desabonner();
+    } on Exception {
+      // Réseau muet : la photo du message reste affichée, ce qui vaut mieux
+      // qu'une carte vide. Le prochain retour au premier plan réessaiera.
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState etat) {
+    if (etat == AppLifecycleState.resumed) unawaited(_relire());
   }
 
   String get _orderId => widget.component.str('order_id');

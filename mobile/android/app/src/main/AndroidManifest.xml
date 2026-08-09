@@ -5,6 +5,13 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Message vocal : dicter sa commande plutôt que la taper. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Sans cette ligne, RIEN ne sonne sur Android 13 et au-delà.
+         `requestPermission()` de Firebase ne peut accorder qu'une permission
+         déclarée : non déclarée, elle est refusée d'office, la méthode rend
+         `denied` sans rien afficher, et l'app abandonne avant même de
+         demander son jeton à FCM. Résultat mesuré : zéro jeton en base, donc
+         aucune notification de commande n'avait de destinataire. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="@string/app_name"
         android:name="${applicationName}"
@@ -53,6 +60,15 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- « Appeler le livreur ».
+             Depuis Android 11, une app ne voit pas les autres applications
+             installées sans le déclarer. Sans cette entrée, le composeur
+             téléphonique est invisible et `launchUrl('tel:…')` échoue sur un
+             appareil qui sait pourtant très bien téléphoner. -->
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+            <data android:scheme="tel"/>
         </intent>
     </queries>
 </manifest>

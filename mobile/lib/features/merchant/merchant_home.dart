@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../components/registry.dart';
 import '../../core/api.dart';
+import '../../core/deconnexion.dart';
 import '../../core/theme.dart';
 import 'merchant_controller.dart';
 import 'hours_editor.dart';
@@ -108,6 +111,16 @@ class _MerchantHomeState extends State<MerchantHome> {
             value: _c.ouverte,
             activeThumbColor: TovoTheme.success,
             onChanged: _c.boutiqueId == null ? null : (_) => _c.basculerOuverture(),
+          ),
+          // Derrière un menu, loin de l'interrupteur d'ouverture : les deux
+          // gestes se ressemblent trop pour cohabiter en plein écran.
+          PopupMenuButton<String>(
+            onSelected: (choix) {
+              if (choix == 'sortir') unawaited(confirmerDeconnexion(context));
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'sortir', child: Text('Se déconnecter')),
+            ],
           ),
         ],
       ),

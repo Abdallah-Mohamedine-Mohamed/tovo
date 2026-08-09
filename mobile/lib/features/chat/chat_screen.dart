@@ -788,7 +788,17 @@ class _ChatScreenState extends State<ChatScreen> {
           autofocus: true,
           decoration: const InputDecoration(
             hintText: 'Ex. : Yantala, derrière la pharmacie Al Nour',
-            helperText: 'Un repère que le livreur reconnaîtra',
+            // Dire lequel des deux fait foi.
+            //
+            // Le point GPS enregistré est celui où se trouve le téléphone
+            // MAINTENANT — c'est lui qui guide le livreur, le texte n'étant
+            // qu'un appoint. Quelqu'un qui commande depuis son bureau pour
+            // une livraison chez lui envoyait donc le livreur au bureau, sans
+            // que rien ne le prévienne. Tant qu'il n'y a pas de carte pour
+            // désigner un autre point, il faut au moins le dire.
+            helperText: 'Repère pour le livreur. Le point GPS enregistré est '
+                'celui où vous êtes en ce moment.',
+            helperMaxLines: 3,
           ),
         ),
         actions: [
