@@ -5,6 +5,11 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    // Lit google-services.json et en fait les ressources dont Firebase a
+    // besoin pour s'initialiser. Il choisit l'entrée correspondant à
+    // l'applicationId du flavor compilé — d'où l'importance que les trois
+    // identifiants figurent bien dans le fichier.
+    id("com.google.gms.google-services")
 }
 
 // ----------------------------------------------------------------------

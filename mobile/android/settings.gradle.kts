@@ -21,6 +21,13 @@ plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "8.9.1" apply false
     id("org.jetbrains.kotlin.android") version "2.1.0" apply false
+    // Sans ce plugin, `google-services.json` n'est qu'un fichier posé là.
+    // C'est LUI qui le transforme en ressources Android ; sans elles,
+    // `Firebase.initializeApp()` échoue au démarrage, l'app continue sans
+    // notifications — et sans rien dire. Résultat constaté : zéro jeton en
+    // base sur les trois apps, donc aucune notification n'avait de
+    // destinataire, quoi qu'envoie le serveur.
+    id("com.google.gms.google-services") version "4.4.2" apply false
 }
 
 include(":app")
