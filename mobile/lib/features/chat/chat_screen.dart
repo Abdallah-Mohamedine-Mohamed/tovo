@@ -79,10 +79,24 @@ class _ChatScreenState extends State<ChatScreen> {
   DateTime? _debutParole;
   Timer? _minuterieParole;
 
+  /// Prénom du client, pour le salut d'accueil. Nul tant qu'on ne l'a pas.
+  String? _prenom;
+
   @override
   void initState() {
     super.initState();
-    _accueil();
+    unawaited(_lirePrenom());
+    unawaited(_demarrer());
+  }
+
+  /// Le fil d'abord, la photo rescapée ensuite.
+  ///
+  /// L'ordre compte : la récupération ajoute un tour à la conversation, et
+  /// la reprise du fil, elle, la remplit depuis le serveur. Dans l'autre
+  /// sens, la photo récupérée serait écrasée avant même d'être vue.
+  Future<void> _demarrer() async {
+    await _accueil();
+    if (mounted) await _recupererPhotoPerdue();
   }
 
   @override
@@ -97,28 +111,62 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// Ce qu'on montre à l'ouverture.
   ///
-  /// Une commande en cours passe AVANT tout le reste : c'est la seule chose
-  /// que le client a en tête en rouvrant l'app. Jusqu'ici il retombait sur
-  /// la grille des catégories et devait demander où en était sa livraison.
+  /// Le fil d'abord, la commande en cours par-dessus.
+  ///
+  /// L'ordre inverse était en place, et il effaçait tout : dès qu'une
+  /// commande était en route, l'app s'ouvrait sur la seule carte de suivi et
+  /// `return` sautait la reprise du fil. La conversation qui avait SERVI à
+  /// passer cette commande disparaissait pendant toute la livraison — et le
+  /// client, lui, en concluait que ses échanges n'étaient pas gardés.
+  ///
+  /// Les deux ne s'excluent pas : on remet le fil, puis on pose le suivi à la
+  /// fin, là où le regard tombe.
   Future<void> _accueil() async {
     final commandes = await widget.api.get('/orders', query: {'limit': 5});
 
+    Map<String, dynamic>? enCours;
     if (commandes.ok) {
       final liste = (commandes.raw['orders'] as List?) ?? const [];
-      final enCours = liste.cast<Map<String, dynamic>>().where((o) {
+      enCours = liste.cast<Map<String, dynamic>>().where((o) {
         final s = '${o['status']}';
         return s != 'delivered' && s != 'cancelled';
-      }).toList();
-
-      if (enCours.isNotEmpty && mounted) {
-        await _appeler(() => widget.api.get('/orders/${enCours.first['id']}'));
-        return;
-      }
+      }).firstOrNull;
     }
 
     if (!mounted) return;
-    if (await _reprendreLaConversation()) return;
+    final filRepris = await _reprendreLaConversation();
+
+    if (enCours != null && mounted) {
+      await _appeler(() => widget.api.get('/orders/${enCours!['id']}'));
+      return;
+    }
+
+    if (filRepris) return;
     if (mounted) await _appeler(() => widget.api.get('/categories'));
+  }
+
+  /// Le prénom, pour le salut d'accueil.
+  ///
+  /// Le premier mot seulement : « Bonjour Abdallah » se dit, « Bonjour
+  /// Abdallah Mohamed Ibrahim » se lit — et déborde sur deux lignes.
+  Future<void> _lirePrenom() async {
+    try {
+      final moi = Supabase.instance.client.auth.currentUser?.id;
+      if (moi == null) return;
+
+      final data = await Supabase.instance.client
+          .from('profiles')
+          .select('full_name')
+          .eq('id', moi)
+          .maybeSingle();
+
+      final complet = ((data?['full_name'] as String?) ?? '').trim();
+      if (complet.isEmpty || !mounted) return;
+      setState(() => _prenom = complet.split(RegExp(r'\s+')).first);
+    } on Exception {
+      // Sans nom, le salut reste impersonnel. Ce n'est pas une raison pour
+      // afficher une erreur : personne n'est venu pour lire son prénom.
+    }
   }
 
   /// Recharge la dernière conversation. Vrai s'il y avait quelque chose.
@@ -230,19 +278,37 @@ class _ChatScreenState extends State<ChatScreen> {
   /// C'est aussi ici qu'on demande l'accès au micro, jamais pendant l'appui
   /// long : la boîte de dialogue Android interromprait le geste, et
   /// l'enregistrement démarrerait après coup, sans personne pour l'arrêter.
+  /// Un appui démarre, un appui envoie.
+  ///
+  /// Le maintien enfoncé a été retiré, pour deux raisons.
+  ///
+  /// La première est un défaut : dès que l'enregistrement commençait, la
+  /// barre de saisie était remplacée par l'affichage d'écoute — et le
+  /// détecteur de geste disparaissait de l'arbre avec elle. Le relâchement
+  /// n'atteignait donc plus personne : l'enregistrement continuait jusqu'à
+  /// la limite de durée, et l'application semblait figée.
+  ///
+  /// La seconde tient à l'usage : parler longtemps le doigt collé à l'écran
+  /// est pénible, et impossible si l'on veut faire autre chose en même
+  /// temps. Deux appuis coûtent un geste de plus et rendent la main.
   Future<void> _toucherLeMicro() async {
-    if (await VoixTovo.autorisation()) {
+    if (_enregistreLaVoix) {
+      await _envoyerLaParole();
+      return;
+    }
+
+    if (!await VoixTovo.autorisation()) {
       if (!mounted) return;
-      _messageAssistant('Maintenez le bouton pour parler, relâchez pour envoyer.');
+      _messageAssistant(
+        "Je n'ai pas accès au micro. Autorisez-le dans les réglages du "
+        'téléphone, ou écrivez votre demande.',
+        enErreur: true,
+      );
       return;
     }
 
     if (!mounted) return;
-    _messageAssistant(
-      "Je n'ai pas accès au micro. Autorisez-le dans les réglages du "
-      'téléphone, ou écrivez votre demande.',
-      enErreur: true,
-    );
+    await _demarrerLaParole();
   }
 
   void _messageAssistant(String texte, {bool enErreur = false}) {
@@ -300,10 +366,14 @@ class _ChatScreenState extends State<ChatScreen> {
     final duree = DateTime.now().difference(_debutParole ?? DateTime.now());
     setState(() => _enregistreLaVoix = false);
 
-    // Appui trop bref : c'est un geste manqué, pas une demande. Envoyer
-    // coûterait un appel au modèle pour du silence.
+    // Trop court pour contenir une phrase. Avec le maintien enfoncé, c'était
+    // un geste manqué qu'on ignorait en silence ; avec deux appuis, c'est
+    // quelqu'un qui a appuyé deux fois de suite — et qui doit savoir
+    // pourquoi rien n'est parti, sinon il recommence à l'identique.
     if (duree < VoixTovo.dureeMin) {
       await VoixTovo.annuler();
+      if (!mounted) return;
+      _messageAssistant("C'était trop court. Appuyez, parlez, puis appuyez à nouveau.");
       return;
     }
 
@@ -476,6 +546,69 @@ class _ChatScreenState extends State<ChatScreen> {
   // Recherche par photo
   // ------------------------------------------------------------------
 
+  /// Rattrape une photo prise juste avant qu'Android ne tue l'application.
+  ///
+  /// L'appareil photo est une activité séparée, et quand la mémoire manque —
+  /// le cas courant sur un téléphone d'entrée de gamme — le système détruit
+  /// Tovo pendant qu'elle est au premier plan. Au retour, l'application
+  /// redémarre : elle rouvre une conversation et la photo qu'on venait de
+  /// confirmer n'arrive nulle part. C'est très exactement ce qu'on observait
+  /// — « ça recharge sur une autre conversation et ne fait rien d'autre ».
+  ///
+  /// Android garde le fichier de côté ; encore faut-il le réclamer.
+  Future<void> _recupererPhotoPerdue() async {
+    try {
+      final perdue = await ImagePicker().retrieveLostData();
+      final fichier = perdue.file;
+      if (fichier == null || !mounted) return;
+      await _envoyerLaPhoto(fichier);
+    } on Exception catch (cause) {
+      debugPrint('[chat] photo perdue non récupérée : $cause');
+    }
+  }
+
+  /// Laisse choisir entre l'appareil photo et la galerie.
+  ///
+  /// Le bouton menait droit à l'appareil photo. Or cadrer un produit d'une
+  /// main, dans une boutique, est souvent raté — alors que la photo existe
+  /// déjà dans la galerie, ou peut être prise tranquillement avec
+  /// l'application appareil photo habituelle, qui a la mise au point et la
+  /// stabilisation du constructeur.
+  Future<void> _choisirLaSource() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      showDragHandle: true,
+      builder: (contexte) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text(
+                'Chercher par photo',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined, color: TovoTheme.teal),
+              title: const Text('Prendre une photo'),
+              onTap: () => Navigator.of(contexte).pop(ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: TovoTheme.teal),
+              title: const Text('Choisir dans la galerie'),
+              onTap: () => Navigator.of(contexte).pop(ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (source == null || !mounted) return;
+    await _chercherParPhoto(source);
+  }
+
   Future<void> _chercherParPhoto(ImageSource source) async {
     final fichier = await ImagePicker().pickImage(
       source: source,
@@ -486,7 +619,15 @@ class _ChatScreenState extends State<ChatScreen> {
       imageQuality: 75,
     );
     if (fichier == null || !mounted) return;
+    await _envoyerLaPhoto(fichier);
+  }
 
+  /// Téléverse la photo et la soumet à l'assistant.
+  ///
+  /// Séparé du choix de l'image pour que la récupération après redémarrage
+  /// emprunte exactement le même chemin : deux chemins d'envoi divergeraient
+  /// au premier correctif.
+  Future<void> _envoyerLaPhoto(XFile fichier) async {
     _ajouterTourUtilisateur('📷 Photo envoyée');
     setState(() => _charge = true);
 
@@ -962,7 +1103,17 @@ class _ChatScreenState extends State<ChatScreen> {
         onNouvelle: _nouvelleConversation,
       ),
       appBar: AppBar(
-        titleSpacing: 16,
+        // Explicite plutôt que le menu automatique de Flutter : trois traits
+        // en haut à gauche ne disent pas qu'il y a des conversations
+        // derrière. Celui-ci le dit, et le libellé au survol aussi.
+        leading: Builder(
+          builder: (context) => IconButton(
+            tooltip: 'Mes conversations',
+            icon: const Icon(Icons.forum_outlined),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
+        titleSpacing: 8,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -992,6 +1143,19 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
+          // Le salut d'accueil, et rien d'autre au-dessus du fil.
+          //
+          // Il ne survit pas au premier échange : une bannière permanente
+          // vole la place du contenu, et sur un téléphone la place est ce
+          // qu'on a de plus rare. Il disparaît donc dès que la conversation
+          // commence, sans que personne ne le remarque — c'est le but.
+          AnimatedSize(
+            duration: TovoTheme.ample,
+            curve: TovoTheme.courbe,
+            child: _tours.length <= 1
+                ? _Accueil(prenom: _prenom)
+                : const SizedBox(width: double.infinity),
+          ),
           Expanded(
             child: ListView.builder(
               controller: _scroll,
@@ -1019,11 +1183,9 @@ class _ChatScreenState extends State<ChatScreen> {
           _BarreDeSaisie(
             controller: _saisie,
             onSend: _envoyer,
-            onCamera: () => _chercherParPhoto(ImageSource.camera),
+            onCamera: () => unawaited(_choisirLaSource()),
             enregistre: _enregistreLaVoix,
             onParoleTouche: _toucherLeMicro,
-            onParoleDebut: _demarrerLaParole,
-            onParoleFin: _envoyerLaParole,
             onParoleAnnulee: _annulerLaParole,
           ),
         ],
@@ -1198,6 +1360,106 @@ class _TourVueState extends State<_TourVue> {
   }
 }
 
+/// Le point rouge de l'enregistrement, qui bat.
+///
+/// Un point fixe pourrait être un élément de décor. Un point qui pulse dit
+/// que quelque chose tourne en ce moment — c'est la seule preuve que le micro
+/// écoute, maintenant que le doigt ne reste plus posé dessus.
+class _PointQuiBat extends StatefulWidget {
+  const _PointQuiBat();
+
+  @override
+  State<_PointQuiBat> createState() => _PointQuiBatState();
+}
+
+class _PointQuiBatState extends State<_PointQuiBat>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween<double>(begin: 1, end: 0.25).animate(
+        CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+      ),
+      child: Container(
+        width: 10,
+        height: 10,
+        decoration: const BoxDecoration(
+          color: TovoTheme.danger,
+          shape: BoxShape.circle,
+        ),
+      ),
+    );
+  }
+}
+
+/// Le salut d'accueil.
+///
+/// Deux lignes, beaucoup d'air, et une hiérarchie franche : le nom en grand,
+/// la question en gris. L'écran s'ouvrait jusqu'ici directement sur une
+/// grille de tuiles — utile, mais qui ne s'adresse à personne.
+class _Accueil extends StatelessWidget {
+  const _Accueil({required this.prenom});
+
+  final String? prenom;
+
+  /// Le moment de la journée, à l'heure de Niamey.
+  ///
+  /// `DateTime.now()` suit le fuseau du téléphone, qui est le bon ici. Rien à
+  /// convertir : c'est le client qui regarde, pas le serveur.
+  String get _salut {
+    final h = DateTime.now().hour;
+    if (h < 5) return 'Bonsoir';
+    if (h < 17) return 'Bonjour';
+    return 'Bonsoir';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            prenom == null ? _salut : '$_salut $prenom',
+            style: const TextStyle(
+              fontSize: 30,
+              fontWeight: FontWeight.w700,
+              color: TovoTheme.teal,
+              height: 1.15,
+              // Les grandes tailles paraissent lâches au crénage par défaut ;
+              // le resserrer très légèrement les rend nettes.
+              letterSpacing: -0.8,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Que voulez-vous commander ?',
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w500,
+              color: TovoTheme.inkDoux,
+              height: 1.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _BarreDeSaisie extends StatelessWidget {
   const _BarreDeSaisie({
     required this.controller,
@@ -1205,8 +1467,6 @@ class _BarreDeSaisie extends StatelessWidget {
     required this.onCamera,
     required this.enregistre,
     required this.onParoleTouche,
-    required this.onParoleDebut,
-    required this.onParoleFin,
     required this.onParoleAnnulee,
   });
 
@@ -1217,10 +1477,10 @@ class _BarreDeSaisie extends StatelessWidget {
   /// Vrai pendant l'enregistrement : la barre change entièrement d'aspect,
   /// sinon l'utilisateur ne sait pas que le micro l'écoute.
   final bool enregistre;
-  /// Appui court : explique le geste, ou demande l'accès au micro.
+  /// Appuyer démarre l'enregistrement ; appuyer de nouveau l'envoie.
   final VoidCallback onParoleTouche;
-  final VoidCallback onParoleDebut;
-  final VoidCallback onParoleFin;
+
+  /// Renoncer à ce qui vient d'être dit.
   final VoidCallback onParoleAnnulee;
 
   /// Ce que voit l'utilisateur pendant qu'il parle.
@@ -1230,24 +1490,32 @@ class _BarreDeSaisie extends StatelessWidget {
   Widget _enEcoute() {
     return Row(
       children: [
-        const SizedBox(width: 8),
-        Container(
-          width: 10,
-          height: 10,
-          decoration: const BoxDecoration(color: TovoTheme.danger, shape: BoxShape.circle),
+        // Renoncer doit rester possible. Sans cette croix, la seule issue
+        // était d'envoyer ce qu'on venait de dire, même en cas d'erreur.
+        IconButton(
+          tooltip: 'Annuler',
+          onPressed: onParoleAnnulee,
+          icon: const Icon(Icons.close_rounded, color: TovoTheme.muted),
         ),
-        const SizedBox(width: 12),
+        const _PointQuiBat(),
+        const SizedBox(width: 10),
         const Expanded(
           child: Text(
-            'Je vous écoute… relâchez pour envoyer',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            'Je vous écoute…',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
           ),
         ),
-        Container(
-          width: 40,
-          height: 40,
-          decoration: const BoxDecoration(color: TovoTheme.teal, shape: BoxShape.circle),
-          child: const Icon(Icons.mic, size: 20, color: Colors.white),
+        // Le MÊME bouton qu'au repos, à la même place, qui a simplement
+        // changé de sens : appuyer une fois démarre, appuyer une fois envoie.
+        // Le déplacer ferait chercher le geste au moment de conclure.
+        GestureDetector(
+          onTap: onParoleTouche,
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: const BoxDecoration(color: TovoTheme.teal, shape: BoxShape.circle),
+            child: const Icon(Icons.arrow_upward, size: 20, color: Colors.white),
+          ),
         ),
       ],
     );
@@ -1259,9 +1527,14 @@ class _BarreDeSaisie extends StatelessWidget {
       top: false,
       child: Container(
         padding: const EdgeInsets.fromLTRB(8, 8, 12, 10),
+        // Plus de trait de séparation : la barre se détache du fil par une
+        // ombre très pâle, qui la fait flotter au-dessus au lieu de couper
+        // l'écran en deux.
         decoration: const BoxDecoration(
           color: Colors.white,
-          border: Border(top: BorderSide(color: TovoTheme.line)),
+          boxShadow: [
+            BoxShadow(color: Color(0x0A000000), blurRadius: 16, offset: Offset(0, -4)),
+          ],
         ),
         child: enregistre ? _enEcoute() : Row(
           children: [
@@ -1279,12 +1552,14 @@ class _BarreDeSaisie extends StatelessWidget {
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => onSend(),
                 decoration: InputDecoration(
-                  hintText: 'Que voulez-vous commander ?',
-                  hintStyle: const TextStyle(fontSize: 13, color: Color(0xFFAAAAAA)),
+                  // Le salut d'accueil pose déjà la question ; la répéter mot
+                  // pour mot juste en dessous sonnait comme un bégaiement.
+                  hintText: 'Demandez ce que vous cherchez…',
+                  hintStyle: const TextStyle(fontSize: 14, color: TovoTheme.muted),
                   filled: true,
-                  fillColor: const Color(0xFFF2F2F2),
+                  fillColor: TovoTheme.bloc,
                   contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(22),
                     borderSide: BorderSide.none,
@@ -1316,20 +1591,15 @@ class _BarreDeSaisie extends StatelessWidget {
                   );
                 }
 
-                // Maintenir pour parler, relâcher pour envoyer. Le geste est
-                // celui de WhatsApp, que tout le monde connaît ici — un
-                // appui-relâche à apprendre ferait échouer le premier essai.
+                // Un appui démarre, un appui envoie. Le maintien enfoncé a
+                // été retiré : la barre changeant d'aspect au démarrage, le
+                // détecteur de geste disparaissait avec elle et le
+                // relâchement n'atteignait plus rien.
                 return GestureDetector(
-                  // Un appui court doit répondre quelque chose. Sans `onTap`,
-                  // toucher le micro ne produisait rien — ni son, ni message,
-                  // ni vibration — et on en concluait que c'était cassé.
                   onTap: onParoleTouche,
-                  onLongPressStart: (_) => onParoleDebut(),
-                  onLongPressEnd: (_) => onParoleFin(),
-                  onLongPressCancel: onParoleAnnulee,
                   child: Container(
-                    width: 40,
-                    height: 40,
+                    width: 44,
+                    height: 44,
                     decoration: const BoxDecoration(
                       color: TovoTheme.teal,
                       shape: BoxShape.circle,

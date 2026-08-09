@@ -1,0 +1,178 @@
+module,categorie,slug,icone_actuelle,produits,boutiques,active
+,"Boutiques",boutiques-m2,,0,22,true
+"Boutiques","SOINS DE CHEVEUX",soins-de-cheveux-c175,,4,0,true
+"Boutiques","SOINS DU CORPS",soins-du-corps-c176,,17,0,true
+"Boutiques","COMPLEMENTS ALIMENTAIRES",complements-alimentaires-c177,,4,0,true
+"Boutiques","Demoi",demoi-c178,,1,0,false
+"Boutiques","Produits locaux",produits-locaux-c183,,6,0,true
+"Boutiques","Produits surgelé",produits-surgele-c193,,4,0,true
+"Boutiques","Snacks",snacks-c195,,3,0,true
+"Boutiques","Thé et Infusion",the-et-infusion-c196,,3,0,true
+"Boutiques","Parfum",parfum-c197,,8,0,true
+"Boutiques","Bijoux",bijoux-c198,,4,0,true
+"Boutiques","KFC",kfc-c3,,0,0,false
+"Boutiques","Hood",hood-c4,,1,0,false
+"Boutiques","CHEMISE",chemise-c61,,19,0,true
+"Boutiques","CHAUSSURES",chaussures-c62,,4,0,true
+"Boutiques","PAGNE/TISSU",pagne-tissu-c63,,0,0,true
+"Boutiques","MONTRE",montre-c64,,0,0,true
+"Boutiques","TELEPHONE & TABLETTE",telephone-tablette-c65,,0,0,true
+"Boutiques","ELECTRONIQUES",electroniques-c66,,33,0,true
+"Boutiques","ELECTROMENAGER",electromenager-c67,,23,0,true
+"Boutiques","PRODUITS POUR BEBE",produits-pour-bebe-c68,,0,0,true
+"Boutiques","Beauté et hygiène",beaute-et-hygiene-c69,,65,0,true
+"Boutiques","INFORMATIQUES",informatiques-c70,,22,0,true
+"Boutiques","JEUX VIDEO ET CONSOLES",jeux-video-et-consoles-c71,,32,0,true
+"Boutiques","ARTICLES DE SPORT",articles-de-sport-c72,,0,0,true
+"Boutiques","ACCESSOIRES DE TELEPHONE",accessoires-de-telephone-c105,,1,0,false
+"Boutiques","ACCESSOIRES AUTOMOBILE",accessoires-automobile-c106,,3,0,true
+"Boutiques","ACCESSOIRES DE TELEPHONE",accessoires-de-telephone-c114,,14,0,true
+"Boutiques","PULL-OVER",pull-over-c164,,4,0,true
+"Boutiques","T-SHIRT",t-shirt-c165,,27,0,true
+"Boutiques","BOISSONS GAZEUSE",boissons-gazeuse-c170,,7,0,true
+"Boutiques","BOISSONS NON GAZEUSE",boissons-non-gazeuse-c171,,14,0,true
+"Boutiques","BOISSONS ENERGISANTES",boissons-energisantes-c172,,9,0,true
+"Boutiques","PANINI",panini-c173,,0,0,false
+,"Restaurants",restaurants-m3,,0,31,true
+"Restaurants","LES GARNITURES",les-garnitures-c207,,0,0,true
+"Restaurants","QUESADILLAS",quesadillas-c187,,4,0,true
+"Restaurants","NEMS",nems-c189,,5,0,true
+"Restaurants","PLATS PANES",plats-panes-c204,,4,0,true
+"Restaurants","PLATS STEAK",plats-steak-c205,,2,0,true
+"Restaurants","MENDY",mendy-c206,,3,0,true
+"Restaurants","LOT PAR PIECES",lot-par-pieces-c8,,7,0,true
+"Restaurants","BOX POULET PANE",box-poulet-pane-c9,,27,0,true
+"Restaurants","SALADE COMPOSEE",salade-composee-c10,,25,0,true
+"Restaurants","PLATS",plats-c12,,160,0,true
+"Restaurants","SANDWICH",sandwich-c14,,47,0,true
+"Restaurants","FRITES",frites-c22,,6,0,true
+"Restaurants","ALLOCO",alloco-c23,,5,0,true
+"Restaurants","TUKUNYA",tukunya-c41,,6,0,true
+"Restaurants","CHAWARMA",chawarma-c42,,51,0,true
+"Restaurants","BOISSONS CHAUDES",boissons-chaudes-c51,,27,0,true
+"Restaurants","TACOS",tacos-c120,,33,0,true
+"Restaurants","BURGERS",burgers-c122,,62,0,true
+"Restaurants","DURUM",durum-c123,,6,0,true
+"Restaurants","PIZZA",pizza-c124,,77,0,true
+"Restaurants","POULET",poulet-c125,,23,0,true
+"Restaurants","TENDERS",tenders-c126,,7,0,true
+"Restaurants","NUGGETS",nuggets-c127,,12,0,true
+"Restaurants","CHICKEN WINGS",chicken-wings-c128,,11,0,true
+"Restaurants","MENU WINGS",menu-wings-c129,,8,0,true
+"Restaurants","MENU NUGGET",menu-nugget-c130,,8,0,true
+"Restaurants","BOISSONS",boissons-c131,,138,0,true
+"Restaurants","MILKSHAKES",milkshakes-c137,,50,0,true
+"Restaurants","SMOOTHIES",smoothies-c138,,28,0,true
+"Restaurants","SPECIAL BOBA",special-boba-c139,,44,0,true
+"Restaurants","THE GLACE",the-glace-c140,,27,0,true
+"Restaurants","THE AU LAIT",the-au-lait-c141,,24,0,true
+"Restaurants","COCKTAILS",cocktails-c142,,23,0,true
+"Restaurants","PIZZA SPECIALES",pizza-speciales-c152,,12,0,true
+"Restaurants","PIZZA CLASSIQUES",pizza-classiques-c153,,12,0,true
+"Restaurants","PETIT DEJEUNER",petit-dejeuner-c154,,35,0,true
+"Restaurants","POUTINES",poutines-c155,,12,0,true
+"Restaurants","SANDWICH PARISIEN",sandwich-parisien-c156,,10,0,true
+"Restaurants","SANDWICH MIAM",sandwich-miam-c157,,6,0,true
+"Restaurants","MAC N CHEESE",mac-n-cheese-c158,,10,0,true
+"Restaurants","CREPES",crepes-c159,,19,0,true
+"Restaurants","FRAPPE",frappe-c160,,0,0,true
+"Restaurants","BUBBLE WHAFFLE",bubble-whaffle-c161,,6,0,true
+"Restaurants","FROZEN YOGURT",frozen-yogurt-c162,,1,0,true
+"Restaurants","AMUSES BOUCHES",amuses-bouches-c166,,4,0,true
+"Restaurants","ENTREES",entrees-c167,,46,0,true
+"Restaurants","GRILLADES",grillades-c168,,100,0,true
+"Restaurants","DESSERTS",desserts-c169,,22,0,true
+"Restaurants","BEIGNET",beignet-c174,,7,0,true
+,"Grocery",grocery-m4,,0,5,true
+"Grocery","BOULANGERIE",boulangerie-c83,,0,0,true
+"Grocery","PETIT DEJENER",petit-dejener-c84,,68,0,true
+"Grocery","BISCUITS, BONBONS ET CHOCOLATS",biscuits-bonbons-et-chocolats-c85,,51,0,true
+"Grocery","EAUX",eaux-c86,,0,0,true
+"Grocery","JUS ET SODA",jus-et-soda-c87,,4,0,true
+"Grocery","BOISSONS ALCOOLISEES",boissons-alcoolisees-c88,,0,0,true
+"Grocery","FRIUTS ET LEGUMES",friuts-et-legumes-c89,,0,0,true
+"Grocery","RIZ, PATES ET FECULENTS",riz-pates-et-feculents-c90,,8,0,true
+"Grocery","VIANDE ET POISSON FRIS",viande-et-poisson-fris-c91,,0,0,true
+"Grocery","LAITS, BEURRES ET FROMAGES",laits-beurres-et-fromages-c92,,0,0,true
+"Grocery","OEUFS, SUCRE ET FARINE",oeufs-sucre-et-farine-c93,,17,0,true
+"Grocery","HUILES, EPICES ET SAUCES",huiles-epices-et-sauces-c94,,12,0,true
+"Grocery","CONSERVES",conserves-c95,,7,0,true
+"Grocery","SURGELE",surgele-c96,,2,0,true
+"Grocery","BEAUTE ET HYGIENE",beaute-et-hygiene-c97,,25,0,true
+"Grocery","COUCHE ET HYGIENE BEBES",couche-et-hygiene-bebes-c98,,0,0,true
+"Grocery","ALIMENTATION POUR BEBES",alimentation-pour-bebes-c99,,3,0,true
+"Grocery","ENTRETIEN MAISON",entretien-maison-c100,,0,0,true
+"Grocery","JOUETS ET JEUX",jouets-et-jeux-c101,,0,0,true
+"Grocery","BAZAR ELECTROMENAGER",bazar-electromenager-c102,,0,0,true
+"Grocery","ANIMALRIE",animalrie-c103,,0,0,true
+"Grocery","CUISINE",cuisine-c104,,0,0,true
+"Grocery","THE ET CAFE",the-et-cafe-c163,,0,0,true
+,"Parapharmacies",parapharmacies-m5,,0,1,true
+"Parapharmacies","ANTIPALUDEEN",antipaludeen-c52,,9,0,true
+"Parapharmacies","ANTIBIOTIQUE",antibiotique-c53,,0,0,true
+"Parapharmacies","BEBE",bebe-c54,,0,0,true
+"Parapharmacies","HYGIENE ET SANTE",hygiene-et-sante-c55,,3,0,true
+"Parapharmacies","ANTI-INFLAMATOIRE",anti-inflamatoire-c56,,4,0,true
+"Parapharmacies","DERMATOLOGIE",dermatologie-c57,,0,0,true
+"Parapharmacies","RHUME ET TOUX",rhume-et-toux-c58,,1,0,true
+"Parapharmacies","ANTIDIABETIQUE",antidiabetique-c59,,0,0,true
+"Parapharmacies","TENSION",tension-c60,,0,0,true
+,"Coursier",coursier-m6,,0,0,true
+,"Tovo Shop",tovo-shop-m7,,0,0,true
+,"Tovo market",tovo-market-m8,,0,4,true
+"Tovo market","CHAISE ET BACHE",chaise-et-bache-c179,,6,0,true
+"Tovo market","TABLE",table-c180,,2,0,true
+"Tovo market","PRODUITS ALIMENTAIRES",produits-alimentaires-c107,,12,0,true
+"Tovo market","MULTIMEDIA",multimedia-c108,,25,0,true
+"Tovo market","CUISINE",cuisine-c109,,7,0,true
+"Tovo market","BRICOLAGE",bricolage-c110,,5,0,true
+"Tovo market","ARTICLES DE SPORT",articles-de-sport-c111,,13,0,true
+"Tovo market","MODE",mode-c112,,22,0,true
+"Tovo market","PAPIERTERI & BUREAU",papierteri-bureau-c113,,3,0,true
+"Tovo market","VIANDE ET VOLAILLES",viande-et-volailles-c143,,13,0,true
+"Tovo market","EPICERIE",epicerie-c144,,2,0,true
+"Tovo market","LEGUMES",legumes-c145,,7,0,true
+"Tovo market","FRUITS",fruits-c146,,10,0,true
+"Tovo market","PRODUITS LOCAUX",produits-locaux-c147,,0,0,true
+"Tovo market","GANI GAZ",gani-gaz-c148,,2,0,true
+"Tovo market","SONYHI GAZ",sonyhi-gaz-c149,,2,0,true
+"Tovo market","ORIBA GAZ",oriba-gaz-c150,,2,0,true
+"Tovo market","ZAMANI GAZ",zamani-gaz-c151,,2,0,true
+,"Kasuwa 1",kasuwa-1-m9,,0,1,true
+"Kasuwa 1","VIANDE ET VOLAILLES",viande-et-volailles-c115,,14,0,true
+"Kasuwa 1","EPICERIE",epicerie-c116,,0,0,true
+"Kasuwa 1","LEGUMES",legumes-c117,,1,0,true
+"Kasuwa 1","FRUITS",fruits-c118,,1,0,true
+"Kasuwa 1","PRODUITS LOCAUX",produits-locaux-c119,,0,0,true
+,"Repas",repas,🍛,0,0,true
+"Repas","Plats locaux",plats-locaux,🍲,0,0,true
+"Repas","Grillades",grillades,🔥,0,0,true
+"Repas","Riz & pâtes",riz-pates,🍚,0,0,true
+"Repas","Petit-déjeuner",petit-dejeuner,☕,0,0,true
+"Repas","Fast-food",fast-food,🍔,0,0,true
+,"Kasuwa",kasuwa-m10,,0,1,true
+"Kasuwa","VIANDE ET VOLAILLES",viande-et-volailles-c132,,13,0,true
+"Kasuwa","EPICERIE",epicerie-c133,,16,0,true
+"Kasuwa","LEGUMES",legumes-c134,,7,0,true
+"Kasuwa","FRUITS",fruits-c135,,13,0,true
+"Kasuwa","PRODUITS LOCAUX",produits-locaux-c136,,0,0,true
+,"Street-food",street-food-m11,,0,4,true
+"Street-food","SANDWICH",sandwich-c181,,10,0,true
+"Street-food","PLAT",plat-c182,,14,0,true
+"Street-food","GRILLADES",grillades-c184,,8,0,true
+"Street-food","PETIT DEJEUNER",petit-dejeuner-c185,,3,0,true
+"Street-food","BOISSONS",boissons-c186,,6,0,true
+,"Gaz",gaz-m12,,0,1,true
+,"Billetterie Evènements",billetterie-evenements-m13,,0,7,true
+"Billetterie Evènements","Ticket",ticket-c190,,4,0,true
+"Billetterie Evènements","Ticket Vip",ticket-vip-c191,,3,0,false
+"Billetterie Evènements","Ticket VVIP",ticket-vvip-c192,,1,0,false
+"Billetterie Evènements","CAPACITY",capacity-c194,,1,0,false
+,"Épicerie",epicerie,🛒,0,0,true
+,"Fruits & légumes",fruits-legumes,🥬,0,0,true
+,"Boissons",boissons,🥤,0,0,true
+,"Boulangerie",boulangerie,🥖,0,0,true
+,"Pharmacie",pharmacie,💊,0,0,true
+,"Viande & poisson",viande-poisson,🍖,0,0,true
+,"Électronique",electronique,🔌,0,0,true
+,"Maison",maison,🏠,0,0,true

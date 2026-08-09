@@ -48,6 +48,15 @@ dependencies:
   # d'AAC, et le réseau nigérien ne pardonne pas la différence.
   record: ^6.2.1
 
+  # Icônes de catégories, dessinées et non photographiées.
+  #
+  # Vectorielles plutôt que PNG : ces neuf icônes sont des aplats de couleur
+  # sans dégradé ni ombre, exactement le cas où le SVG gagne — 400 octets par
+  # fichier contre 6 Ko en PNG @3x, et net à n'importe quelle taille, y
+  # compris sur les écrans à forte densité que le catalogue de demain
+  # utilisera.
+  flutter_svg: ^2.0.10
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -55,6 +64,15 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # Icônes de catégories embarquées plutôt que téléchargées.
+  #
+  # Ce sont les neuf premières formes que voit le client en ouvrant Tovo :
+  # elles doivent être là avant le réseau, pas après. Les neuf fichiers
+  # pèsent moins de 4 Ko au total — les charger depuis le serveur coûterait
+  # neuf allers-retours pour économiser un millième de l'APK.
+  assets:
+    - assets/icons/categories/
 
   # DM Sans, embarquée et non chargée à l'exécution.
   #

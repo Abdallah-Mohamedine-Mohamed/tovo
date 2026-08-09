@@ -17,14 +17,46 @@ class TovoTheme {
   static const Color success = Color(0xFF10B981);
   static const Color danger = Color(0xFFE74C3C);
 
+  // -------------------------------------------------------------------
+  // Surfaces
+  // -------------------------------------------------------------------
+  // Ce qui donnait à l'application son air de logiciel de bureau : chaque
+  // bloc cerné d'un trait gris. Un trait dit « ceci est une boîte » ; un
+  // fond légèrement teinté dit « ceci va ensemble », ce qui est presque
+  // toujours l'intention réelle. On sépare donc par la couleur et par
+  // l'espace, et on garde les traits pour les rares cas où une frontière
+  // compte vraiment.
+
+  /// Fond des blocs posés sur le blanc. Assez proche pour ne pas découper
+  /// l'écran, assez distinct pour se lire sans bordure.
+  static const Color bloc = Color(0xFFF4F5F4);
+
+  /// Le même, au contact : ce qu'on voit sous le doigt.
+  static const Color blocPresse = Color(0xFFE9EBEA);
+
+  /// Texte secondaire assez sombre pour rester lisible en plein soleil —
+  /// `muted` disparaît sur un écran de téléphone dehors, à Niamey.
+  static const Color inkDoux = Color(0xFF5F6360);
+
+  /// Ombre unique de l'application.
+  ///
+  /// Très diffuse et très pâle : elle ne doit pas se voir, seulement
+  /// détacher. Une ombre qu'on remarque est une ombre trop forte.
+  static const List<BoxShadow> ombre = [
+    BoxShadow(color: Color(0x0D000000), blurRadius: 18, offset: Offset(0, 4)),
+  ];
+
   /// Déclarée dans pubspec.yaml et embarquée dans l'app.
   ///
   /// Une seule police pour les trois flavors : le client, le livreur et le
   /// boutiquier doivent avoir l'air de venir du même endroit.
   static const String fontFamily = 'DM Sans';
 
-  static const double radiusCard = 16;
-  static const double radiusChip = 12;
+  /// Rayons généreux, dans l'esprit des interfaces de Google aujourd'hui.
+  /// 16 restait anguleux à côté d'un contenu aéré ; 22 arrondit franchement
+  /// sans virer à la pastille.
+  static const double radiusCard = 22;
+  static const double radiusChip = 14;
   static const double gap = 12;
 
   // -------------------------------------------------------------------

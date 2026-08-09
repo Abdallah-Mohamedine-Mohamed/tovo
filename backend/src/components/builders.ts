@@ -32,6 +32,14 @@ export function envelope(content: string, components: Component[] = []): ChatEnv
 export interface CategoryRow {
   id: string;
   name: string;
+  /**
+   * Clé de l'icône embarquée dans l'application.
+   *
+   * Ni l'UUID ni le nom ne conviennent : l'un oblige à republier l'app si la
+   * base est réamorcée, l'autre change dès qu'on renomme une catégorie.
+   * Absent sur les rayons de boutique, qui n'ont pas d'icône dédiée.
+   */
+  slug?: string | null;
   icon: string | null;
   image_url: string | null;
   /**
@@ -55,6 +63,7 @@ export function categoryGrid(items: CategoryRow[], title = 'Que cherchez-vous ?'
         name: c.name,
         icon: c.icon,
         image_url: c.image_url,
+        ...(c.slug ? { slug: c.slug } : {}),
         ...(c.merchant_id ? { merchant_id: c.merchant_id } : {}),
         ...(c.produits != null ? { produits: c.produits } : {}),
       })),
