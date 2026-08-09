@@ -62,6 +62,35 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^5.0.0
 
+  # Génère les icônes de lancement pour toutes les densités Android et iOS.
+  # Outil de développement uniquement : il produit des fichiers, il n'entre
+  # pas dans l'application.
+  flutter_launcher_icons: ^0.14.1
+
+# Icônes de lancement.
+#
+# LE SYMBOLE, ET NON LE LOGOTYPE.
+#
+# Le fichier de marque porte le mot « TOVO » en entier. Sur une grille
+# d'accueil, une icône fait douze millimètres : le mot y occuperait trois
+# millimètres de large et ne se lirait pas. C'est pourquoi Uber affiche un
+# carré et non son nom.
+#
+# Les deux images sont produites par test/generer_icone_test.dart, à partir
+# de la même géométrie que le symbole affiché dans l'application — une
+# seconde copie des coordonnées finirait par diverger.
+#
+# Le fond teal est déclaré ici plutôt que peint dans l'image : Android
+# découpe l'icône selon la forme choisie par le constructeur — ronde,
+# carrée, en goutte — et seul le centre survit à coup sûr.
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/branding/icone-tovo.png
+  adaptive_icon_background: "#006666"
+  adaptive_icon_foreground: assets/branding/icone-tovo-premier-plan.png
+  remove_alpha_ios: true
+
 flutter:
   uses-material-design: true
 

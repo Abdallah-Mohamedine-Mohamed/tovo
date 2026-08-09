@@ -88,12 +88,12 @@ class _TiroirConversationsState extends State<TiroirConversations> {
                   const MarqueTovo(taille: 26),
                   const SizedBox(width: 10),
                   const Text(
-                    'tovo',
+                    'TOVO',
                     style: TextStyle(
-                      fontSize: 20,
+                      fontSize: 19,
                       fontWeight: FontWeight.w800,
                       color: TovoTheme.teal,
-                      letterSpacing: -0.5,
+                      letterSpacing: 1.1,
                     ),
                   ),
                 ],

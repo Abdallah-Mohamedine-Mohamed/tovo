@@ -428,7 +428,10 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
                 nom: (boutique?['name'] as String?) ??
                     (course['merchant_name'] as String?),
                 repere: (pickup?['hint'] as String?) ?? (boutique?['hint'] as String?),
-                telephone: boutique?['phone'] as String?,
+                // Sur une course coursier il n'y a pas de boutique : le
+                // contact du point de retrait est celui qui remet le colis.
+                telephone: (pickup?['contact'] as String?) ??
+                    boutique?['phone'] as String?,
                 lat: _nombre(pickup?['lat'] ?? boutique?['lat']),
                 lng: _nombre(pickup?['lng'] ?? boutique?['lng']),
                 actif: !enRouteVersClient,
@@ -439,7 +442,10 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
                 titre: 'Livrer',
                 nom: client?['name'] as String?,
                 repere: dropoff['hint'] as String?,
-                telephone: client?['phone'] as String?,
+                // Pour un colis, celui qui commande n'est presque jamais
+                // celui qui reçoit : le contact de destination prime.
+                telephone: (dropoff['contact'] as String?) ??
+                    client?['phone'] as String?,
                 lat: _nombre(dropoff['lat']),
                 lng: _nombre(dropoff['lng']),
                 actif: enRouteVersClient,

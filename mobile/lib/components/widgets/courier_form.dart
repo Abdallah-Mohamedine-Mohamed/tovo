@@ -47,6 +47,14 @@ class _CourierFormState extends State<CourierForm> {
   late final TextEditingController _arriveeHint =
       TextEditingController(text: _arrivee.hint);
 
+  /// Le numéro de celui qui reçoit le colis.
+  ///
+  /// Obligatoire, et c'est le seul champ qui l'est en plus des deux points.
+  /// Un livreur devant une porte close sans numéro à appeler repart avec le
+  /// paquet, et la course est perdue pour tout le monde.
+  late final TextEditingController _contactArrivee =
+      TextEditingController(text: widget.component.map('dropoff')['contact'] as String? ?? '');
+
   late String _colis = widget.component.str('parcel', 'small');
   bool _immediat = true;
   bool _localisationEnCours = false;
@@ -64,8 +72,18 @@ class _CourierFormState extends State<CourierForm> {
   void dispose() {
     _departHint.dispose();
     _arriveeHint.dispose();
+    _contactArrivee.dispose();
     super.dispose();
   }
+
+  /// Un numéro nigérien utilisable tel quel.
+  ///
+  /// On accepte les espaces et l'indicatif : les gens les écrivent comme ils
+  /// les lisent. Huit chiffres au minimum une fois nettoyé — en dessous, ce
+  /// n'est pas un numéro, et le découvrir devant la porte est trop tard.
+  static String _chiffres(String brut) => brut.replaceAll(RegExp(r'[^\d]'), '');
+
+  bool get _contactValide => _chiffres(_contactArrivee.text).length >= 8;
 
   Future<void> _utiliserMaPosition(_PointColis point) async {
     setState(() => _localisationEnCours = true);
@@ -90,7 +108,7 @@ class _CourierFormState extends State<CourierForm> {
   bool get _pretAEnvoyer {
     _depart.hint = _departHint.text;
     _arrivee.hint = _arriveeHint.text;
-    return _depart.complet && _arrivee.complet;
+    return _depart.complet && _arrivee.complet && _contactValide;
   }
 
   void _envoyer() {
@@ -100,6 +118,7 @@ class _CourierFormState extends State<CourierForm> {
     widget.onInteraction(TovoInteraction('submit_courier', {
       'pickup': _depart.toJson(),
       'dropoff': _arrivee.toJson(),
+      'dropoff_contact': _contactArrivee.text.trim(),
       'parcel': _colis,
       'scheduled_for': _immediat ? null : 'later',
     }));
@@ -141,6 +160,30 @@ class _CourierFormState extends State<CourierForm> {
             occupe: _localisationEnCours,
             onPosition: () => _utiliserMaPosition(_arrivee),
             onChanged: () => setState(() {}),
+          ),
+
+          // Juste sous le point de livraison, parce que c'est la même
+          // question : où, et chez qui.
+          const SizedBox(height: 12),
+          TextField(
+            controller: _contactArrivee,
+            keyboardType: TextInputType.phone,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              labelText: 'Téléphone du destinataire',
+              hintText: '90 00 00 00',
+              helperText: _contactValide
+                  ? 'Le livreur pourra l’appeler en arrivant.'
+                  : 'Obligatoire : sans numéro, le livreur repart avec le colis.',
+              helperMaxLines: 2,
+              prefixIcon: const Icon(Icons.call_outlined, size: 20),
+              filled: true,
+              fillColor: TovoTheme.bloc,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
+                borderSide: BorderSide.none,
+              ),
+            ),
           ),
 
           const Divider(height: 28),

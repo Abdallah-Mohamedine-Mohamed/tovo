@@ -44,6 +44,16 @@ const courierSchema = z.object({
   payment_method: z.enum(['cash', 'mobile_money']).default('cash'),
   scheduled_for: z.string().datetime().nullable().default(null),
   parcel_note: z.string().max(300).nullable().default(null),
+  /**
+   * À qui remettre le colis.
+   *
+   * Obligatoire, contrairement à tout le reste : sans numéro, un livreur
+   * arrivé devant une porte close repart avec le paquet. Le repère amène
+   * dans le bon quartier, le téléphone fait les cinquante derniers mètres.
+   */
+  dropoff_contact: z.string().min(6).max(30),
+  /** Chez qui le prendre, si ce n'est pas l'expéditeur lui-même. */
+  pickup_contact: z.string().max(30).nullable().default(null),
 });
 
 const createOrderSchema = z.discriminatedUnion('type', [deliverySchema, courierSchema]);
@@ -81,6 +91,8 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
             p_payment: body.data.payment_method,
             p_scheduled_for: body.data.scheduled_for,
             p_parcel_note: body.data.parcel_note,
+            p_dropoff_contact: body.data.dropoff_contact,
+            p_pickup_contact: body.data.pickup_contact,
           });
 
     if (error) {

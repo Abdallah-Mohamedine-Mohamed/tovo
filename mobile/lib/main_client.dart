@@ -55,7 +55,7 @@ class TovoClientApp extends StatelessWidget {
       theme: TovoTheme.build(),
       home: AuthGate(
         appPush: 'client',
-        titre: 'tovo',
+        titre: 'TOVO',
         sousTitre: 'Livraison, coursier, comparateur de prix à Niamey.',
         child: () => ChatScreen(api: TovoApi()),
       ),

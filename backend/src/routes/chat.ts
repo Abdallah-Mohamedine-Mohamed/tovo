@@ -95,6 +95,39 @@ function interactionEnMessage(action: string, payload: Record<string, unknown>):
   }
 }
 
+/**
+ * Ce que le client relira dans son historique.
+ *
+ * Distinct de la consigne envoyée au modèle : celle-ci contient des
+ * identifiants, des chemins de fichiers et des instructions à la deuxième
+ * personne. Enregistrée telle quelle, elle réapparaissait dans le fil à la
+ * réouverture de la conversation — « J'ai envoyé une photo, cherche ce
+ * produit. image_path : a7b7d19d-84e7-460e… » dans une bulle censée être la
+ * parole du client.
+ *
+ * `null` quand la consigne est déjà lisible : un « Montre-moi mon panier »
+ * n'a pas besoin d'être reformulé.
+ */
+function libelleLisible(action: string, payload: Record<string, unknown>): string | null {
+  switch (action) {
+    case 'search_by_image':
+      return '📷 Photo envoyée';
+    case 'select_category':
+    case 'select_product':
+    case 'select_merchant':
+    case 'add_to_cart':
+    case 'remove_from_cart':
+      // Ces actions portent un UUID que personne ne veut relire. Le libellé
+      // exact du produit n'est pas connu ici, mais l'intention suffit à
+      // rendre le fil compréhensible.
+      return null;
+    case 'quick_reply':
+      return String(payload.label ?? payload.value ?? '');
+    default:
+      return null;
+  }
+}
+
 export async function chatRoutes(app: FastifyInstance): Promise<void> {
   /**
    * La dernière conversation, pour la reprendre à l'ouverture.
@@ -239,11 +272,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         : interactionEnMessage(body.data.interaction!.action, body.data.interaction!.payload);
 
     try {
+      // Ce que le client relira. Le vocal n'a pas de texte du tout, et la
+      // photo n'a qu'un chemin de fichier : sans ce libellé, l'historique se
+      // remplissait de consignes techniques.
+      const messagePublic = body.data.audio
+        ? '🎤 Message vocal'
+        : body.data.interaction
+          ? libelleLisible(body.data.interaction.action, body.data.interaction.payload)
+          : null;
+
       const resultat = await orchestrate({
         db,
         userId,
         conversationId,
         message,
+        ...(messagePublic ? { messagePublic } : {}),
         clientMessageId: body.data.client_message_id,
         ...(body.data.audio ? { audio: body.data.audio } : {}),
         position: body.data.context,

@@ -38,6 +38,50 @@ double _balayage(double de, double a) {
   return d;
 }
 
+/// Trace le symbole sur un canevas quelconque.
+///
+/// Publique parce que l'icône de lancement se fabrique avec — un générateur
+/// qui recopierait les coordonnées créerait une seconde vérité, et les deux
+/// dessins divergeraient au premier ajustement.
+///
+/// [occupation] est la part du carré que remplit le symbole. 1 le colle aux
+/// bords ; les icônes adaptatives d'Android ont besoin de marge, la forme
+/// finale étant découpée par le constructeur.
+void peindreSymboleTovo(
+  Canvas canvas,
+  Size size, {
+  required Color couleur,
+  double rotation = 0,
+  double occupation = 1,
+}) {
+  // Le SVG est dessiné dans un carré de 160 : on met à l'échelle une fois
+  // plutôt que de convertir chaque coordonnée.
+  final echelle = size.shortestSide / 160 * occupation;
+  canvas.save();
+  canvas.translate(size.width / 2, size.height / 2);
+  canvas.rotate(rotation * 2 * math.pi);
+  canvas.scale(echelle);
+  canvas.translate(-_centre.dx, -_centre.dy);
+
+  final trait = Paint()
+    ..color = couleur
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 5.8
+    ..strokeCap = StrokeCap.round;
+
+  final plein = Paint()..color = couleur;
+  final boite = Rect.fromCircle(center: _centre, radius: _rayon);
+
+  for (final arc in _arcs) {
+    final debut = _angle(arc[0]);
+    final fin = _angle(arc[1]);
+    canvas.drawArc(boite, debut, _balayage(debut, fin), false, trait);
+    canvas.drawCircle(arc[1], 15.2, plein);
+  }
+
+  canvas.restore();
+}
+
 class _SymboleTovo extends CustomPainter {
   const _SymboleTovo({required this.couleur, required this.rotation});
 
@@ -47,34 +91,8 @@ class _SymboleTovo extends CustomPainter {
   final double rotation;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    // Le SVG est dessiné dans un carré de 160 : on met à l'échelle une fois
-    // plutôt que de convertir chaque coordonnée.
-    final echelle = size.shortestSide / 160;
-    canvas.save();
-    canvas.translate(size.width / 2, size.height / 2);
-    canvas.rotate(rotation * 2 * math.pi);
-    canvas.scale(echelle);
-    canvas.translate(-_centre.dx, -_centre.dy);
-
-    final trait = Paint()
-      ..color = couleur
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 5.8
-      ..strokeCap = StrokeCap.round;
-
-    final plein = Paint()..color = couleur;
-    final boite = Rect.fromCircle(center: _centre, radius: _rayon);
-
-    for (final arc in _arcs) {
-      final debut = _angle(arc[0]);
-      final fin = _angle(arc[1]);
-      canvas.drawArc(boite, debut, _balayage(debut, fin), false, trait);
-      canvas.drawCircle(arc[1], 15.2, plein);
-    }
-
-    canvas.restore();
-  }
+  void paint(Canvas canvas, Size size) =>
+      peindreSymboleTovo(canvas, size, couleur: couleur, rotation: rotation);
 
   @override
   bool shouldRepaint(_SymboleTovo ancien) =>

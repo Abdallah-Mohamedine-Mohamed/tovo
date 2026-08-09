@@ -932,6 +932,9 @@ class _ChatScreenState extends State<ChatScreen> {
           'pickup': {'lat': depart['lat'], 'lng': depart['lng']},
           'dropoff_hint': arrivee!['hint'],
           'dropoff': {'lat': arrivee['lat'], 'lng': arrivee['lng']},
+          // Sans lui le serveur refuse : c'est par ce numéro que le livreur
+          // joint le destinataire une fois sur place.
+          'dropoff_contact': p['dropoff_contact'] ?? '',
           'parcel': p['parcel'] ?? 'small',
           'payment_method': paiement,
         }));
@@ -1137,13 +1140,17 @@ class _ChatScreenState extends State<ChatScreen> {
         onNouvelle: _nouvelleConversation,
       ),
       appBar: AppBar(
-        // Explicite plutôt que le menu automatique de Flutter : trois traits
-        // en haut à gauche ne disent pas qu'il y a des conversations
-        // derrière. Celui-ci le dit, et le libellé au survol aussi.
+        // Les trois traits, et rien d'autre.
+        //
+        // J'avais mis une icône de conversation, en me disant qu'elle
+        // annoncerait mieux ce qu'il y a derrière. C'était une erreur : le
+        // menu à trois traits est le seul symbole que tout le monde
+        // reconnaît sans y penser, et ce qu'on gagne à être explicite ne
+        // vaut pas ce qu'on perd en habitude.
         leading: Builder(
           builder: (context) => IconButton(
             tooltip: 'Mes conversations',
-            icon: const Icon(Icons.forum_outlined),
+            icon: const Icon(Icons.menu_rounded),
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
@@ -1153,12 +1160,16 @@ class _ChatScreenState extends State<ChatScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              'tovo',
+              // « TOVO » en capitales, comme le logo. Le minuscule était mon
+              // interprétation, pas la marque.
+              'TOVO',
               style: TextStyle(
-                fontSize: 22,
+                fontSize: 21,
                 fontWeight: FontWeight.w800,
                 color: TovoTheme.teal,
-                letterSpacing: -1,
+                // Positif, alors que le minuscule demandait l'inverse : des
+                // capitales resserrées se touchent et deviennent un bloc.
+                letterSpacing: 1.2,
               ),
             ),
             const Text(

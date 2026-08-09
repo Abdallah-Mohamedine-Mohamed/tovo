@@ -35,6 +35,19 @@ export interface OrchestrateInput {
   /** Généré par Flutter avant l'envoi : c'est la clé d'idempotence. */
   clientMessageId: string;
   /**
+   * Ce que le CLIENT doit relire dans son historique.
+   *
+   * `message` est une consigne écrite pour le modèle — « L'utilisateur a
+   * parlé. Écoute l'enregistrement… », ou un chemin de fichier de 60
+   * caractères. C'était pourtant lui qu'on enregistrait, et donc lui qui
+   * réapparaissait dans la conversation à sa réouverture, dans une bulle
+   * verte censée être la parole du client.
+   *
+   * Absent, on retombe sur `message` : pour un message tapé, les deux sont
+   * la même chose.
+   */
+  messagePublic?: string | undefined;
+  /**
    * Message vocal, transmis au modèle et jamais conservé.
    *
    * Contrairement à la photo de recherche, qui transite par Storage et peut
@@ -224,7 +237,8 @@ async function persister(
     await input.db.from('messages').insert({
       conversation_id: input.conversationId,
       role: 'user',
-      content: input.message,
+      // Ce que le client relira, jamais la consigne destinée au modèle.
+      content: input.messagePublic ?? input.message,
       client_message_id: input.clientMessageId,
     });
 
