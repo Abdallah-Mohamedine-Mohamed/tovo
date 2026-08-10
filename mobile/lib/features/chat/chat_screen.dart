@@ -1027,18 +1027,64 @@ class _ChatScreenState extends State<ChatScreen> {
     unawaited(_chercherPuisDemander(texte));
   }
 
-  /// La recherche d'abord, l'assistant seulement s'il le faut.
+  /// Un mot-clé, ou une phrase adressée à quelqu'un ?
   ///
-  /// « tacos » est un mot-clé sans ambiguïté : le faire interpréter coûtait
-  /// 3,5 secondes et un appel au modèle facturé, là où la base répond en
-  /// 200 ms. On tente donc la recherche directe, et on ne réveille
-  /// l'assistant que si elle ne trouve rien — c'est précisément là que
-  /// l'interprétation sert, pour « quelque chose de léger pour ce soir ».
+  /// C'est cette distinction qui décide si la base répond seule ou si
+  /// l'assistant est appelé. Elle porte sur la FORME de ce qui est écrit,
+  /// et non sur le fait que la recherche trouve quelque chose.
   ///
-  /// Ce que ça coûte : l'assistant ne voit pas passer les recherches
-  /// abouties, donc un « le deuxième » qui suit ne trouvera pas de contexte.
-  /// Le compromis vaut la peine tant que la lenteur reste le premier reproche.
+  /// L'ancien critère était le second : on cherchait, et l'assistant ne
+  /// prenait le relais que sur un échec. « Je veux du poulet dont le prix ne
+  /// dépasse pas 5000 francs CFA » contient « poulet », la recherche
+  /// trouvait donc du poulet, et le client recevait « Voici ce que j'ai
+  /// trouvé pour "je veux du poulet dont le prix ne dépasse pas 5000 francs
+  /// CFA" » — sa propre phrase renvoyée en écho, la contrainte de prix
+  /// ignorée, et l'assistant jamais consulté.
+  ///
+  /// Une recherche qui aboutit n'est pas une conversation réussie.
+  ///
+  /// « tacos » ou « souris sans fil » restent sur la voie rapide : la base
+  /// répond en 200 ms, contre 3,5 secondes et un appel facturé. C'est le cas
+  /// courant et il ne mérite pas d'interprétation.
+  static bool _estUnePhrase(String texte) {
+    final t = texte.trim().toLowerCase();
+    if (t.endsWith('?')) return true;
+
+    final mots = t.split(RegExp(r'[\s,]+')).where((m) => m.isNotEmpty).toList();
+    if (mots.length >= 5) return true;
+
+    // Pronoms, interrogatifs, verbes de demande, contraintes de prix : autant
+    // de signes qu'on s'adresse à quelqu'un plutôt qu'on ne nomme un produit.
+    // Un nom de produit n'en contient jamais.
+    const marqueurs = {
+      'je', 'j', 'tu', 'vous', 'nous', 'moi', 'mon', 'ma', 'mes',
+      'quoi', 'où', 'comment', 'combien', 'pourquoi', 'quel', 'quelle',
+      'veux', 'voudrais', 'cherche', 'aimerais', 'faut', 'peux', 'peut',
+      'propose', 'conseille', 'donne', 'montre', 'trouve',
+      'moins', 'maximum', 'budget', 'cher', 'dépasse', 'entre',
+      // Ni des produits, ni des recherches : les chercher dans le catalogue
+      // était un aller-retour pour rien, avant de finir chez l'assistant.
+      'oui', 'non', 'merci', 'bonjour', 'bonsoir', 'salut',
+      'annule', 'annuler', 'attends', 'stop',
+    };
+    return mots.any(marqueurs.contains);
+  }
+
+  /// La recherche d'abord pour un mot-clé, l'assistant pour une phrase.
+  ///
+  /// Ce que la voie rapide coûte : l'assistant ne voit pas passer ces
+  /// recherches, donc un « le deuxième » qui suivrait un mot-clé ne
+  /// trouverait pas de contexte. C'est acceptable pour un mot-clé, ça ne
+  /// l'était pas pour une phrase — quelqu'un qui écrit une phrase attend
+  /// qu'on lui réponde, pas qu'on lui renvoie une liste.
   Future<void> _chercherPuisDemander(String texte) async {
+    // Une phrase va droit à l'assistant : la recherche saurait peut-être y
+    // répondre, mais pas en tenir compte.
+    if (_estUnePhrase(texte)) {
+      await _parler(texte: texte);
+      return;
+    }
+
     setState(() => _charge = true);
 
     final recherche = await widget.api.get('/search', query: {
