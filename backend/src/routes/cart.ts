@@ -98,14 +98,26 @@ export async function cartRoutes(app: FastifyInstance): Promise<void> {
       // Panier déjà ouvert ailleurs : on ne vide rien de force, on rend la
       // main à l'utilisateur avec un choix explicite.
       if (error.code === 'P0003') {
-        return reply.code(409).send(
-          envelope(failure.body.error, [
+        return reply.code(409).send({
+          ...envelope(failure.body.error, [
             quickReplies([
               { label: 'Vider et recommencer', value: 'vider_panier' },
               { label: 'Garder mon panier', value: 'garder_panier' },
             ]),
           ]),
-        );
+          // `error` EN PLUS de `content`, et ce n'est pas une redondance.
+          //
+          // Sur un statut ≥ 400 l'application lit `error` ; une enveloppe
+          // n'a que `content`. Elle affichait donc les deux boutons — qui
+          // venaient bien des composants — au-dessus d'un « Une erreur est
+          // survenue » générique, alors que le serveur avait rédigé « votre
+          // panier contient déjà des articles de telle boutique ».
+          //
+          // Le client sait ce qu'on lui demande de trancher sans avoir à
+          // deviner, et les versions déjà installées en profitent sans
+          // réinstallation.
+          error: failure.body.error,
+        });
       }
       return reply.code(failure.status).send(failure.body);
     }

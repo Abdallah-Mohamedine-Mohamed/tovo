@@ -197,7 +197,15 @@ class TovoApi {
         return TovoResponse.failure(
           // Le backend renvoie un message rédigé pour l'utilisateur sur les
           // erreurs métier (400/404/409). On l'affiche tel quel.
-          message: decoded['error'] as String? ?? 'Une erreur est survenue.',
+          //
+          // `content` en second recours : une route qui répond par une
+          // enveloppe complète — texte ET boutons — n'a pas de clé `error`.
+          // Le conflit de panier le faisait, et l'écran montrait « Une
+          // erreur est survenue » suivi de deux boutons dont rien
+          // n'expliquait l'objet.
+          message: (decoded['error'] as String?) ??
+              (decoded['content'] as String?) ??
+              'Une erreur est survenue.',
           statusCode: response.statusCode,
           components: _components(decoded),
         );

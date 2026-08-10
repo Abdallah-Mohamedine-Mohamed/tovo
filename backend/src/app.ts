@@ -14,6 +14,7 @@ import { addressRoutes } from './routes/addresses.js';
 import { reviewRoutes } from './routes/reviews.js';
 import { externalOfferRoutes } from './routes/externalOffers.js';
 import { adminMerchantRoutes } from './routes/adminMerchants.js';
+import { adminComptesRoutes } from './routes/adminComptes.js';
 import { CONTRACT_VERSION } from './components/builders.js';
 import { registerDispatchProcessor } from './services/dispatch.js';
 import { registerSweepProcessor } from './services/sweep.js';
@@ -127,6 +128,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(reviewRoutes);
   await app.register(externalOfferRoutes);
   await app.register(adminMerchantRoutes);
+  await app.register(adminComptesRoutes);
 
   return app;
 }

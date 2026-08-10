@@ -3,6 +3,7 @@ import { List, useTable } from '@refinedev/antd';
 import { useNotification, useUpdate } from '@refinedev/core';
 import { Alert, Button, Drawer, Form, Input, Space, Table, Tag } from 'antd';
 import { appelerBackend } from '../backend';
+import { NouvelleBoutique } from './nouvelleBoutique';
 
 /**
  * Boutiques — et surtout leur approbation.
@@ -118,7 +119,14 @@ export const MerchantList = () => {
   };
 
   return (
-    <List title="Boutiques">
+    <List
+      title="Boutiques"
+      headerButtons={
+        <Space>
+          <NouvelleBoutique onCreee={() => void tableQuery.refetch()} />
+        </Space>
+      }
+    >
       <Input.Search
         placeholder="Chercher une boutique…"
         allowClear
