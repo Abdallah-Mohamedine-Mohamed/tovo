@@ -1,5 +1,5 @@
 import { serviceClient } from './supabase.js';
-import { embed, texteIndexable } from './embeddings.js';
+import { embed, embedImage, texteIndexable } from './embeddings.js';
 import { registerProcessor, startWorker, getQueue } from './queue.js';
 
 /**
@@ -63,10 +63,69 @@ export function tronquer(texte: string, maximum: number): string {
   return dernier >= 0xd800 && dernier <= 0xdbff ? coupe.slice(0, -1) : coupe;
 }
 
+/**
+ * Vectorise la photo du produit, si elle ne l'a jamais été.
+ *
+ * SÉPARÉ DU TEXTE, ET DÉLIBÉRÉMENT SANS CONSÉQUENCE. Une image inaccessible
+ * ou un refus de l'API ne doit pas faire compter le produit comme non
+ * indexé : son texte, lui, est bien en place et le rend cherchable. Traiter
+ * les deux comme un seul échec ferait reprendre le produit à chaque passage
+ * pour une photo qui ne reviendra jamais.
+ *
+ * La date est écrite même en cas d'échec, pour la même raison : sans elle,
+ * une URL morte serait retentée indéfiniment.
+ */
+async function vectoriserLaPhoto(id: string, url: string): Promise<void> {
+  const db = serviceClient();
+  try {
+    const reponse = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!reponse.ok) throw new Error(`HTTP ${reponse.status}`);
+
+    const octets = Buffer.from(await reponse.arrayBuffer());
+    if (octets.byteLength > 8 * 1024 * 1024) throw new Error('image trop lourde');
+
+    const vecteur = await embedImage(
+      octets,
+      reponse.headers.get('content-type') ?? 'image/jpeg',
+    );
+
+    await db
+      .from('products')
+      .update({ image_embedding: vecteur, image_embedded_at: new Date().toISOString() })
+      .eq('id', id);
+  } catch (cause) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[indexer] photo de ${id} non vectorisée :`,
+      cause instanceof Error ? cause.message : cause,
+    );
+    await db
+      .from('products')
+      .update({ image_embedded_at: new Date().toISOString() })
+      .eq('id', id);
+  }
+}
+
 async function indexerChacun(produits: ProduitAIndexer[]): Promise<IndexOutcome> {
   const db = serviceClient();
   let indexed = 0;
   let failed = 0;
+
+  // Une seule requete pour tout le lot : savoir quelles photos restent a
+  // vectoriser ne vaut pas cinquante allers-retours.
+  const { data: photos } = await db
+    .from("products")
+    .select("id, image_url")
+    .in("id", produits.map((p) => p.id))
+    .not("image_url", "is", null)
+    .is("image_embedded_at", null);
+
+  const aVectoriser = new Map(
+    ((photos ?? []) as Array<{ id: string; image_url: string }>).map((p) => [
+      p.id,
+      p.image_url,
+    ]),
+  );
 
   for (const produit of produits) {
     const texte = texteIndexable(produit);
@@ -91,6 +150,11 @@ async function indexerChacun(produits: ProduitAIndexer[]): Promise<IndexOutcome>
       if (erreurEcriture) throw erreurEcriture;
 
       indexed++;
+
+      // Apres le texte, et hors du compteur : la photo est un complement,
+      // son echec ne rend pas le produit introuvable.
+      const photo = aVectoriser.get(produit.id);
+      if (photo) await vectoriserLaPhoto(produit.id, photo);
     } catch (cause) {
       // Un produit qui échoue ne doit pas bloquer les autres : il sera
       // repris au prochain passage, puisqu'il reste sans embedding.

@@ -13,7 +13,8 @@ import {
   type OptionRow,
   type ProductRow,
 } from '../components/builders.js';
-import { embed } from '../services/embeddings.js';
+import { embed, embedImage } from '../services/embeddings.js';
+import { serviceClient } from '../services/supabase.js';
 import { decrireImage } from '../services/vision.js';
 
 /**
@@ -119,11 +120,67 @@ const listerCategories: Executor = async (_args, ctx) => {
   };
 };
 
+/**
+ * Retrouve une boutique nommée par le client.
+ *
+ * « chez otakoss » désigne « O'TAKOSS ( Centre Aéré ) » : apostrophe,
+ * capitales, parenthèses. On compare donc sur une forme réduite aux lettres
+ * et aux chiffres, sinon aucune correspondance ne se ferait.
+ *
+ * Renvoie null plutôt que de deviner. Une boutique introuvable doit être
+ * annoncée au client, pas remplacée en silence par une autre.
+ */
+/**
+ * Retrouve les boutiques nommées par le client.
+ *
+ * « chez otakoss » désigne « O'TAKOSS ( Centre Aéré ) » : apostrophe,
+ * capitales, parenthèses. On compare donc sur une forme réduite aux lettres
+ * et aux chiffres, sinon aucune correspondance ne se ferait.
+ *
+ * Rend une liste vide plutôt que de deviner. Une boutique introuvable doit
+ * être annoncée au client, pas remplacée en silence par une autre.
+ */
+async function boutiquesNommees(ctx: ToolContext, nom: string): Promise<string[]> {
+  const reduire = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cible = reduire(nom);
+  if (cible.length < 3) return [];
+
+  const { data } = await ctx.db
+    .from('merchants')
+    .select('id, name')
+    .eq('is_approved', true)
+    .limit(500);
+
+  const boutiques = (data ?? []) as Array<{ id: string; name: string }>;
+
+  // TOUTES les correspondances, pas la première. « chez otakoss » désigne
+  // l'enseigne, et O'TAKOSS a deux adresses : en retenir une masquerait la
+  // moitié de sa carte sans que rien ne le signale.
+  const exactes = boutiques.filter((b) => reduire(b.name) === cible);
+  if (exactes.length > 0) return exactes.map((b) => b.id);
+
+  return boutiques.filter((b) => reduire(b.name).includes(cible)).map((b) => b.id);
+}
+
 const rechercherProduits: Executor = async (args, ctx) => {
   const requete = texte(args, 'requete');
   if (!requete) return vide;
 
   const pos = position(args, ctx);
+
+  const nomBoutique = texte(args, 'boutique');
+  const boutiqueIds = nomBoutique ? await boutiquesNommees(ctx, nomBoutique) : [];
+
+  // Nom donné mais introuvable : on ne cherche PAS partout. Rendre les tacos
+  // du voisin à qui demande ceux d'otakoss est pire que de ne rien rendre,
+  // parce que rien ne signale la substitution.
+  if (nomBoutique && boutiqueIds.length === 0) {
+    return {
+      summary: { resultats: 0, requete, boutique_introuvable: nomBoutique },
+      components: [],
+    };
+  }
+
   const vecteur = await embed(requete, 'query').catch(() => null);
 
   const { data, error } = await ctx.db.rpc('search_products', {
@@ -134,6 +191,7 @@ const rechercherProduits: Executor = async (args, ctx) => {
     radius_m: nombre(args, 'rayon_m') ?? null,
     filter_category: texte(args, 'categorie_id') || null,
     match_count: null,
+    filter_merchants: boutiqueIds.length > 0 ? boutiqueIds : null,
   });
 
   if (error) throw error;
@@ -153,28 +211,69 @@ const rechercherParImage: Executor = async (args, ctx) => {
   const chemin = texte(args, 'image_path');
   if (!chemin) return vide;
 
-  // La photo passe par des MOTS-CLÉS, et non par son vecteur.
+  // LA PHOTO EST COMPARÉE AUX PHOTOS DU CATALOGUE, avec les mots-clés en
+  // repli.
   //
-  // La comparaison directe image-contre-catalogue paraissait plus élégante,
-  // et elle ne pouvait pas fonctionner : les produits sont vectorisés depuis
-  // leur TEXTE — nom, description, étiquettes. Comparer une image à des
-  // vecteurs de texte ne sépare rien.
+  // Ça n'a pas toujours été possible. Les produits n'étaient vectorisés que
+  // depuis leur TEXTE, et comparer une image à des vecteurs de texte ne
+  // séparait rien — mesuré : une autre souris notait 0,31 à 0,40, un produit
+  // au hasard 0,33 à 0,36. Le chemin par mots-clés était alors le seul qui
+  // marchait.
   //
-  // MESURÉ sur le catalogue réel, photo d'une souris comparée à :
-  //     elle-même                    0,469
-  //     une AUTRE souris        0,31 à 0,40
-  //     un produit au hasard    0,33 à 0,36
+  // Depuis, les 2 058 produits ont un vecteur calculé depuis leur propre
+  // photo. Calibré sur les VRAIES photos des clients, prises au téléphone :
+  // six photos de souris sur six retrouvent la bonne souris en tête, entre
+  // 0,676 et 0,708.
   //
-  // Une autre souris note comme un produit sans rapport. Aucun seuil ne peut
-  // rattraper ça : trop haut, rien ne sort ; trop bas, n'importe quoi sort.
-  //
-  // Le chemin par mots-clés, lui, est mesuré comme fonctionnel : « souris
-  // sans fil » ramène cinq articles. On demande donc au modèle de vision ce
-  // qu'un client taperait, puis on cherche exactement comme s'il l'avait
-  // tapé — même moteur, même classement, mêmes résultats.
-  //
-  // La comparaison visuelle redeviendra la bonne approche le jour où les
-  // produits seront vectorisés depuis leurs propres photos.
+  // Les mots-clés restent, et ne sont pas un vestige : ils rattrapent ce que
+  // le visuel ne sait pas faire. Un emballage lu de travers, un produit dont
+  // la photo du catalogue est mauvaise, une catégorie entière sans photo —
+  // le nom, lui, est toujours là.
+  const pos = position(args, ctx);
+
+  const { data: fichier, error: erreurFichier } = await serviceClient()
+    .storage.from('search-images')
+    .download(chemin);
+
+  if (!erreurFichier && fichier) {
+    try {
+      const octets = Buffer.from(await fichier.arrayBuffer());
+      const vecteur = await embedImage(octets, fichier.type || 'image/jpeg');
+
+      const { data, error } = await ctx.db.rpc('search_by_photo', {
+        query_embedding: JSON.stringify(vecteur),
+        origin_lat: pos?.lat ?? null,
+        origin_lng: pos?.lng ?? null,
+        radius_m: null,
+        match_count: null,
+      });
+      if (error) throw error;
+
+      const produits = ((data ?? []) as Record<string, unknown>[]).map(versProductRow);
+
+      if (produits.length > 0) {
+        const meilleur = Number((data as Record<string, unknown>[])[0]?.['score'] ?? 0);
+        return {
+          summary: {
+            recherche: 'par ressemblance visuelle',
+            // Le score est ici une vraie similarité, pas une fusion de
+            // classements : le modèle peut donc juger de la qualité de la
+            // correspondance et le dire, au lieu de présenter une
+            // approximation comme une trouvaille.
+            ressemblance: meilleur.toFixed(2),
+            resultats: produits.length,
+            produits: produits.map(resumeProduit),
+          },
+          components: [productCarousel(produits, 'Ce qui ressemble à votre photo')],
+        };
+      }
+    } catch {
+      // Le visuel a échoué — image illisible, API indisponible. On ne
+      // s'arrête pas là : les mots-clés ci-dessous sont une seconde chance,
+      // et le client n'a pas à savoir laquelle des deux a répondu.
+    }
+  }
+
   let motsCles: string;
   try {
     motsCles = (await decrireImage(chemin)).trim();
@@ -189,12 +288,11 @@ const rechercherParImage: Executor = async (args, ctx) => {
     return { summary: { recherche: 'par image', resultats: 0 }, components: [] };
   }
 
-  const pos = position(args, ctx);
   const produits = await chercherEnRaccourcissant(ctx, motsCles, pos);
 
   return {
     summary: {
-      recherche: 'par image',
+      recherche: 'par mots-clés lus sur la photo',
       // Ce que la photo a donné comme mots-clés. Le modèle peut ainsi dire
       // « je vois une souris sans fil » plutôt que « je n'ai rien trouvé » :
       // le client sait alors si c'est la photo ou le catalogue qui a manqué.
@@ -825,6 +923,9 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
       properties: {
         requete: S.string("Ce que cherche l'utilisateur, dans ses mots"),
         categorie_id: S.string('Identifiant de catégorie, si la recherche doit être restreinte'),
+        boutique: S.string(
+          "Nom de la boutique, quand l'utilisateur en désigne une — « chez otakoss ». Écris-le tel qu'il l'a dit : la correspondance est tolérante aux apostrophes et aux capitales. N'APPELLE PAS boutiques_proches pour cela, elle ne cherche que par la géographie.",
+        ),
         rayon_m: S.number('Rayon de recherche en mètres'),
       },
       required: ['requete'],
