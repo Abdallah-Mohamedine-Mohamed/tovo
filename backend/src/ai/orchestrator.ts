@@ -181,8 +181,19 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
 
   const { components, rejected } = validateComponents(composantsDuTour, idsAutorises);
 
-  if (!texteFinal && components.length === 0) {
-    texteFinal = "Je n'ai pas trouvé ce que vous cherchez. Reformulez, ou choisissez une catégorie.";
+  if (!texteFinal) {
+    // Un carrousel sans un mot laisse croire que la question a trouvé sa
+    // réponse. Vu sur « de la crème fraîche » : trois cartes de yaourt
+    // apparaissaient seules, sans que rien ne dise que le catalogue n'en
+    // contient aucune.
+    //
+    // Le repli ne couvrait que le cas SANS composant. Or c'est justement
+    // quand il y en a que le silence trompe : sans composant, l'écran reste
+    // vide et personne n'est induit en erreur.
+    texteFinal =
+      components.length === 0
+        ? "Je n'ai pas trouvé ce que vous cherchez. Reformulez, ou choisissez une catégorie."
+        : "Voici ce que je trouve de plus proche. Dites-moi si ce n'est pas ça.";
   }
 
   const messageId = await persister(input, texteFinal, components);
