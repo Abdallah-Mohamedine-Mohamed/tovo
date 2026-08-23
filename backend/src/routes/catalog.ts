@@ -26,6 +26,60 @@ import { embed, embeddingsEnabled } from '../services/embeddings.js';
  * limite de toute façon aux boutiques approuvées.
  */
 
+/**
+ * Ce qu'on dit au-dessus des résultats, sans déranger le modèle.
+ *
+ * L'ancienne phrase renvoyait au client ses propres mots : « Voici ce que
+ * j'ai trouvé pour "tacos boulettes" ». C'est le réflexe d'un moteur de
+ * recherche — ça ne lui apprend rien, et ça montre qu'on n'a pas regardé ce
+ * qu'on lui rend.
+ *
+ * On dispose pourtant de tout ce qu'il faut pour dire quelque chose d'utile :
+ * combien d'articles, chez combien de boutiques, à quelle distance, et
+ * combien sont fermées. Aucun appel au modèle, aucune latence.
+ */
+function resumeDeRecherche(items: ProductRow[]): string {
+  const nombres = ['', 'Un', 'Deux', 'Trois', 'Quatre', 'Cinq', 'Six', 'Sept', 'Huit', 'Neuf', 'Dix'];
+  const enLettres = (n: number) => (n <= 10 ? nombres[n]! : String(n));
+
+  const ouverts = items.filter((i) => i.merchant_open !== false);
+  const fermes = items.length - ouverts.length;
+
+  if (ouverts.length === 0) {
+    return `${enLettres(items.length)} article${items.length > 1 ? 's' : ''}, mais tout est fermé en ce moment.`;
+  }
+
+  const boutiques = new Set(ouverts.map((i) => i.merchant_id));
+  const seule = boutiques.size === 1 ? ouverts[0]!.merchant_name : null;
+
+  // Le nom de la boutique quand il n'y en a qu'une : c'est l'information la
+  // plus utile pour décider, et elle tient dans la phrase.
+  let phrase =
+    ouverts.length === 1
+      ? `Un seul article${seule ? `, chez ${seule}` : ''}.`
+      : seule
+        ? `${enLettres(ouverts.length)} articles chez ${seule}.`
+        : `${enLettres(ouverts.length)} articles, dans ${enLettres(boutiques.size).toLowerCase()} boutiques.`;
+
+  // La distance du plus proche, quand la position est connue. Sur un réseau
+  // où chaque livraison se négocie en minutes de moto, c'est ce qui départage.
+  const distances = ouverts
+    .map((i) => i.distance_m)
+    .filter((d): d is number => typeof d === 'number');
+  if (distances.length > 0) {
+    const proche = Math.min(...distances);
+    const lisible =
+      proche >= 1000 ? `${(proche / 1000).toFixed(1).replace('.', ',')} km` : `${proche} m`;
+    phrase += ` Le plus proche est à ${lisible}.`;
+  }
+
+  if (fermes > 0) {
+    phrase += ` ${enLettres(fermes)} autre${fermes > 1 ? 's sont fermés' : ' est fermé'}.`;
+  }
+
+  return phrase;
+}
+
 export async function catalogRoutes(app: FastifyInstance): Promise<void> {
   /** Client authentifié si l'appelant l'est, anonyme sinon. */
   function db(request: import('fastify').FastifyRequest) {
@@ -125,12 +179,9 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       return reply.send(envelope(`Rien trouvé pour « ${query.data.q} ».`));
     }
 
-    const fermees = items.filter((i) => i.merchant_open === false).length;
-    const message = fermees === items.length
-      ? `${items.length} résultat${items.length > 1 ? 's' : ''}, mais tout est fermé en ce moment.`
-      : `Voici ce que j'ai trouvé pour « ${query.data.q} ».`;
-
-    return reply.send(envelope(message, [productCarousel(items, query.data.q)]));
+    return reply.send(
+      envelope(resumeDeRecherche(items), [productCarousel(items, query.data.q)]),
+    );
   });
 
   /**
