@@ -162,6 +162,65 @@ async function boutiquesNommees(ctx: ToolContext, nom: string): Promise<string[]
   return boutiques.filter((b) => reduire(b.name).includes(cible)).map((b) => b.id);
 }
 
+/**
+ * Les options qui répondent à la demande du client.
+ *
+ * La recherche sait remonter un Tacos parce qu'il propose la boulette
+ * (migration 0042), mais le résultat ne dit pas POURQUOI il remonte : le
+ * modèle reçoit un nom, un prix, une boutique. Il voyait donc « Tacos Bowl »
+ * et concluait honnêtement « je n'ai pas de tacos aux boulettes » — alors
+ * que la boulette y est, à +600 F.
+ *
+ * Sans cette information, la branche options de la recherche travaille pour
+ * rien : elle place le bon produit devant, et personne ne peut le dire.
+ */
+async function optionsCorrespondantes(
+  ctx: ToolContext,
+  requete: string,
+  ids: string[],
+): Promise<Map<string, string[]>> {
+  const resultat = new Map<string, string[]>();
+  if (ids.length === 0) return resultat;
+
+  // Les mêmes règles que la migration 0042, sinon l'explication ne
+  // correspondrait pas à ce qui a fait remonter le produit.
+  const reduire = (s: string) =>
+    s
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean)
+      .map((m) => m.replace(/s$/, ''));
+
+  const motsRequete = new Set(reduire(requete).filter((m) => m.length >= 4));
+  if (motsRequete.size === 0) return resultat;
+
+  const { data } = await ctx.db
+    .from('product_options')
+    .select('product_id, product_option_values(name, price_delta, is_available)')
+    .in('product_id', ids);
+
+  type Valeur = { name: string; price_delta: number | null; is_available: boolean };
+  for (const groupe of (data ?? []) as Array<{
+    product_id: string;
+    product_option_values: Valeur[] | null;
+  }>) {
+    for (const v of groupe.product_option_values ?? []) {
+      if (!v.is_available) continue;
+      if (!reduire(v.name).some((m) => motsRequete.has(m))) continue;
+
+      const supplement = v.price_delta ?? 0;
+      const libelle = supplement > 0 ? `${v.name} (+${supplement} F)` : v.name;
+      const liste = resultat.get(groupe.product_id) ?? [];
+      if (!liste.includes(libelle)) liste.push(libelle);
+      resultat.set(groupe.product_id, liste);
+    }
+  }
+
+  return resultat;
+}
+
 const rechercherProduits: Executor = async (args, ctx) => {
   const requete = texte(args, 'requete');
   if (!requete) return vide;
@@ -201,8 +260,25 @@ const rechercherProduits: Executor = async (args, ctx) => {
     return { summary: { resultats: 0, requete }, components: [] };
   }
 
+  // Ce qui, dans les OPTIONS, répond à la demande. Le modèle peut alors
+  // dire « le Tacos M existe, la boulette est une garniture à +600 F »
+  // au lieu de « je n'ai pas de tacos aux boulettes ».
+  const options = await optionsCorrespondantes(
+    ctx,
+    requete,
+    produits.map((p) => p.id),
+  );
+
   return {
-    summary: { resultats: produits.length, produits: produits.map(resumeProduit) },
+    summary: {
+      resultats: produits.length,
+      produits: produits.map((p) => {
+        const trouvees = options.get(p.id);
+        return trouvees && trouvees.length > 0
+          ? { ...resumeProduit(p), options_disponibles: trouvees }
+          : resumeProduit(p);
+      }),
+    },
     components: [productCarousel(produits, requete)],
   };
 };
