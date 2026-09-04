@@ -8,6 +8,7 @@ import {
   optionSelector,
   productCard,
   productCarousel,
+  quickReplies,
   type OptionRow,
   type ProductRow,
 } from '../components/builders.js';
@@ -80,6 +81,56 @@ function resumeDeRecherche(items: ProductRow[]): string {
   return phrase;
 }
 
+/**
+ * « Comme la dernière fois ? »
+ *
+ * L'accueil montrait neuf tuiles de catégories à quelqu'un qui, la plupart
+ * du temps, veut reprendre ce qu'il a déjà pris. Le parcours complet —
+ * catégorie, boutique, produit, options, panier — pour un plat qu'il connaît
+ * par cœur.
+ *
+ * Réduire l'effort vaut mieux ici que susciter l'envie : le besoin de manger
+ * revient de lui-même, il n'a pas à être fabriqué. Ce qui se gagne, c'est le
+ * nombre de gestes entre la faim et la commande.
+ *
+ * Rend une chaîne vide quand il n'y a rien à proposer — client non connecté,
+ * ou aucune commande livrée. L'accueil reste alors tel qu'il était.
+ */
+async function commandePrecedente(
+  request: import('fastify').FastifyRequest,
+): Promise<{ ligne: string; composant: ReturnType<typeof quickReplies> } | null> {
+  if (!request.supabase) return null;
+
+  const { data } = await request.supabase.rpc('last_delivered_order');
+  const c = data as {
+    order_id?: string;
+    total?: number;
+    merchant_name?: string | null;
+    articles?: Array<{ nom: string; quantite: number }>;
+  } | null;
+
+  if (!c?.order_id) return null;
+
+  const articles = c.articles ?? [];
+  if (articles.length === 0) return null;
+
+  // Le premier article nomme la commande, le reste se compte. « Tacos XL et
+  // 2 autres » se lit d'un coup d'œil ; la liste complète ne se lit pas.
+  const titre =
+    articles.length === 1
+      ? articles[0]!.nom
+      : `${articles[0]!.nom} et ${articles.length - 1} autre${articles.length > 2 ? 's' : ''}`;
+
+  const chezQui = c.merchant_name ? ` chez ${c.merchant_name}` : '';
+
+  return {
+    ligne: `La dernière fois : ${titre}${chezQui}.`,
+    composant: quickReplies([
+      { label: `Reprendre — ${c.total} F`, value: `recommander:${c.order_id}` },
+    ]),
+  };
+}
+
 export async function catalogRoutes(app: FastifyInstance): Promise<void> {
   /** Client authentifié si l'appelant l'est, anonyme sinon. */
   function db(request: import('fastify').FastifyRequest) {
@@ -103,18 +154,27 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(failure.status).send(failure.body);
     }
 
-    // Ni phrase d'accompagnement, ni titre de grille.
+    // PAS DE TITRE DE GRILLE, et une phrase seulement si elle apprend
+    // quelque chose.
     //
-    // L'écran d'accueil posait la même question trois fois de suite : le
-    // salut de l'application (« Que voulez-vous commander ? »), la phrase de
-    // cette enveloppe (« Que souhaitez-vous commander ? »), puis le titre de
-    // la grille (« Que cherchez-vous ? »). Trois formulations du même
-    // besoin, empilées, qui repoussaient les catégories hors de l'écran.
+    // L'accueil posait la même question trois fois : le salut de
+    // l'application (« Que voulez-vous commander ? »), la phrase de cette
+    // enveloppe (« Que souhaitez-vous commander ? »), puis le titre de la
+    // grille (« Que cherchez-vous ? »). Trois formulations du même besoin,
+    // empilées, qui repoussaient les catégories hors de l'écran.
     //
-    // Le salut suffit : il est plus grand, il s'adresse au client par son
-    // nom, et il est le seul des trois à disparaître quand la conversation
-    // commence.
-    return reply.send(envelope('', [categoryGrid(data ?? [], '')]));
+    // Ne subsiste ici que ce qui n'est pas une redite du salut : la
+    // dernière commande, quand il y en a une.
+    // La dernière commande AVANT les catégories : c'est la réponse la plus
+    // probable à « on mange quoi ? », et elle tient en un bouton.
+    const derniere = await commandePrecedente(request);
+
+    return reply.send(
+      envelope(derniere?.ligne ?? '', [
+        ...(derniere ? [derniere.composant] : []),
+        categoryGrid(data ?? [], ''),
+      ]),
+    );
   });
 
   /**
@@ -209,9 +269,50 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
 
     const { data: categorie } = await db(request)
       .from('categories')
-      .select('name')
+      .select('name, browse_mode')
       .eq('id', params.data.categoryId)
       .maybeSingle();
+
+    const nom = (categorie?.name as string | null) ?? 'Cette catégorie';
+
+    /**
+     * Les produits d'une catégorie, présentés en carrousel.
+     *
+     * Sert deux cas qui n'en font qu'un pour le client : la porte ouvre
+     * directement sur des marchandises, ou elle ne cache qu'une seule
+     * boutique et l'étape intermédiaire ne lui apprendrait rien.
+     */
+    const carrouselProduits = async () => {
+      const { data: produits } = await db(request).rpc('category_products', {
+        p_category_id: params.data.categoryId,
+        p_limite: 20,
+      });
+
+      const items: ProductRow[] = ((produits ?? []) as Record<string, unknown>[]).map((p) => ({
+        id: p['id'] as string,
+        name: p['name'] as string,
+        description: (p['description'] as string | null) ?? null,
+        image_url: (p['image_url'] as string | null) ?? null,
+        price: p['price'] as number,
+        is_available: p['is_available'] as boolean,
+        merchant_id: p['merchant_id'] as string,
+        merchant_name: (p['merchant_name'] as string | null) ?? null,
+      }));
+
+      return items;
+    };
+
+    // MODE PRODUIT. Personne ne veut choisir l'enseigne avant le shampoing :
+    // laquelle des vingt-deux boutiques l'a en stock est un détail
+    // d'exécution qu'on faisait porter au client. Pour manger, à l'inverse,
+    // le restaurant fait partie du choix — d'où le mode, par catégorie.
+    if (categorie?.browse_mode === 'products') {
+      const items = await carrouselProduits();
+      if (items.length > 0) {
+        return reply.send(envelope(nom, [productCarousel(items, nom)]));
+      }
+      return reply.send(envelope(`Rien dans ${nom} pour le moment.`));
+    }
 
     const { data, error } = await db(request).rpc('category_merchants', {
       p_category_id: params.data.categoryId,
@@ -237,8 +338,6 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       distance_m: (m['distance_m'] as number | null) ?? null,
     }));
 
-    const nom = (categorie?.name as string | null) ?? 'Cette catégorie';
-
     // Aucune boutique : c'est presque toujours qu'on vise une catégorie
     // FEUILLE — « Pizza », « Boissons » — et non un module. Les boutiques ne
     // sont rattachées qu'aux racines ; une feuille, elle, porte des produits.
@@ -247,27 +346,30 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
     // quarante derrière. On bascule donc sur les produits plutôt que
     // d'exiger de l'appelant qu'il sache à quel niveau il se trouve.
     if (boutiques.length === 0) {
-      const { data: produits } = await db(request).rpc('category_products', {
-        p_category_id: params.data.categoryId,
-        p_limite: 20,
-      });
-
-      const items: ProductRow[] = ((produits ?? []) as Record<string, unknown>[]).map((p) => ({
-        id: p['id'] as string,
-        name: p['name'] as string,
-        description: (p['description'] as string | null) ?? null,
-        image_url: (p['image_url'] as string | null) ?? null,
-        price: p['price'] as number,
-        is_available: p['is_available'] as boolean,
-        merchant_id: p['merchant_id'] as string,
-        merchant_name: (p['merchant_name'] as string | null) ?? null,
-      }));
-
+      const items = await carrouselProduits();
       if (items.length > 0) {
         return reply.send(envelope(nom, [productCarousel(items, nom)]));
       }
-
       return reply.send(envelope(`Rien dans ${nom} pour le moment.`));
+    }
+
+    // UNE SEULE BOUTIQUE : on saute son étape.
+    //
+    // « Parapharmacies » n'en a qu'une, « Gaz » aussi. Le client ouvrait la
+    // porte, voyait une carte unique, la touchait, et découvrait enfin les
+    // produits — deux gestes pour une information qu'il n'avait pas à
+    // choisir. Le nom de la boutique reste visible sur chaque produit.
+    //
+    // On ne le fait que si elle est OUVERTE : sur une boutique fermée, la
+    // carte dit pourquoi rien n'est commandable, là où un carrousel de
+    // produits inertes ne l'expliquerait pas.
+    if (boutiques.length === 1 && boutiques[0]!.is_open) {
+      const items = await carrouselProduits();
+      if (items.length > 0) {
+        return reply.send(
+          envelope(`${nom} — chez ${boutiques[0]!.name}`, [productCarousel(items, nom)]),
+        );
+      }
     }
 
     const ouvertes = boutiques.filter((b) => b.is_open).length;

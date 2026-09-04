@@ -1,0 +1,137 @@
+# =====================================================================
+# Codemagic — build iOS du client Tovo, vers TestFlight
+# =====================================================================
+# Construit l'app CLIENT et la dépose sur TestFlight. Pas de Mac requis :
+# Codemagic loue des machines macOS.
+#
+# CE FICHIER NE PUBLIE RIEN SUR L'APP STORE. Il dépose un build dans
+# TestFlight, et rien d'autre. La version publique (2.0.0 build 4) reste
+# intacte tant que personne ne crée et ne soumet une nouvelle version depuis
+# App Store Connect — ce que ce pipeline ne fait pas et ne peut pas faire :
+# `submit_to_app_store` est explicitement à `false`.
+#
+# UN SEUL BUNDLE EXISTE CÔTÉ iOS : com.tovoapp.UserApp, celui de l'app
+# publiée. Contrairement à Android où trois flavors cohabitent
+# (client / livreur / boutique), le projet iOS n'a qu'un schéma. Livreur et
+# boutique demanderaient chacun un nouveau bundle, une nouvelle fiche App
+# Store et de nouveaux profils — c'est un autre chantier.
+#
+# AVANT LE PREMIER BUILD, à faire une fois dans Codemagic :
+#
+#   1. Une clé API App Store Connect
+#      App Store Connect > Utilisateurs et accès > Intégrations >
+#      App Store Connect API > « + ». Rôle « App Manager » suffit, Admin
+#      n'est pas nécessaire. Récupérer : Issuer ID, Key ID, fichier .p8.
+#      Dans Codemagic : Teams > Integrations > App Store Connect, la nommer
+#      exactement `tovo_asc_key`.
+#
+#   2. Un groupe de variables `tovo_config` contenant, en SECRET :
+#      SUPABASE_URL, SUPABASE_ANON_KEY, API_BASE_URL.
+#      Ce sont les mêmes valeurs que celles passées à build_apks.sh. Elles
+#      n'entrent jamais dans le dépôt.
+#
+#   3. Dans App Store Connect > TestFlight > Tests internes, ajouter les
+#      testeurs. Les tests INTERNES ne passent par aucune relecture Apple :
+#      le build est disponible quelques minutes après le traitement. Les
+#      groupes EXTERNES exigent une « Beta App Review » — inutile ici.
+
+workflows:
+  ios-client-testflight:
+    name: Tovo client — TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    working_directory: mobile
+
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      groups:
+        - tovo_config
+      vars:
+        # L'app publiée. Ne jamais modifier : changer ce bundle créerait une
+        # nouvelle fiche et ferait perdre les utilisateurs existants.
+        BUNDLE_ID: com.tovoapp.UserApp
+        APP_APPLE_ID: 6740201431
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.tovoapp.UserApp
+
+    integrations:
+      app_store_connect: tovo_asc_key
+
+    triggering:
+      # Aucun déclenchement automatique. Un build iOS part chez Apple : il se
+      # lance à la main, quand on a décidé de tester quelque chose.
+      events: []
+
+    scripts:
+      - name: Paquets Flutter
+        script: flutter pub get
+
+      - name: Profils de signature
+        script: |
+          # Codemagic crée le profil s'il n'existe pas encore, à partir de la
+          # clé API. Aucun certificat à générer sur un Mac.
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain initialize
+          keychain add-certificates
+          xcode-project use-profiles
+
+      - name: Pods
+        script: |
+          cd ios
+          pod install
+
+      - name: Numéro de build
+        script: |
+          # Apple REFUSE un build dont le numéro n'est pas strictement
+          # supérieur au précédent. On lit le dernier connu plutôt que de
+          # tenir le compte à la main : le numéro figé de pubspec.yaml
+          # provoquerait un rejet au deuxième envoi.
+          DERNIER=$(app-store-connect get-latest-testflight-build-number \
+                      "$APP_APPLE_ID" --platform IOS 2>/dev/null || echo "")
+          if [ -z "$DERNIER" ]; then
+            # Aucun build TestFlight : on part de la version publiée (4).
+            DERNIER=4
+          fi
+          echo "NUMERO_BUILD=$((DERNIER + 1))" >> "$CM_ENV"
+
+      - name: Construire l'IPA
+        script: |
+          # -t est OBLIGATOIRE : il n'existe pas de lib/main.dart dans ce
+          # projet, seulement main_client, main_driver et main_merchant.
+          # Sans lui, la compilation échoue sans expliquer pourquoi.
+          flutter build ipa --release \
+            -t lib/main_client.dart \
+            --build-name=2.1.0 \
+            --build-number="$NUMERO_BUILD" \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --export-options-plist=/Users/builder/export_options.plist
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+
+        # TestFlight, et rien de plus. La fiche publique n'est pas touchée.
+        submit_to_testflight: true
+
+        # EXPLICITE, alors que false est déjà la valeur par défaut. Ce
+        # réglage est le seul qui sépare un test d'une mise en production :
+        # il mérite d'être lisible plutôt que sous-entendu.
+        submit_to_app_store: false
+
+      email:
+        recipients:
+          - mohamedine@tovoapp.com
+        notify:
+          success: true
+          failure: true

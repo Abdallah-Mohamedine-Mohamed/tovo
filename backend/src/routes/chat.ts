@@ -88,8 +88,22 @@ function interactionEnMessage(action: string, payload: Record<string, unknown>):
       return `J'ai envoyé une photo, cherche ce produit. image_path : ${payload.image_path}`;
     case 'compare_price':
       return `Compare les prix pour : ${payload.query}.`;
-    case 'quick_reply':
-      return String(payload.label ?? payload.value ?? '');
+    case 'quick_reply': {
+      const libelle = String(payload.label ?? '');
+      const valeur = String(payload.value ?? '');
+      // La VALEUR en plus du libellé quand elle dit autre chose.
+      //
+      // « Reprendre : Tacos XL » a pour valeur « recommander:<uuid> », et
+      // seul le libellé partait au modèle. Il voyait donc un bouton sans
+      // savoir sur quelle commande il portait, et ne pouvait rien en faire.
+      //
+      // Le client, lui, continue de ne relire que le libellé : c'est
+      // `libelleLisible` qui décide de ce qui est conservé.
+      if (valeur && valeur !== libelle) {
+        return libelle ? `${libelle} [${valeur}]` : valeur;
+      }
+      return libelle || valeur;
+    }
     default:
       return `Action : ${action} ${JSON.stringify(payload)}`;
   }

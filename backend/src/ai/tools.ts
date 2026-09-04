@@ -121,16 +121,6 @@ const listerCategories: Executor = async (_args, ctx) => {
 };
 
 /**
- * Retrouve une boutique nommée par le client.
- *
- * « chez otakoss » désigne « O'TAKOSS ( Centre Aéré ) » : apostrophe,
- * capitales, parenthèses. On compare donc sur une forme réduite aux lettres
- * et aux chiffres, sinon aucune correspondance ne se ferait.
- *
- * Renvoie null plutôt que de deviner. Une boutique introuvable doit être
- * annoncée au client, pas remplacée en silence par une autre.
- */
-/**
  * Retrouve les boutiques nommées par le client.
  *
  * « chez otakoss » désigne « O'TAKOSS ( Centre Aéré ) » : apostrophe,
@@ -874,12 +864,56 @@ function nommerAdresse(a: { label: string; text_hint: string }): string {
   return court.length > 24 ? `${court.slice(0, 23).trimEnd()}…` : court;
 }
 
+/**
+ * Remet au panier une commande déjà livrée.
+ *
+ * Le bouton « Recommander » existait depuis longtemps et ne menait nulle
+ * part : aucun outil ne traitait la valeur `recommander:<id>`. Le client
+ * appuyait, rien ne se passait. Un bouton mort coûte plus cher qu'un bouton
+ * absent — on essaie une fois, puis on cesse de croire au reste.
+ *
+ * Le travail est fait en base par `reorder_into_cart`, qui rappelle
+ * `cart_add_item` ligne par ligne : mêmes contrôles de disponibilité, et
+ * surtout PRIX DU JOUR. Recopier l'ancien prix ferait payer au boutiquier
+ * un tarif d'avril.
+ */
+const recommanderCommande: Executor = async (args, ctx) => {
+  const id = texte(args, 'commande_id');
+  if (!id) return { summary: { erreur: 'identifiant manquant' }, components: [] };
+
+  const { data, error } = await ctx.db.rpc('reorder_into_cart', { p_order_id: id });
+
+  if (error) {
+    // Conflit de boutique, plus rien de disponible : ces messages sont
+    // rédigés pour le client. On les transmet au lieu de les reformuler.
+    return { summary: { erreur: error.message }, components: [] };
+  }
+
+  const bilan = (data ?? {}) as { repris?: number; ignores?: string[] };
+  const manquants = bilan.ignores ?? [];
+
+  const panier = await panierCourant(ctx);
+
+  return {
+    summary: {
+      repris: bilan.repris ?? 0,
+      // Nommément. Le modèle doit pouvoir dire ce qui manque : un panier
+      // amputé en silence ne se découvre qu'au moment de payer.
+      ...(manquants.length > 0 ? { indisponibles: manquants } : {}),
+      panier: panier.summary,
+    },
+    components: panier.components,
+  };
+};
+
 const historiqueCommandes: Executor = async (args, ctx) => {
   const limite = Math.min(nombre(args, 'limite') ?? 5, 10);
 
   const { data } = await ctx.db
     .from('orders')
-    .select('id, type, status, total, placed_at, dropoff_hint')
+    // Les articles, et pas seulement le total : « Recommander (4500 F) » ne
+    // rappelle à personne ce qu'il a mangé.
+    .select('id, type, status, total, placed_at, dropoff_hint, order_items(product_name, quantity)')
     .eq('status', 'delivered')
     .order('placed_at', { ascending: false })
     .limit(limite);
@@ -894,14 +928,23 @@ const historiqueCommandes: Executor = async (args, ctx) => {
         total: o.total,
         date: o.placed_at,
         type: o.type,
+        articles: ((o.order_items ?? []) as Array<{ product_name: string; quantity: number }>)
+          .map((a) => `${a.quantity} × ${a.product_name}`),
       })),
     },
     components: [
       quickReplies(
-        commandes.slice(0, 3).map((o) => ({
-          label: `Recommander (${o.total} F)`,
-          value: `recommander:${o.id}`,
-        })),
+        commandes.slice(0, 3).map((o) => {
+          const a = (o.order_items ?? []) as Array<{ product_name: string; quantity: number }>;
+          // Le premier article nomme la commande. Un bouton doit dire ce
+          // qu'il fait, pas seulement combien il coûte.
+          const titre = a.length === 0
+            ? `${o.total} F`
+            : a.length === 1
+              ? a[0]!.product_name
+              : `${a[0]!.product_name} +${a.length - 1}`;
+          return { label: `Reprendre : ${titre}`, value: `recommander:${o.id}` };
+        }),
       ),
     ],
   };
@@ -1106,6 +1149,18 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
     },
   },
   {
+    name: 'recommander_commande',
+    description:
+      "Remet au panier tous les articles d'une commande déjà livrée, aux prix du jour. À appeler quand l'utilisateur veut reprendre la même chose — y compris depuis un bouton dont la valeur commence par « recommander: », l'identifiant suit les deux points.",
+    parameters: {
+      type: 'object',
+      properties: {
+        commande_id: S.string('Identifiant de la commande à reprendre'),
+      },
+      required: ['commande_id'],
+    },
+  },
+  {
     name: 'annuler_commande',
     description:
       "Annule une commande du client. Possible tant qu'aucun livreur n'est en " +
@@ -1191,6 +1246,7 @@ export const EXECUTORS: Record<string, Executor> = {
   retirer_du_panier: retirerDuPanier,
   suivre_commande: suivreCommande,
   historique_commandes: historiqueCommandes,
+  recommander_commande: recommanderCommande,
   annuler_commande: annulerCommande,
   appeler_livreur: appelerLivreur,
   produits_de_boutique: produitsDeBoutique,

@@ -33,8 +33,22 @@ class IconesCategories {
     // Kasuwa et Kasuwa 1 partagent le même dessin : ce sont deux modules
     // identiques hérités de la migration, avec les mêmes sous-catégories.
     // Deux icônes différentes laisseraient croire à deux choses différentes.
+    // Kasuwa est devenu « Marché » et Kasuwa 1 a été fondu dedans
+    // (migration 0046). Le slug ne change pas — il porte l'identifiant du
+    // module 6ammart, et le renommer ferait perdre l'icône. L'étal
+    // convient toujours : c'est bien le marché qu'on y dessine.
     'kasuwa-m10': '$_dossier/kasuwa.svg',
     'kasuwa-1-m9': '$_dossier/kasuwa.svg',
+
+    // Portes ouvertes en 0047, sur des PRODUITS et non des boutiques :
+    // personne ne choisit son enseigne avant son shampoing.
+    'beaute-soins': '$_dossier/beaute.svg',
+    'vetements': '$_dossier/vetements.svg',
+    'electronique': '$_dossier/electronique.svg',
+
+    // Le gaz existait comme module vide depuis la migration ; il a reçu ses
+    // bouteilles en 0047, en venant de « Tovo market ».
+    'gaz-m12': '$_dossier/gaz.svg',
   };
 
   /// L'icône d'une catégorie, ou `null` s'il n'y en a pas de prévue.
