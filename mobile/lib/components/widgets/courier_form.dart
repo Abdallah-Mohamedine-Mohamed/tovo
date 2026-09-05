@@ -35,25 +35,32 @@ class _PointColis {
   String hint;
 
   bool get complet => lat != null && lng != null && hint.trim().isNotEmpty;
-  Map<String, dynamic> toJson() => {'lat': lat, 'lng': lng, 'hint': hint.trim()};
+  Map<String, dynamic> toJson() => {
+    'lat': lat,
+    'lng': lng,
+    'hint': hint.trim(),
+  };
 }
 
 class _CourierFormState extends State<CourierForm> {
   late final _depart = _lire('pickup');
   late final _arrivee = _lire('dropoff');
 
-  late final TextEditingController _departHint =
-      TextEditingController(text: _depart.hint);
-  late final TextEditingController _arriveeHint =
-      TextEditingController(text: _arrivee.hint);
+  late final TextEditingController _departHint = TextEditingController(
+    text: _depart.hint,
+  );
+  late final TextEditingController _arriveeHint = TextEditingController(
+    text: _arrivee.hint,
+  );
 
   /// Le numéro de celui qui reçoit le colis.
   ///
   /// Obligatoire, et c'est le seul champ qui l'est en plus des deux points.
   /// Un livreur devant une porte close sans numéro à appeler repart avec le
   /// paquet, et la course est perdue pour tout le monde.
-  late final TextEditingController _contactArrivee =
-      TextEditingController(text: widget.component.map('dropoff')['contact'] as String? ?? '');
+  late final TextEditingController _contactArrivee = TextEditingController(
+    text: widget.component.map('dropoff')['contact'] as String? ?? '',
+  );
 
   late String _colis = widget.component.str('parcel', 'small');
   bool _immediat = true;
@@ -100,7 +107,9 @@ class _CourierFormState extends State<CourierForm> {
 
     if (position == null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Activez la localisation pour utiliser ce bouton.')),
+        const SnackBar(
+          content: Text('Activez la localisation pour utiliser ce bouton.'),
+        ),
       );
     }
   }
@@ -115,13 +124,15 @@ class _CourierFormState extends State<CourierForm> {
     _depart.hint = _departHint.text;
     _arrivee.hint = _arriveeHint.text;
 
-    widget.onInteraction(TovoInteraction('submit_courier', {
-      'pickup': _depart.toJson(),
-      'dropoff': _arrivee.toJson(),
-      'dropoff_contact': _contactArrivee.text.trim(),
-      'parcel': _colis,
-      'scheduled_for': _immediat ? null : 'later',
-    }));
+    widget.onInteraction(
+      TovoInteraction('submit_courier', {
+        'pickup': _depart.toJson(),
+        'dropoff': _arrivee.toJson(),
+        'dropoff_contact': _contactArrivee.text.trim(),
+        'parcel': _colis,
+        'scheduled_for': _immediat ? null : 'later',
+      }),
+    );
   }
 
   @override
@@ -134,12 +145,45 @@ class _CourierFormState extends State<CourierForm> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-        border: Border.all(color: const Color(0x12000000)),
+        boxShadow: TovoTheme.ombreFlottante,
       ),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(17),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const Row(
+            children: [
+              CircleAvatar(
+                radius: 22,
+                backgroundColor: TovoTheme.tealSoft,
+                child: Icon(
+                  Icons.local_shipping_rounded,
+                  color: TovoTheme.teal,
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Envoyer un colis',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    Text(
+                      'Deux points, et Tovo s’occupe du trajet.',
+                      style: TextStyle(fontSize: 11.5, color: TovoTheme.muted),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
           _Point(
             couleur: TovoTheme.teal,
             titre: 'Prise en charge',
@@ -198,7 +242,8 @@ class _CourierFormState extends State<CourierForm> {
             children: [
               for (final option in widget.component.list('parcel_options'))
                 _Chip(
-                  libelle: '${option['icon'] ?? ''} ${option['label'] ?? ''}'.trim(),
+                  libelle: '${option['icon'] ?? ''} ${option['label'] ?? ''}'
+                      .trim(),
                   detail: option['hint'] as String?,
                   selectionne: _colis == option['value'],
                   onTap: () => setState(() => _colis = '${option['value']}'),
@@ -233,7 +278,7 @@ class _CourierFormState extends State<CourierForm> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: TovoTheme.surface,
+                color: TovoTheme.tealMist,
                 borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
               ),
               child: Row(
@@ -244,12 +289,18 @@ class _CourierFormState extends State<CourierForm> {
                       children: [
                         const Text(
                           'Estimation',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         if (distance != null)
                           Text(
                             Money.distance(distance),
-                            style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: TovoTheme.muted,
+                            ),
                           ),
                       ],
                     ),
@@ -259,7 +310,7 @@ class _CourierFormState extends State<CourierForm> {
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w800,
-                      color: TovoTheme.teal,
+                      color: TovoTheme.tealDeep,
                     ),
                   ),
                 ],
@@ -347,7 +398,10 @@ class _Point extends StatelessWidget {
                 style: const TextStyle(fontSize: 13),
                 decoration: InputDecoration(
                   hintText: hint,
-                  hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFAAAAAA)),
+                  hintStyle: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFFAAAAAA),
+                  ),
                   isDense: true,
                   border: InputBorder.none,
                 ),

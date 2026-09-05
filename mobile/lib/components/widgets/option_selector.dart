@@ -40,7 +40,8 @@ class _OptionSelectorState extends State<OptionSelector> {
   int get _prixUnitaire {
     var total = widget.component.money('base_price');
     for (final option in _options) {
-      final retenues = _choix[option['id'] as String? ?? ''] ?? const <String>{};
+      final retenues =
+          _choix[option['id'] as String? ?? ''] ?? const <String>{};
       for (final valeur in (option['values'] as List? ?? const [])) {
         if (valeur is! Map) continue;
         if (retenues.contains(valeur['id'])) {
@@ -59,7 +60,8 @@ class _OptionSelectorState extends State<OptionSelector> {
       final requise = option['required'] as bool? ?? false;
       if (!requise) continue;
       final minimum = (option['min_select'] as num?)?.toInt() ?? 1;
-      final retenues = _choix[option['id'] as String? ?? ''] ?? const <String>{};
+      final retenues =
+          _choix[option['id'] as String? ?? ''] ?? const <String>{};
       if (retenues.length < (minimum < 1 ? 1 : minimum)) return false;
     }
     return true;
@@ -85,14 +87,16 @@ class _OptionSelectorState extends State<OptionSelector> {
   }
 
   void _confirmer() {
-    widget.onInteraction(TovoInteraction('add_to_cart', {
-      'product_id': widget.component.str('product_id'),
-      'quantity': _quantite,
-      'selections': _choix.entries
-          .where((e) => e.value.isNotEmpty)
-          .map((e) => {'option_id': e.key, 'value_ids': e.value.toList()})
-          .toList(),
-    }));
+    widget.onInteraction(
+      TovoInteraction('add_to_cart', {
+        'product_id': widget.component.str('product_id'),
+        'quantity': _quantite,
+        'selections': _choix.entries
+            .where((e) => e.value.isNotEmpty)
+            .map((e) => {'option_id': e.key, 'value_ids': e.value.toList()})
+            .toList(),
+      }),
+    );
   }
 
   @override
@@ -101,9 +105,9 @@ class _OptionSelectorState extends State<OptionSelector> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-        border: Border.all(color: const Color(0x12000000)),
+        boxShadow: TovoTheme.ombreFlottante,
       ),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(17),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -113,24 +117,31 @@ class _OptionSelectorState extends State<OptionSelector> {
                 child: Text(
                   widget.component.str('product_name'),
                   style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 18,
+                    letterSpacing: -0.3,
+                    fontWeight: FontWeight.w800,
                     color: TovoTheme.ink,
                   ),
                 ),
               ),
               Text(
                 Money.format(widget.component.money('base_price')),
-                style: const TextStyle(fontSize: 13, color: TovoTheme.muted),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: TovoTheme.tealDeep,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 14),
-          for (final option in _options) _BlocOption(
-            option: option,
-            retenues: _choix[option['id'] as String? ?? ''] ?? const <String>{},
-            onTap: (valeurId) => _basculer(option, valeurId),
-          ),
+          for (final option in _options)
+            _BlocOption(
+              option: option,
+              retenues:
+                  _choix[option['id'] as String? ?? ''] ?? const <String>{},
+              onTap: (valeurId) => _basculer(option, valeurId),
+            ),
           Row(
             children: [
               const Text(
@@ -139,12 +150,17 @@ class _OptionSelectorState extends State<OptionSelector> {
               ),
               const Spacer(),
               IconButton(
-                onPressed: _quantite > 1 ? () => setState(() => _quantite--) : null,
+                onPressed: _quantite > 1
+                    ? () => setState(() => _quantite--)
+                    : null,
                 icon: const Icon(Icons.remove_circle_outline, size: 20),
               ),
               Text(
                 '$_quantite',
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               IconButton(
                 onPressed: () => setState(() => _quantite++),

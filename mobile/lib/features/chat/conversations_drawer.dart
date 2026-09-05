@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../../core/api.dart';
 import '../../core/deconnexion.dart';
-import '../../core/marque.dart';
 import '../../core/theme.dart';
 
 /// La liste des conversations, en tiroir.
@@ -63,9 +62,11 @@ class _TiroirConversationsState extends State<TiroirConversations> {
     if (date == null) return '';
 
     final maintenant = DateTime.now();
-    final jours = DateTime(maintenant.year, maintenant.month, maintenant.day)
-        .difference(DateTime(date.year, date.month, date.day))
-        .inDays;
+    final jours = DateTime(
+      maintenant.year,
+      maintenant.month,
+      maintenant.day,
+    ).difference(DateTime(date.year, date.month, date.day)).inDays;
 
     if (jours == 0) return "aujourd'hui";
     if (jours == 1) return 'hier';
@@ -76,25 +77,29 @@ class _TiroirConversationsState extends State<TiroirConversations> {
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: Colors.white,
+      width: MediaQuery.sizeOf(context).width.clamp(280, 360).toDouble(),
+      backgroundColor: TovoTheme.canvas,
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 16, 10),
-              child: Row(
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 18, 20, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const MarqueTovo(taille: 26),
-                  const SizedBox(width: 10),
-                  const Text(
-                    'TOVO',
+                  Text(
+                    'Conversations',
                     style: TextStyle(
-                      fontSize: 19,
-                      fontWeight: FontWeight.w800,
-                      color: TovoTheme.teal,
-                      letterSpacing: 1.1,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: TovoTheme.ink,
                     ),
+                  ),
+                  SizedBox(height: 3),
+                  Text(
+                    'Retrouvez vos anciennes demandes',
+                    style: TextStyle(fontSize: 11.5, color: TovoTheme.muted),
                   ),
                 ],
               ),
@@ -103,9 +108,9 @@ class _TiroirConversationsState extends State<TiroirConversations> {
               padding: const EdgeInsets.symmetric(horizontal: 14),
               child: FilledButton.icon(
                 style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(46),
-                  backgroundColor: TovoTheme.tealSoft,
-                  foregroundColor: TovoTheme.teal,
+                  minimumSize: const Size.fromHeight(50),
+                  backgroundColor: TovoTheme.teal,
+                  foregroundColor: Colors.white,
                   elevation: 0,
                 ),
                 onPressed: () {
@@ -119,12 +124,17 @@ class _TiroirConversationsState extends State<TiroirConversations> {
                 ),
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 20),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 22),
               child: Text(
-                'Vos conversations',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: TovoTheme.muted),
+                'CONVERSATIONS',
+                style: TextStyle(
+                  fontSize: 10,
+                  letterSpacing: 1.1,
+                  fontWeight: FontWeight.w800,
+                  color: TovoTheme.muted,
+                ),
               ),
             ),
             const SizedBox(height: 6),
@@ -134,53 +144,68 @@ class _TiroirConversationsState extends State<TiroirConversations> {
                       child: SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: TovoTheme.teal),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: TovoTheme.teal,
+                        ),
                       ),
                     )
                   : _conversations.isEmpty
-                      ? const Padding(
-                          padding: EdgeInsets.fromLTRB(22, 20, 22, 0),
-                          child: Text(
-                            'Vos échanges apparaîtront ici.',
-                            style: TextStyle(fontSize: 13, color: TovoTheme.muted),
-                          ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          itemCount: _conversations.length,
-                          itemBuilder: (context, i) {
-                            final c = _conversations[i];
-                            final id = '${c['id']}';
-                            final courante = id == widget.conversationCourante;
+                  ? const Padding(
+                      padding: EdgeInsets.fromLTRB(22, 20, 22, 0),
+                      child: Text(
+                        'Vos échanges apparaîtront ici.',
+                        style: TextStyle(fontSize: 13, color: TovoTheme.muted),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      itemCount: _conversations.length,
+                      itemBuilder: (context, i) {
+                        final c = _conversations[i];
+                        final id = '${c['id']}';
+                        final courante = id == widget.conversationCourante;
 
-                            return ListTile(
-                              dense: true,
-                              selected: courante,
-                              selectedTileColor: TovoTheme.tealSoft,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
-                              ),
-                              title: Text(
-                                '${c['title'] ?? 'Conversation'}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: courante ? FontWeight.w700 : FontWeight.w500,
-                                  color: courante ? TovoTheme.teal : TovoTheme.ink,
-                                ),
-                              ),
-                              subtitle: Text(
-                                _quand(c['updated_at'] as String?),
-                                style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
-                              ),
-                              onTap: () {
-                                Navigator.of(context).pop();
-                                widget.onOuvrir(id);
-                              },
-                            );
+                        return ListTile(
+                          dense: false,
+                          selected: courante,
+                          selectedTileColor: TovoTheme.tealSoft,
+                          leading: Icon(
+                            Icons.chat_bubble_outline_rounded,
+                            size: 17,
+                            color: courante ? TovoTheme.teal : TovoTheme.muted,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                              TovoTheme.radiusChip,
+                            ),
+                          ),
+                          title: Text(
+                            '${c['title'] ?? 'Conversation'}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: courante
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              color: courante ? TovoTheme.teal : TovoTheme.ink,
+                            ),
+                          ),
+                          subtitle: Text(
+                            _quand(c['updated_at'] as String?),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: TovoTheme.muted,
+                            ),
+                          ),
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            widget.onOuvrir(id);
                           },
-                        ),
+                        );
+                      },
+                    ),
             ),
 
             // En pied de panneau, sous les conversations : c'est là qu'on
@@ -189,16 +214,27 @@ class _TiroirConversationsState extends State<TiroirConversations> {
             const Divider(height: 1),
             ListTile(
               dense: true,
-              leading: const Icon(Icons.logout, size: 18, color: TovoTheme.muted),
+              leading: const Icon(
+                Icons.logout,
+                size: 18,
+                color: TovoTheme.muted,
+              ),
               title: const Text(
                 'Se déconnecter',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: TovoTheme.muted),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: TovoTheme.muted,
+                ),
               ),
               onTap: () {
                 // Le contexte du navigateur racine est pris AVANT de fermer :
                 // celui-ci appartient au tiroir, qui est démonté par le `pop`.
                 // La boîte de dialogue s'ouvrirait alors sur un élément mort.
-                final racine = Navigator.of(context, rootNavigator: true).context;
+                final racine = Navigator.of(
+                  context,
+                  rootNavigator: true,
+                ).context;
                 Navigator.of(context).pop();
                 unawaited(confirmerDeconnexion(racine));
               },

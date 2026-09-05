@@ -32,8 +32,9 @@ class CategoryGrid extends StatelessWidget {
             child: Text(
               title,
               style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
+                fontSize: 18,
+                letterSpacing: -0.3,
+                fontWeight: FontWeight.w800,
                 color: TovoTheme.ink,
               ),
             ),
@@ -42,12 +43,10 @@ class CategoryGrid extends StatelessWidget {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            // Un peu plus haut que large : l'icône respire au-dessus du nom
-            // au lieu de le toucher.
-            childAspectRatio: 0.86,
+            crossAxisCount: 4,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 12,
+            childAspectRatio: 0.78,
           ),
           itemCount: items.length,
           itemBuilder: (context, index) {
@@ -71,12 +70,13 @@ class CategoryGrid extends StatelessWidget {
                   // chez GALAXIE renverrait vers toutes les boissons de
                   // Niamey au lieu des siennes.
                   : () => onInteraction(
-                        TovoInteraction('select_category', {
-                          'category_id': id,
-                          if (item['merchant_id'] != null)
-                            'merchant_id': item['merchant_id'],
-                        }),
-                      ),
+                      TovoInteraction('select_category', {
+                        'category_id': id,
+                        'category_name': item['name'],
+                        if (item['merchant_id'] != null)
+                          'merchant_id': item['merchant_id'],
+                      }),
+                    ),
             );
           },
         ),
@@ -158,7 +158,10 @@ class _TuileState extends State<_Tuile> {
   Widget _pastilleEmoji() {
     return Container(
       alignment: Alignment.center,
-      decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+      ),
       child: (widget.emoji ?? '').isEmpty
           ? SvgPicture.asset(IconesCategories.generique, width: 44, height: 44)
           : Text(widget.emoji!, style: const TextStyle(fontSize: 22)),
@@ -178,30 +181,26 @@ class _TuileState extends State<_Tuile> {
         curve: TovoTheme.courbe,
         child: AnimatedContainer(
           duration: TovoTheme.vif,
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
           decoration: BoxDecoration(
-            // Un fond doux, pas de bordure. Le trait gris cernait chaque
-            // tuile et donnait à la grille un air de tableau de bord.
-            color: _presse ? TovoTheme.blocPresse : TovoTheme.bloc,
-            borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
+            color: _presse ? TovoTheme.tealSoft : Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
           ),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.start,
             children: [
-              SizedBox(width: 44, height: 44, child: _dessin()),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text(
-                  widget.nom,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: TovoTheme.ink,
-                    height: 1.25,
-                  ),
+              SizedBox(width: 52, height: 52, child: _dessin()),
+              const SizedBox(height: 7),
+              Text(
+                widget.nom,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: TovoTheme.ink,
+                  height: 1.15,
                 ),
               ),
             ],

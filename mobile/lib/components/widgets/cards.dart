@@ -21,13 +21,16 @@ class ProductCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final actions = (component.data['actions'] as List?)?.whereType<String>().toList() ??
+    final actions =
+        (component.data['actions'] as List?)?.whereType<String>().toList() ??
         const ['add_to_cart'];
     final disponible = component.flag('is_available', true);
     final id = component.str('id');
 
     return _Fiche(
-      imageUrl: component.str('image_url').isEmpty ? null : component.str('image_url'),
+      imageUrl: component.str('image_url').isEmpty
+          ? null
+          : component.str('image_url'),
       titre: component.str('name'),
       sousTitre: component.str('merchant_name'),
       description: component.str('description'),
@@ -37,32 +40,38 @@ class ProductCard extends StatelessWidget {
           Text(
             Money.format(component.money('price')),
             style: const TextStyle(
-              fontSize: 18,
+              fontSize: 20,
               fontWeight: FontWeight.w800,
-              color: TovoTheme.teal,
+              color: TovoTheme.tealDeep,
+              letterSpacing: -0.4,
             ),
           ),
           const Spacer(),
           if (actions.contains('compare_price'))
             TextButton(
               onPressed: () => onInteraction(
-                TovoInteraction('compare_price', {'query': component.str('name')}),
+                TovoInteraction('compare_price', {
+                  'query': component.str('name'),
+                }),
               ),
               child: const Text('Comparer', style: TextStyle(fontSize: 12)),
             ),
           if (actions.contains('add_to_cart'))
             FilledButton(
-              style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(0, 42),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+              ),
               // Un produit indisponible garde son bouton, désactivé : le
               // faire disparaître laisserait croire à un défaut d'affichage.
               onPressed: disponible && id.isNotEmpty
                   ? () => onInteraction(
-                        TovoInteraction('add_to_cart', {
-                          'product_id': id,
-                          'quantity': 1,
-                          'selections': const [],
-                        }),
-                      )
+                      TovoInteraction('add_to_cart', {
+                        'product_id': id,
+                        'quantity': 1,
+                        'selections': const [],
+                      }),
+                    )
                   : null,
               child: Text(disponible ? 'Ajouter' : 'Indisponible'),
             ),
@@ -87,47 +96,142 @@ class MerchantCard extends StatelessWidget {
     final ouverte = component.flag('is_open');
     final distance = component.data['distance_m'] as num?;
     final id = component.str('id');
+    final logo = component.str('logo_url');
+    final adresse = component.str('address_hint');
 
-    return _Fiche(
-      imageUrl: component.str('logo_url').isEmpty ? null : component.str('logo_url'),
-      hauteurImage: 96,
-      titre: component.str('name'),
-      sousTitre: [
-        component.str('address_hint'),
-        if (distance != null) Money.distance(distance.toInt()),
-      ].where((s) => s.isNotEmpty).join(' · '),
-      description: component.str('description'),
-      indisponible: !ouverte,
-      pied: Row(
-        children: [
-          Icon(
-            ouverte ? Icons.check_circle : Icons.schedule,
-            size: 15,
-            color: ouverte ? TovoTheme.success : TovoTheme.danger,
-          ),
-          const SizedBox(width: 5),
-          Text(
-            ouverte
-                ? 'Ouverte · ${component.money('prep_time_min', 20)} min'
-                : 'Fermée',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: ouverte ? TovoTheme.success : TovoTheme.danger,
+    return Opacity(
+      opacity: ouverte ? 1 : 0.72,
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: id.isEmpty
+              ? null
+              : () => onInteraction(
+                  TovoInteraction('select_merchant', {'merchant_id': id}),
+                ),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 82,
+                  height: 82,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: _LogoBoutique(url: logo.isEmpty ? null : logo),
+                  ),
+                ),
+                const SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        component.str('name'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 15.5,
+                          fontWeight: FontWeight.w700,
+                          color: TovoTheme.ink,
+                        ),
+                      ),
+                      if (adresse.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          adresse,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            color: TovoTheme.muted,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 9),
+                      Row(
+                        children: [
+                          Icon(
+                            ouverte ? Icons.check_circle : Icons.schedule,
+                            size: 14,
+                            color: ouverte
+                                ? TovoTheme.success
+                                : TovoTheme.danger,
+                          ),
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: Text(
+                              ouverte
+                                  ? 'Ouverte · ${component.money('prep_time_min', 20)} min'
+                                  : 'Fermée',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: ouverte
+                                    ? TovoTheme.success
+                                    : TovoTheme.danger,
+                              ),
+                            ),
+                          ),
+                          if (distance != null) ...[
+                            const Text(
+                              '  ·  ',
+                              style: TextStyle(color: TovoTheme.muted),
+                            ),
+                            Text(
+                              Money.distance(distance.toInt()),
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                color: TovoTheme.muted,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  color: TovoTheme.muted,
+                  size: 22,
+                ),
+              ],
             ),
           ),
-          const Spacer(),
-          FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
-            onPressed: id.isEmpty
-                ? null
-                : () => onInteraction(
-                      TovoInteraction('select_merchant', {'merchant_id': id}),
-                    ),
-            child: const Text('Voir'),
-          ),
-        ],
+        ),
       ),
+    );
+  }
+}
+
+class _LogoBoutique extends StatelessWidget {
+  const _LogoBoutique({this.url});
+
+  final String? url;
+
+  @override
+  Widget build(BuildContext context) {
+    final repli = Container(
+      color: TovoTheme.tealMist,
+      alignment: Alignment.center,
+      child: const Icon(
+        Icons.storefront_outlined,
+        color: TovoTheme.teal,
+        size: 28,
+      ),
+    );
+    if (url == null) return repli;
+
+    return Image.network(
+      url!,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => repli,
     );
   }
 }
@@ -141,7 +245,6 @@ class _Fiche extends StatelessWidget {
     this.sousTitre = '',
     this.description = '',
     this.indisponible = false,
-    this.hauteurImage = 132,
   });
 
   final String titre;
@@ -149,7 +252,6 @@ class _Fiche extends StatelessWidget {
   final String description;
   final String? imageUrl;
   final bool indisponible;
-  final double hauteurImage;
   final Widget pied;
 
   @override
@@ -160,23 +262,24 @@ class _Fiche extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-          border: Border.all(color: const Color(0x12000000)),
+          boxShadow: TovoTheme.ombre,
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _Vignette(url: imageUrl, hauteur: hauteurImage),
+            _Vignette(url: imageUrl, hauteur: 132),
             Padding(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.fromLTRB(16, 15, 16, 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     titre,
                     style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.25,
                       color: TovoTheme.ink,
                     ),
                   ),
@@ -184,7 +287,11 @@ class _Fiche extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       sousTitre,
-                      style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: TovoTheme.muted,
+                      ),
                     ),
                   ],
                   if (description.isNotEmpty) ...[
@@ -193,7 +300,11 @@ class _Fiche extends StatelessWidget {
                       description,
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, height: 1.4),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        height: 1.45,
+                        color: TovoTheme.inkDoux,
+                      ),
                     ),
                   ],
                   const SizedBox(height: 14),

@@ -25,13 +25,18 @@ class QuickReplies extends StatelessWidget {
       children: [
         for (final item in items)
           ActionChip(
+            avatar: const Icon(
+              Icons.arrow_upward_rounded,
+              size: 14,
+              color: TovoTheme.teal,
+            ),
             label: Text(
               (item['label'] as String?) ?? '',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
             ),
-            backgroundColor: TovoTheme.tealSoft,
-            side: const BorderSide(color: Color(0x22006666)),
-            labelStyle: const TextStyle(color: TovoTheme.teal),
+            backgroundColor: Colors.white,
+            side: const BorderSide(color: TovoTheme.line),
+            labelStyle: const TextStyle(color: TovoTheme.ink),
             onPressed: () => onInteraction(
               TovoInteraction('quick_reply', {
                 'value': item['value'] ?? '',

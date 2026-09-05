@@ -32,22 +32,26 @@ class ProductCollection extends StatelessWidget {
             child: Text(
               title,
               style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
+                fontSize: 18,
+                letterSpacing: -0.3,
+                fontWeight: FontWeight.w800,
                 color: TovoTheme.ink,
               ),
             ),
           ),
         if (horizontal)
           SizedBox(
-            height: 208,
+            height: 248,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: items.length,
               separatorBuilder: (_, __) => const SizedBox(width: 10),
               itemBuilder: (context, i) => SizedBox(
-                width: 156,
-                child: _ProductTile(data: items[i], onInteraction: onInteraction),
+                width: 174,
+                child: _ProductTile(
+                  data: items[i],
+                  onInteraction: onInteraction,
+                ),
               ),
             ),
           )
@@ -66,7 +70,8 @@ class ProductCollection extends StatelessWidget {
   }
 }
 
-String _prix(Map<String, dynamic> data) => Money.format((data['price'] as num?)?.toInt() ?? 0);
+String _prix(Map<String, dynamic> data) =>
+    Money.format((data['price'] as num?)?.toInt() ?? 0);
 
 void _ouvrir(Map<String, dynamic> data, InteractionCallback onInteraction) {
   final id = data['id'] as String?;
@@ -93,15 +98,15 @@ class _ProductTile extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-            border: Border.all(color: const Color(0x12000000)),
+            boxShadow: TovoTheme.ombre,
           ),
           clipBehavior: Clip.antiAlias,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Vignette(url: data['image_url'] as String?, height: 104),
+              _Vignette(url: data['image_url'] as String?, height: 122),
               Padding(
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.fromLTRB(12, 11, 12, 12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -110,26 +115,54 @@ class _ProductTile extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 13,
+                        fontSize: 14,
                         fontWeight: FontWeight.w700,
                         color: TovoTheme.ink,
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      (data['merchant_name'] as String?) ?? '',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
-                    ),
                     const SizedBox(height: 6),
-                    Text(
-                      _prix(data),
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        color: TovoTheme.teal,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            (data['merchant_name'] as String?) ?? '',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w600,
+                              color: TovoTheme.muted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text(
+                          _prix(data),
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: TovoTheme.tealDeep,
+                          ),
+                        ),
+                        const Spacer(),
+                        Container(
+                          width: 30,
+                          height: 30,
+                          decoration: const BoxDecoration(
+                            color: TovoTheme.teal,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.arrow_forward_rounded,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -163,13 +196,18 @@ class _ProductRow extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-            border: Border.all(color: const Color(0x12000000)),
+            border: Border.all(color: TovoTheme.line),
+            boxShadow: TovoTheme.ombre,
           ),
           child: Row(
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
-                child: _Vignette(url: data['image_url'] as String?, height: 56, width: 56),
+                child: _Vignette(
+                  url: data['image_url'] as String?,
+                  height: 56,
+                  width: 56,
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -194,7 +232,10 @@ class _ProductRow extends StatelessWidget {
                       ].where((s) => s.isNotEmpty).join(' · '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: TovoTheme.muted,
+                      ),
                     ),
                   ],
                 ),
@@ -232,7 +273,11 @@ class _Vignette extends StatelessWidget {
       width: width ?? double.infinity,
       color: const Color(0xFFEBEBEB),
       alignment: Alignment.center,
-      child: const Icon(Icons.image_outlined, color: Color(0xFFBDBDBD), size: 20),
+      child: const Icon(
+        Icons.image_outlined,
+        color: Color(0xFFBDBDBD),
+        size: 20,
+      ),
     );
 
     if (url == null || url!.isEmpty) return placeholder;

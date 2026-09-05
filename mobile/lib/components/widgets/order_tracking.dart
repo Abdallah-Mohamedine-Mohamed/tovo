@@ -6,6 +6,32 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme.dart';
 import '../registry.dart';
 
+const List<String> _etapesCommandeVisibles = [
+  'Acceptée',
+  'En préparation',
+  'Livreur en route',
+  'Livrée',
+];
+
+int _etapeCommandeVisible(String statut) {
+  switch (statut) {
+    case 'pending':
+    case 'confirmed':
+      return 0;
+    case 'preparing':
+    case 'ready':
+      return 1;
+    case 'assigned':
+    case 'picked_up':
+    case 'delivering':
+      return 2;
+    case 'delivered':
+      return 3;
+    default:
+      return -1;
+  }
+}
+
 /// `order_tracking` — composant vivant.
 ///
 /// Contrairement aux autres, il ne se contente pas d'afficher ce que le
@@ -30,7 +56,8 @@ class OrderTracking extends StatefulWidget {
   State<OrderTracking> createState() => _OrderTrackingState();
 }
 
-class _OrderTrackingState extends State<OrderTracking> with WidgetsBindingObserver {
+class _OrderTrackingState extends State<OrderTracking>
+    with WidgetsBindingObserver {
   RealtimeChannel? _canalCommande;
   RealtimeChannel? _canalLivreur;
 
@@ -78,8 +105,10 @@ class _OrderTrackingState extends State<OrderTracking> with WidgetsBindingObserv
     if (_orderId.isEmpty) return;
 
     try {
-      final etat = await Supabase.instance.client
-          .rpc('order_tracking', params: {'p_order_id': _orderId});
+      final etat = await Supabase.instance.client.rpc(
+        'order_tracking',
+        params: {'p_order_id': _orderId},
+      );
 
       if (!mounted || etat is! Map) return;
       final statut = etat['status'] as String?;
@@ -87,7 +116,8 @@ class _OrderTrackingState extends State<OrderTracking> with WidgetsBindingObserv
 
       setState(() {
         _statut = statut;
-        _livreur = (etat['driver'] as Map?)?.cast<String, dynamic>() ?? _livreur;
+        _livreur =
+            (etat['driver'] as Map?)?.cast<String, dynamic>() ?? _livreur;
       });
 
       // Livrée pendant l'absence : plus rien à écouter, et l'abonnement
@@ -174,17 +204,15 @@ class _OrderTrackingState extends State<OrderTracking> with WidgetsBindingObserv
 
   @override
   Widget build(BuildContext context) {
-    final etapes = (widget.component.data['steps'] as List? ?? const [])
-        .whereType<String>()
-        .toList();
-    final courante = etapes.indexOf(_statut);
+    final etapes = _etapesCommandeVisibles;
+    final courante = _etapeCommandeVisible(_statut);
     final annulee = _statut == 'cancelled';
 
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-        border: Border.all(color: const Color(0x12000000)),
+        boxShadow: TovoTheme.ombreFlottante,
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -192,14 +220,14 @@ class _OrderTrackingState extends State<OrderTracking> with WidgetsBindingObserv
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            color: annulee ? const Color(0xFFFDECEA) : TovoTheme.tealSoft,
+            color: annulee ? TovoTheme.coralSoft : TovoTheme.tealDeep,
             child: Row(
               children: [
                 Container(
                   width: 8,
                   height: 8,
                   decoration: BoxDecoration(
-                    color: annulee ? TovoTheme.danger : TovoTheme.success,
+                    color: annulee ? TovoTheme.danger : const Color(0xFF66D4B2),
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -210,16 +238,16 @@ class _OrderTrackingState extends State<OrderTracking> with WidgetsBindingObserv
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: annulee ? TovoTheme.danger : TovoTheme.teal,
+                      color: annulee ? TovoTheme.danger : Colors.white,
                     ),
                   ),
                 ),
                 Text(
                   Money.format(widget.component.money('total')),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
-                    color: TovoTheme.ink,
+                    color: annulee ? TovoTheme.ink : Colors.white,
                   ),
                 ),
               ],
@@ -250,13 +278,16 @@ class _OrderTrackingState extends State<OrderTracking> with WidgetsBindingObserv
                 ],
               ),
             ),
-          if (_livreur != null) _BlocLivreur(
-            livreur: _livreur!,
-            positionRecue: _dernierePosition != null,
-            onAppeler: () => widget.onInteraction(
-              TovoInteraction('call_driver', {'phone': _livreur!['phone'] ?? ''}),
+          if (_livreur != null)
+            _BlocLivreur(
+              livreur: _livreur!,
+              positionRecue: _dernierePosition != null,
+              onAppeler: () => widget.onInteraction(
+                TovoInteraction('call_driver', {
+                  'phone': _livreur!['phone'] ?? '',
+                }),
+              ),
             ),
-          ),
           // La notation apparaît au moment où elle a du sens, dans la carte
           // que le client regarde déjà. Un écran séparé qu'il faudrait aller
           // ouvrir ne serait jamais visité, et les boutiques resteraient
@@ -325,7 +356,11 @@ class _BlocNotation extends StatelessWidget {
       child: noteDeposee != null
           ? Row(
               children: [
-                const Icon(Icons.favorite_rounded, size: 16, color: TovoTheme.teal),
+                const Icon(
+                  Icons.favorite_rounded,
+                  size: 16,
+                  color: TovoTheme.teal,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -350,7 +385,10 @@ class _BlocNotation extends StatelessWidget {
                         onPressed: () => onNoter(etoile),
                         visualDensity: VisualDensity.compact,
                         padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                        constraints: const BoxConstraints(
+                          minWidth: 40,
+                          minHeight: 40,
+                        ),
                         icon: const Icon(
                           Icons.star_rounded,
                           size: 26,
@@ -399,13 +437,18 @@ class _BlocLivreur extends StatelessWidget {
               children: [
                 Text(
                   (livreur['name'] as String?) ?? 'Votre livreur',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 Text(
                   // La carte viendra avec l'intégration cartographique. En
                   // attendant, dire simplement si la position arrive vaut
                   // mieux qu'un cadre vide.
-                  positionRecue ? 'Position mise à jour' : 'En attente de position',
+                  positionRecue
+                      ? 'Position mise à jour'
+                      : 'En attente de position',
                   style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
                 ),
               ],

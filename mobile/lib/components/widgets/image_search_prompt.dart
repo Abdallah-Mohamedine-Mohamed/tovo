@@ -28,20 +28,44 @@ class ImageSearchPrompt extends StatelessWidget {
     final galerie = component.flag('allow_gallery', true);
 
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: TovoTheme.surface,
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [TovoTheme.tealDeep, TovoTheme.teal],
+        ),
         borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-        border: Border.all(color: const Color(0x14000000)),
+        boxShadow: TovoTheme.ombreFlottante,
       ),
       child: Column(
         children: [
-          const Icon(Icons.photo_camera_outlined, size: 32, color: TovoTheme.teal),
-          const SizedBox(height: 10),
+          Container(
+            width: 54,
+            height: 54,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.13),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.center_focus_strong_rounded,
+              size: 27,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 13),
           Text(
-            component.str('message', 'Montrez-moi une photo, je trouve où l’acheter'),
+            component.str(
+              'message',
+              'Montrez-moi une photo, je trouve où l’acheter',
+            ),
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 13, height: 1.4),
+            style: const TextStyle(
+              fontSize: 15,
+              height: 1.4,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+            ),
           ),
           const SizedBox(height: 16),
           Row(
@@ -49,7 +73,11 @@ class ImageSearchPrompt extends StatelessWidget {
             children: [
               if (camera)
                 FilledButton.icon(
-                  style: FilledButton.styleFrom(minimumSize: const Size(0, 42)),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 44),
+                    backgroundColor: Colors.white,
+                    foregroundColor: TovoTheme.tealDeep,
+                  ),
                   onPressed: () => onInteraction(
                     const TovoInteraction('pick_image', {'source': 'camera'}),
                   ),
@@ -60,8 +88,9 @@ class ImageSearchPrompt extends StatelessWidget {
               if (galerie)
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 42),
-                    foregroundColor: TovoTheme.teal,
+                    minimumSize: const Size(0, 44),
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Color(0x66FFFFFF)),
                   ),
                   onPressed: () => onInteraction(
                     const TovoInteraction('pick_image', {'source': 'gallery'}),

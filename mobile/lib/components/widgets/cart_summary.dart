@@ -29,7 +29,7 @@ class CartSummary extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-        border: Border.all(color: const Color(0x12000000)),
+        boxShadow: TovoTheme.ombreFlottante,
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -38,21 +38,34 @@ class CartSummary extends StatelessWidget {
           if (merchant.isNotEmpty)
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              color: TovoTheme.tealSoft,
-              child: Text(
-                merchant,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: TovoTheme.teal,
-                ),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 13),
+              color: TovoTheme.tealDeep,
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.shopping_bag_rounded,
+                    size: 17,
+                    color: Colors.white,
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      merchant,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          for (final item in items) _Ligne(data: item, onInteraction: onInteraction),
+          for (final item in items)
+            _Ligne(data: item, onInteraction: onInteraction),
           const Divider(height: 1),
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
             child: Column(
               children: [
                 _Total(
@@ -69,25 +82,32 @@ class CartSummary extends StatelessWidget {
                   montant: component.money('total'),
                   fort: true,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 if (!peutCommander && blocage.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Text(
                       blocage,
-                      style: const TextStyle(fontSize: 12, color: TovoTheme.danger),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: TovoTheme.danger,
+                      ),
                     ),
                   ),
                 FilledButton(
                   onPressed: peutCommander
-                      ? () => onInteraction(const TovoInteraction('place_order'))
+                      ? () =>
+                            onInteraction(const TovoInteraction('place_order'))
                       : null,
                   child: Text(
                     component.str(
                       'checkout_label',
                       'Commander — ${Money.format(component.money('total'))}',
                     ),
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -112,7 +132,7 @@ class _Ligne extends StatelessWidget {
     final label = (data['selections_label'] as String?) ?? '';
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+      padding: const EdgeInsets.fromLTRB(16, 13, 12, 13),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -123,8 +143,8 @@ class _Ligne extends StatelessWidget {
                 Text(
                   (data['product_name'] as String?) ?? '',
                   style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
                     color: TovoTheme.ink,
                   ),
                 ),
@@ -133,7 +153,10 @@ class _Ligne extends StatelessWidget {
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
                       label,
-                      style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: TovoTheme.muted,
+                      ),
                     ),
                   ),
               ],
@@ -206,20 +229,24 @@ class _Bouton extends StatelessWidget {
       borderRadius: BorderRadius.circular(999),
       onTap: onTap,
       child: Container(
-        width: 26,
-        height: 26,
+        width: 30,
+        height: 30,
         decoration: const BoxDecoration(
-          color: TovoTheme.surface,
+          color: TovoTheme.tealMist,
           shape: BoxShape.circle,
         ),
-        child: Icon(icone, size: 14, color: TovoTheme.ink),
+        child: Icon(icone, size: 15, color: TovoTheme.teal),
       ),
     );
   }
 }
 
 class _Total extends StatelessWidget {
-  const _Total({required this.libelle, required this.montant, this.fort = false});
+  const _Total({
+    required this.libelle,
+    required this.montant,
+    this.fort = false,
+  });
 
   final String libelle;
   final int montant;
@@ -228,9 +255,9 @@ class _Total extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = TextStyle(
-      fontSize: fort ? 15 : 12,
+      fontSize: fort ? 18 : 12.5,
       fontWeight: fort ? FontWeight.w800 : FontWeight.w400,
-      color: fort ? TovoTheme.ink : TovoTheme.muted,
+      color: fort ? TovoTheme.tealDeep : TovoTheme.muted,
     );
 
     return Padding(

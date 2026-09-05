@@ -73,7 +73,6 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
 
-
     setState(() {
       _occupe = true;
       _erreur = null;
@@ -210,7 +209,8 @@ class _AuthScreenState extends State<AuthScreen> {
             width: double.infinity,
             decoration: const BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(36)),
+              boxShadow: TovoTheme.ombreFlottante,
             ),
             child: SafeArea(
               top: false,
@@ -222,13 +222,30 @@ class _AuthScreenState extends State<AuthScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (_etape == _Etape.numero) ..._etapeNumero() else ..._etapeCode(),
+                      Center(
+                        child: Container(
+                          width: 42,
+                          height: 5,
+                          margin: const EdgeInsets.only(bottom: 24),
+                          decoration: BoxDecoration(
+                            color: TovoTheme.line,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                      if (_etape == _Etape.numero)
+                        ..._etapeNumero()
+                      else
+                        ..._etapeCode(),
                       if (_erreur != null) ...[
                         const SizedBox(height: 14),
                         Text(
                           _erreur!,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 12, color: TovoTheme.danger),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: TovoTheme.danger,
+                          ),
                         ),
                       ],
                     ],
@@ -243,100 +260,114 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   List<Widget> _etapeNumero() => [
-        const Text(
-          'Bienvenue',
-          style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5),
-        ),
-        const SizedBox(height: 4),
-        const Text(
-          'Commençons par votre numéro de téléphone.',
-          style: TextStyle(fontSize: 13, color: TovoTheme.muted),
-        ),
-        const SizedBox(height: 22),
-        TextField(
-          controller: _numero,
-          keyboardType: TextInputType.phone,
-          autofocus: true,
-          textInputAction: TextInputAction.done,
-          onSubmitted: (_) => _envoyerCode(),
-          // Chiffres, « + » et espaces. Le « \d » compte : sans lui, la
-          // classe n'autorise que la lettre d, le plus et l'espace — le champ
-          // refuse alors tout chiffre, et personne ne peut se connecter.
-          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d+ ]'))],
-          decoration: _decoration('+227 90 00 00 00'),
-          style: const TextStyle(fontSize: 19, letterSpacing: 1, fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 20),
-        FilledButton(
-          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(54)),
-          onPressed: _occupe ? null : _envoyerCode,
-          child: _occupe
-              ? const _Attente()
-              : const Text(
-                  'Commencer',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                ),
-        ),
-      ];
+    const Text(
+      'Bienvenue',
+      style: TextStyle(
+        fontSize: 26,
+        fontWeight: FontWeight.w800,
+        letterSpacing: -0.5,
+      ),
+    ),
+    const SizedBox(height: 4),
+    const Text(
+      'Commençons par votre numéro de téléphone.',
+      style: TextStyle(fontSize: 13, color: TovoTheme.muted),
+    ),
+    const SizedBox(height: 22),
+    TextField(
+      controller: _numero,
+      keyboardType: TextInputType.phone,
+      autofocus: true,
+      textInputAction: TextInputAction.done,
+      onSubmitted: (_) => _envoyerCode(),
+      // Chiffres, « + » et espaces. Le « \d » compte : sans lui, la
+      // classe n'autorise que la lettre d, le plus et l'espace — le champ
+      // refuse alors tout chiffre, et personne ne peut se connecter.
+      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d+ ]'))],
+      decoration: _decoration('+227 90 00 00 00').copyWith(
+        prefixIcon: const Icon(Icons.phone_rounded, color: TovoTheme.teal),
+      ),
+      style: const TextStyle(
+        fontSize: 19,
+        letterSpacing: 1,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+    const SizedBox(height: 20),
+    FilledButton(
+      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(54)),
+      onPressed: _occupe ? null : _envoyerCode,
+      child: _occupe
+          ? const _Attente()
+          : const Text(
+              'Commencer',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+            ),
+    ),
+  ];
 
   List<Widget> _etapeCode() => [
-        Text(
-          'Code envoyé au $_numeroComplet',
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _code,
-          keyboardType: TextInputType.number,
-          autofocus: true,
-          maxLength: 6,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          textAlign: TextAlign.center,
-          decoration: _decoration('••••••').copyWith(counterText: ''),
-          style: const TextStyle(fontSize: 26, letterSpacing: 10, fontWeight: FontWeight.w700),
-          onChanged: (v) {
-            // Validation automatique à six chiffres : un code se saisit et se
-            // valide d'un geste, pas de deux.
-            if (v.length == 6 && !_occupe) _verifierCode();
-          },
-        ),
-        const SizedBox(height: 20),
-        FilledButton(
-          onPressed: _occupe ? null : _verifierCode,
-          child: _occupe ? const _Attente() : const Text('Valider'),
-        ),
-        const SizedBox(height: 10),
-        TextButton(
-          onPressed: _secondesAvantRenvoi > 0 || _occupe ? null : _envoyerCode,
-          child: Text(
-            _secondesAvantRenvoi > 0
-                ? 'Renvoyer le code dans $_secondesAvantRenvoi s'
-                : 'Renvoyer le code',
-            style: const TextStyle(fontSize: 12),
-          ),
-        ),
-        TextButton(
-          onPressed: _occupe
-              ? null
-              : () => setState(() {
-                    _etape = _Etape.numero;
-                    _code.clear();
-                    _erreur = null;
-                  }),
-          child: const Text('Changer de numéro', style: TextStyle(fontSize: 12)),
-        ),
-      ];
+    Text(
+      'Code envoyé au $_numeroComplet',
+      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+    ),
+    const SizedBox(height: 8),
+    TextField(
+      controller: _code,
+      keyboardType: TextInputType.number,
+      autofocus: true,
+      maxLength: 6,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      textAlign: TextAlign.center,
+      decoration: _decoration('••••••').copyWith(counterText: ''),
+      style: const TextStyle(
+        fontSize: 26,
+        letterSpacing: 10,
+        fontWeight: FontWeight.w700,
+      ),
+      onChanged: (v) {
+        // Validation automatique à six chiffres : un code se saisit et se
+        // valide d'un geste, pas de deux.
+        if (v.length == 6 && !_occupe) _verifierCode();
+      },
+    ),
+    const SizedBox(height: 20),
+    FilledButton(
+      onPressed: _occupe ? null : _verifierCode,
+      child: _occupe ? const _Attente() : const Text('Valider'),
+    ),
+    const SizedBox(height: 10),
+    TextButton(
+      onPressed: _secondesAvantRenvoi > 0 || _occupe ? null : _envoyerCode,
+      child: Text(
+        _secondesAvantRenvoi > 0
+            ? 'Renvoyer le code dans $_secondesAvantRenvoi s'
+            : 'Renvoyer le code',
+        style: const TextStyle(fontSize: 12),
+      ),
+    ),
+    TextButton(
+      onPressed: _occupe
+          ? null
+          : () => setState(() {
+              _etape = _Etape.numero;
+              _code.clear();
+              _erreur = null;
+            }),
+      child: const Text('Changer de numéro', style: TextStyle(fontSize: 12)),
+    ),
+  ];
 
   InputDecoration _decoration(String hint) => InputDecoration(
-        hintText: hint,
-        filled: true,
-        fillColor: TovoTheme.surface,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
-          borderSide: BorderSide.none,
-        ),
-      );
+    hintText: hint,
+    filled: true,
+    fillColor: TovoTheme.tealMist,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
+      borderSide: BorderSide.none,
+    ),
+  );
 }
 
 class _Attente extends StatelessWidget {
@@ -344,8 +375,8 @@ class _Attente extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const SizedBox(
-        height: 18,
-        width: 18,
-        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-      );
+    height: 18,
+    width: 18,
+    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+  );
 }

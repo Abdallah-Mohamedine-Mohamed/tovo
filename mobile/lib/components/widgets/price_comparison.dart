@@ -28,8 +28,9 @@ class PriceComparison extends StatelessWidget {
     // Partenaires d'abord, du moins cher au plus cher. C'est le classement
     // qui sert l'utilisateur ET le produit : ce qu'il peut réellement
     // commander vient en premier.
-    final partenaires = resultats.where((r) => r['is_orderable'] == true).toList()
-      ..sort((a, b) => _prix(a).compareTo(_prix(b)));
+    final partenaires =
+        resultats.where((r) => r['is_orderable'] == true).toList()
+          ..sort((a, b) => _prix(a).compareTo(_prix(b)));
     final externes = resultats.where((r) => r['is_orderable'] != true).toList()
       ..sort((a, b) => _prix(a).compareTo(_prix(b)));
 
@@ -37,22 +38,34 @@ class PriceComparison extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-        border: Border.all(color: const Color(0x12000000)),
+        boxShadow: TovoTheme.ombreFlottante,
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            color: TovoTheme.tealSoft,
-            child: Text(
-              component.str('product_query'),
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: TovoTheme.teal,
-              ),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 13),
+            color: TovoTheme.tealDeep,
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.compare_arrows_rounded,
+                  size: 18,
+                  color: Colors.white,
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    component.str('product_query'),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
 
@@ -79,14 +92,19 @@ class PriceComparison extends StatelessWidget {
               ),
             ),
             for (final externe in externes)
-              _Ligne(donnee: externe, meilleure: false, onInteraction: onInteraction),
+              _Ligne(
+                donnee: externe,
+                meilleure: false,
+                onInteraction: onInteraction,
+              ),
           ],
         ],
       ),
     );
   }
 
-  static int _prix(Map<String, dynamic> r) => (r['price'] as num?)?.toInt() ?? 0;
+  static int _prix(Map<String, dynamic> r) =>
+      (r['price'] as num?)?.toInt() ?? 0;
 }
 
 class _Ligne extends StatelessWidget {
@@ -125,13 +143,19 @@ class _Ligne extends StatelessWidget {
                         child: Text(
                           (donnee['seller_name'] as String?) ?? '',
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                       if (meilleure) ...[
                         const SizedBox(width: 6),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: TovoTheme.tealSoft,
                             borderRadius: BorderRadius.circular(4),
@@ -157,7 +181,10 @@ class _Ligne extends StatelessWidget {
                     ].where((s) => s.isNotEmpty).join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: TovoTheme.muted,
+                    ),
                   ),
                 ],
               ),
@@ -183,12 +210,15 @@ class _Ligne extends StatelessWidget {
                     ),
                     onPressed: enStock
                         ? () => onInteraction(
-                              TovoInteraction('select_product', {
-                                'product_id': donnee['ref_id'],
-                              }),
-                            )
+                            TovoInteraction('select_product', {
+                              'product_id': donnee['ref_id'],
+                            }),
+                          )
                         : null,
-                    child: const Text('Commander', style: TextStyle(fontSize: 11)),
+                    child: const Text(
+                      'Commander',
+                      style: TextStyle(fontSize: 11),
+                    ),
                   )
                 : TextButton(
                     style: TextButton.styleFrom(
@@ -196,7 +226,9 @@ class _Ligne extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                     ),
                     onPressed: () => onInteraction(
-                      TovoInteraction('open_external', {'url': donnee['source_url']}),
+                      TovoInteraction('open_external', {
+                        'url': donnee['source_url'],
+                      }),
                     ),
                     child: const Text('Voir', style: TextStyle(fontSize: 11)),
                   ),

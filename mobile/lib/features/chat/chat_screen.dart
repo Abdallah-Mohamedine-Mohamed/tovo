@@ -43,7 +43,11 @@ class ChatScreen extends StatefulWidget {
 /// Le repère écrit compte autant que les coordonnées : c'est lui que le
 /// livreur lit quand le GPS le pose au milieu du quartier.
 class _Destination {
-  const _Destination({required this.repere, required this.lat, required this.lng});
+  const _Destination({
+    required this.repere,
+    required this.lat,
+    required this.lng,
+  });
 
   final String repere;
   final double lat;
@@ -202,15 +206,17 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _conversationId = id;
       for (final m in messages.cast<Map<String, dynamic>>()) {
-        _tours.add(_Tour(
-          deLAssistant: m['role'] != 'user',
-          contenu: '${m['content'] ?? ''}',
-          composants: ((m['components'] as List?) ?? const [])
-              .whereType<Map<String, dynamic>>()
-              .map(TovoComponent.fromJson)
-              .where((c) => c.type.isNotEmpty)
-              .toList(),
-        ));
+        _tours.add(
+          _Tour(
+            deLAssistant: m['role'] != 'user',
+            contenu: '${m['content'] ?? ''}',
+            composants: ((m['components'] as List?) ?? const [])
+                .whereType<Map<String, dynamic>>()
+                .map(TovoComponent.fromJson)
+                .where((c) => c.type.isNotEmpty)
+                .toList(),
+          ),
+        );
       }
     });
     _versLeBas();
@@ -245,7 +251,8 @@ class _ChatScreenState extends State<ChatScreen> {
       // On ne remplace que si le dernier tour montre bien la même chose :
       // écraser un message d'erreur ou une réponse de l'assistant ferait
       // disparaître une information que l'utilisateur n'a pas encore lue.
-      final peutRemplacer = remplaceLeDernier &&
+      final peutRemplacer =
+          remplaceLeDernier &&
           _tours.isNotEmpty &&
           reponse.ok &&
           _memeNature(_tours.last, tour);
@@ -271,14 +278,16 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// Parle à l'assistant. Texte libre ou interaction à interpréter.
   Future<void> _parler({String? texte, Map<String, dynamic>? interaction}) {
-    return _appeler(() => widget.api.post('/chat', {
-          'client_message_id': _nouvelIdentifiant(),
-          if (_conversationId != null) 'conversation_id': _conversationId,
-          if (texte != null) 'text': texte,
-          if (interaction != null) 'interaction': interaction,
-          if (_position != null)
-            'context': {'lat': _position!.$1, 'lng': _position!.$2},
-        }));
+    return _appeler(
+      () => widget.api.post('/chat', {
+        'client_message_id': _nouvelIdentifiant(),
+        if (_conversationId != null) 'conversation_id': _conversationId,
+        if (texte != null) 'text': texte,
+        if (interaction != null) 'interaction': interaction,
+        if (_position != null)
+          'context': {'lat': _position!.$1, 'lng': _position!.$2},
+      }),
+    );
   }
 
   // ------------------------------------------------------------------
@@ -389,7 +398,9 @@ class _ChatScreenState extends State<ChatScreen> {
     if (duree < VoixTovo.dureeMin) {
       await VoixTovo.annuler();
       if (!mounted) return;
-      _messageAssistant("C'était trop court. Appuyez, parlez, puis appuyez à nouveau.");
+      _messageAssistant(
+        "C'était trop court. Appuyez, parlez, puis appuyez à nouveau.",
+      );
       return;
     }
 
@@ -398,13 +409,15 @@ class _ChatScreenState extends State<ChatScreen> {
 
     unawaited(HapticFeedback.lightImpact());
     _ajouterTourUtilisateur('🎤 Message vocal');
-    await _appeler(() => widget.api.post('/chat', {
-          'client_message_id': _nouvelIdentifiant(),
-          if (_conversationId != null) 'conversation_id': _conversationId,
-          'audio': {'mime': audio.mime, 'data': audio.data},
-          if (_position != null)
-            'context': {'lat': _position!.$1, 'lng': _position!.$2},
-        }));
+    await _appeler(
+      () => widget.api.post('/chat', {
+        'client_message_id': _nouvelIdentifiant(),
+        if (_conversationId != null) 'conversation_id': _conversationId,
+        'audio': {'mime': audio.mime, 'data': audio.data},
+        if (_position != null)
+          'context': {'lat': _position!.$1, 'lng': _position!.$2},
+      }),
+    );
   }
 
   Future<void> _annulerLaParole() async {
@@ -420,13 +433,17 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _rafraichirPosition() async {
     final p = await TovoLocation.current();
-    if (p != null && mounted) setState(() => _position = (p.latitude, p.longitude));
+    if (p != null && mounted) {
+      setState(() => _position = (p.latitude, p.longitude));
+    }
   }
 
   void _ajouterTourUtilisateur(String texte, {String? photoLocale}) {
-    setState(() => _tours.add(
-          _Tour(deLAssistant: false, contenu: texte, photoLocale: photoLocale),
-        ));
+    setState(
+      () => _tours.add(
+        _Tour(deLAssistant: false, contenu: texte, photoLocale: photoLocale),
+      ),
+    );
     _versLeBas();
   }
 
@@ -460,38 +477,42 @@ class _ChatScreenState extends State<ChatScreen> {
         // catégorie.
         final boutique = p['merchant_id'] as String?;
         if (boutique != null) {
-          _appeler(() => widget.api.get(
-                '/merchants/$boutique/products',
-                query: {'category': p['category_id']},
-              ));
+          _appeler(
+            () => widget.api.get(
+              '/merchants/$boutique/products',
+              query: {'category': p['category_id']},
+            ),
+          );
         } else {
-          _ajouterTourUtilisateur('Voir cette catégorie');
-          _appeler(() => widget.api.get(
-                '/categories/${p['category_id']}/merchants',
-                query: _position == null
-                    ? null
-                    : {'lat': _position!.$1, 'lng': _position!.$2},
-              ));
+          _appeler(
+            () => widget.api.get(
+              '/categories/${p['category_id']}/merchants',
+              query: _position == null
+                  ? null
+                  : {'lat': _position!.$1, 'lng': _position!.$2},
+            ),
+          );
         }
 
       case 'select_product':
         _appeler(() => widget.api.get('/products/${p['product_id']}'));
 
       case 'add_to_cart':
-        _appeler(() => widget.api.post('/cart/items', {
-              'product_id': p['product_id'],
-              'quantity': p['quantity'] ?? 1,
-              'selections': p['selections'] ?? const [],
-            }));
+        _appeler(
+          () => widget.api.post('/cart/items', {
+            'product_id': p['product_id'],
+            'quantity': p['quantity'] ?? 1,
+            'selections': p['selections'] ?? const [],
+          }),
+        );
 
       // Ces trois gestes changent un panier déjà à l'écran : ils le
       // mettent à jour sur place au lieu d'en empiler une copie plus bas.
       case 'update_qty':
         _appeler(
-          () => widget.api.patch(
-            '/cart/items/${p['item_id']}',
-            {'quantity': p['quantity']},
-          ),
+          () => widget.api.patch('/cart/items/${p['item_id']}', {
+            'quantity': p['quantity'],
+          }),
           remplaceLeDernier: true,
         );
 
@@ -517,7 +538,9 @@ class _ChatScreenState extends State<ChatScreen> {
       // le faire et répondait « je n'ai rien trouvé » — un aller-retour au
       // modèle, facturé, pour une réponse fausse.
       case 'select_merchant':
-        _appeler(() => widget.api.get('/merchants/${p['merchant_id']}/products'));
+        _appeler(
+          () => widget.api.get('/merchants/${p['merchant_id']}/products'),
+        );
 
       // --- interprétation nécessaire : l'assistant -------------------
 
@@ -546,7 +569,9 @@ class _ChatScreenState extends State<ChatScreen> {
       // --- cas particuliers ------------------------------------------
       case 'pick_image':
         _chercherParPhoto(
-          '${p['source']}' == 'camera' ? ImageSource.camera : ImageSource.gallery,
+          '${p['source']}' == 'camera'
+              ? ImageSource.camera
+              : ImageSource.gallery,
         );
 
       case 'open_external':
@@ -608,12 +633,18 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined, color: TovoTheme.teal),
+              leading: const Icon(
+                Icons.photo_camera_outlined,
+                color: TovoTheme.teal,
+              ),
               title: const Text('Prendre une photo'),
               onTap: () => Navigator.of(contexte).pop(ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: TovoTheme.teal),
+              leading: const Icon(
+                Icons.photo_library_outlined,
+                color: TovoTheme.teal,
+              ),
               title: const Text('Choisir dans la galerie'),
               onTap: () => Navigator.of(contexte).pop(ImageSource.gallery),
             ),
@@ -657,7 +688,9 @@ class _ChatScreenState extends State<ChatScreen> {
       // l'identifiant de l'utilisateur. Chacun n'écrit que chez soi.
       final chemin = '${utilisateur.id}/${_nouvelIdentifiant()}.jpg';
 
-      await Supabase.instance.client.storage.from('search-images').uploadBinary(
+      await Supabase.instance.client.storage
+          .from('search-images')
+          .uploadBinary(
             chemin,
             await fichier.readAsBytes(),
             fileOptions: const FileOptions(contentType: 'image/jpeg'),
@@ -669,19 +702,23 @@ class _ChatScreenState extends State<ChatScreen> {
       // Seul le CHEMIN part vers l'assistant. Les octets de l'image
       // n'entrent jamais dans le contexte du modèle : ils y resteraient à
       // chaque tour, pour toujours.
-      await _parler(interaction: {
-        'action': 'search_by_image',
-        'payload': {'image_path': chemin},
-      });
+      await _parler(
+        interaction: {
+          'action': 'search_by_image',
+          'payload': {'image_path': chemin},
+        },
+      );
     } on Exception catch (cause) {
       if (!mounted) return;
       setState(() {
         _charge = false;
-        _tours.add(_Tour(
-          deLAssistant: true,
-          contenu: "L'envoi de la photo a échoué. Vérifiez votre réseau.",
-          enErreur: true,
-        ));
+        _tours.add(
+          _Tour(
+            deLAssistant: true,
+            contenu: "L'envoi de la photo a échoué. Vérifiez votre réseau.",
+            enErreur: true,
+          ),
+        );
       });
       debugPrint('[chat] photo non envoyée : $cause');
     }
@@ -700,7 +737,9 @@ class _ChatScreenState extends State<ChatScreen> {
     // Les adresses d'abord : à Niamey il n'y a pas d'adresse postale, et
     // retaper « Yantala, derrière la pharmacie Al Nour » à chaque commande
     // est la friction la plus évitable de l'application.
-    final destination = await _choisirDestination(adresseChoisie: adresseChoisie);
+    final destination = await _choisirDestination(
+      adresseChoisie: adresseChoisie,
+    );
     if (!mounted || destination == null) return;
 
     final paiement = await _choisirPaiement();
@@ -710,13 +749,15 @@ class _ChatScreenState extends State<ChatScreen> {
     unawaited(HapticFeedback.mediumImpact());
     _idCommandeEnCours ??= _nouvelIdentifiant();
 
-    await _appeler(() => widget.api.post('/orders', {
-          'type': 'delivery',
-          'client_order_id': _idCommandeEnCours,
-          'dropoff_hint': destination.repere,
-          'dropoff': {'lat': destination.lat, 'lng': destination.lng},
-          'payment_method': paiement,
-        }));
+    await _appeler(
+      () => widget.api.post('/orders', {
+        'type': 'delivery',
+        'client_order_id': _idCommandeEnCours,
+        'dropoff_hint': destination.repere,
+        'dropoff': {'lat': destination.lat, 'lng': destination.lng},
+        'payment_method': paiement,
+      }),
+    );
 
     _idCommandeEnCours = null;
   }
@@ -743,7 +784,9 @@ class _ChatScreenState extends State<ChatScreen> {
     // Une adresse entre-temps supprimée retombe sur la feuille de choix
     // plutôt que de faire échouer la commande.
     if (adresseChoisie != null && adresseChoisie != 'nouvelle') {
-      final connue = connues.where((a) => a['id'] == adresseChoisie).firstOrNull;
+      final connue = connues
+          .where((a) => a['id'] == adresseChoisie)
+          .firstOrNull;
       if (connue != null) {
         return _Destination(
           repere: connue['text_hint'] as String,
@@ -778,12 +821,14 @@ class _ChatScreenState extends State<ChatScreen> {
 
     // Enregistrer se fait en tâche de fond : un échec ne doit pas empêcher
     // la commande, qui est ce que le client est venu faire.
-    unawaited(widget.api.post('/addresses', {
-      'label': _libelleDepuisRepere(repere),
-      'text_hint': repere,
-      'lat': position.latitude,
-      'lng': position.longitude,
-    }));
+    unawaited(
+      widget.api.post('/addresses', {
+        'label': _libelleDepuisRepere(repere),
+        'text_hint': repere,
+        'lat': position.latitude,
+        'lng': position.longitude,
+      }),
+    );
 
     return _Destination(
       repere: repere,
@@ -829,7 +874,9 @@ class _ChatScreenState extends State<ChatScreen> {
             for (final a in adresses)
               ListTile(
                 leading: Icon(
-                  a['is_default'] == true ? Icons.home_rounded : Icons.place_outlined,
+                  a['is_default'] == true
+                      ? Icons.home_rounded
+                      : Icons.place_outlined,
                   color: TovoTheme.teal,
                 ),
                 title: Text(a['label'] as String? ?? 'Adresse'),
@@ -876,15 +923,23 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.payments_outlined, color: TovoTheme.teal),
+              leading: const Icon(
+                Icons.payments_outlined,
+                color: TovoTheme.teal,
+              ),
               title: const Text('Espèces'),
               subtitle: const Text('Vous payez le livreur à l’arrivée'),
               onTap: () => Navigator.pop(context, 'cash'),
             ),
             ListTile(
-              leading: const Icon(Icons.phone_iphone_rounded, color: TovoTheme.teal),
+              leading: const Icon(
+                Icons.phone_iphone_rounded,
+                color: TovoTheme.teal,
+              ),
               title: const Text('Nita'),
-              subtitle: const Text('Un code à régler depuis MYNITA, ou payez au livreur'),
+              subtitle: const Text(
+                'Un code à régler depuis MYNITA, ou payez au livreur',
+              ),
               onTap: () => Navigator.pop(context, 'mobile_money'),
             ),
             const SizedBox(height: 8),
@@ -925,31 +980,36 @@ class _ChatScreenState extends State<ChatScreen> {
 
     _idCommandeEnCours ??= _nouvelIdentifiant();
 
-    await _appeler(() => widget.api.post('/orders', {
-          'type': 'courier',
-          'client_order_id': _idCommandeEnCours,
-          'pickup_hint': depart!['hint'],
-          'pickup': {'lat': depart['lat'], 'lng': depart['lng']},
-          'dropoff_hint': arrivee!['hint'],
-          'dropoff': {'lat': arrivee['lat'], 'lng': arrivee['lng']},
-          // Sans lui le serveur refuse : c'est par ce numéro que le livreur
-          // joint le destinataire une fois sur place.
-          'dropoff_contact': p['dropoff_contact'] ?? '',
-          'parcel': p['parcel'] ?? 'small',
-          'payment_method': paiement,
-        }));
+    await _appeler(
+      () => widget.api.post('/orders', {
+        'type': 'courier',
+        'client_order_id': _idCommandeEnCours,
+        'pickup_hint': depart!['hint'],
+        'pickup': {'lat': depart['lat'], 'lng': depart['lng']},
+        'dropoff_hint': arrivee!['hint'],
+        'dropoff': {'lat': arrivee['lat'], 'lng': arrivee['lng']},
+        // Sans lui le serveur refuse : c'est par ce numéro que le livreur
+        // joint le destinataire une fois sur place.
+        'dropoff_contact': p['dropoff_contact'] ?? '',
+        'parcel': p['parcel'] ?? 'small',
+        'payment_method': paiement,
+      }),
+    );
 
     _idCommandeEnCours = null;
   }
 
   void _erreurLocalisation() {
     setState(() {
-      _tours.add(_Tour(
-        deLAssistant: true,
-        contenu: "Je ne peux pas livrer sans savoir où vous êtes. "
-            "Activez la localisation, puis réessayez.",
-        enErreur: true,
-      ));
+      _tours.add(
+        _Tour(
+          deLAssistant: true,
+          contenu:
+              "Je ne peux pas livrer sans savoir où vous êtes. "
+              "Activez la localisation, puis réessayez.",
+          enErreur: true,
+        ),
+      );
     });
     _versLeBas();
   }
@@ -974,7 +1034,8 @@ class _ChatScreenState extends State<ChatScreen> {
             // une livraison chez lui envoyait donc le livreur au bureau, sans
             // que rien ne le prévienne. Tant qu'il n'y a pas de carte pour
             // désigner un autre point, il faut au moins le dire.
-            helperText: 'Repère pour le livreur. Le point GPS enregistré est '
+            helperText:
+                'Repère pour le livreur. Le point GPS enregistré est '
                 'celui où vous êtes en ce moment.',
             helperMaxLines: 3,
           ),
@@ -1087,11 +1148,14 @@ class _ChatScreenState extends State<ChatScreen> {
 
     setState(() => _charge = true);
 
-    final recherche = await widget.api.get('/search', query: {
-      'q': texte,
-      if (_position != null) 'lat': _position!.$1,
-      if (_position != null) 'lng': _position!.$2,
-    });
+    final recherche = await widget.api.get(
+      '/search',
+      query: {
+        'q': texte,
+        if (_position != null) 'lat': _position!.$1,
+        if (_position != null) 'lng': _position!.$2,
+      },
+    );
 
     if (!mounted) return;
 
@@ -1099,11 +1163,13 @@ class _ChatScreenState extends State<ChatScreen> {
     if (recherche.ok && recherche.components.isNotEmpty) {
       setState(() {
         _charge = false;
-        _tours.add(_Tour(
-          deLAssistant: true,
-          contenu: recherche.content,
-          composants: recherche.components,
-        ));
+        _tours.add(
+          _Tour(
+            deLAssistant: true,
+            contenu: recherche.content,
+            composants: recherche.components,
+          ),
+        );
       });
       _versLeBas();
       return;
@@ -1147,17 +1213,20 @@ class _ChatScreenState extends State<ChatScreen> {
 
     setState(() {
       _charge = false;
-      for (final m in ((reponse.raw['messages'] as List?) ?? const [])
-          .whereType<Map<String, dynamic>>()) {
-        _tours.add(_Tour(
-          deLAssistant: m['role'] != 'user',
-          contenu: '${m['content'] ?? ''}',
-          composants: ((m['components'] as List?) ?? const [])
-              .whereType<Map<String, dynamic>>()
-              .map(TovoComponent.fromJson)
-              .where((c) => c.type.isNotEmpty)
-              .toList(),
-        ));
+      for (final m
+          in ((reponse.raw['messages'] as List?) ?? const [])
+              .whereType<Map<String, dynamic>>()) {
+        _tours.add(
+          _Tour(
+            deLAssistant: m['role'] != 'user',
+            contenu: '${m['content'] ?? ''}',
+            composants: ((m['components'] as List?) ?? const [])
+                .whereType<Map<String, dynamic>>()
+                .map(TovoComponent.fromJson)
+                .where((c) => c.type.isNotEmpty)
+                .toList(),
+          ),
+        );
       }
     });
     _versLeBas();
@@ -1179,6 +1248,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: TovoTheme.canvas,
       drawer: TiroirConversations(
         api: widget.api,
         conversationCourante: _conversationId,
@@ -1196,40 +1266,27 @@ class _ChatScreenState extends State<ChatScreen> {
         leading: Builder(
           builder: (context) => IconButton(
             tooltip: 'Mes conversations',
-            icon: const Icon(Icons.menu_rounded),
+            icon: const Icon(Icons.menu_rounded, size: 25),
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-        titleSpacing: 8,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              // « TOVO » en capitales, comme le logo. Le minuscule était mon
-              // interprétation, pas la marque.
-              'TOVO',
-              style: TextStyle(
-                fontSize: 21,
-                fontWeight: FontWeight.w800,
-                color: TovoTheme.teal,
-                // Positif, alors que le minuscule demandait l'inverse : des
-                // capitales resserrées se touchent et deviennent un bloc.
-                letterSpacing: 1.2,
-              ),
-            ),
-            const Text(
-              'Niamey · livraison',
-              style: TextStyle(fontSize: 11, color: TovoTheme.muted),
-            ),
-          ],
+        leadingWidth: 52,
+        titleSpacing: 2,
+        title: const Text(
+          'Assistant',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: TovoTheme.ink,
+          ),
         ),
         actions: [
           IconButton(
             tooltip: 'Mon panier',
-            icon: const Icon(Icons.shopping_bag_outlined),
+            icon: const Icon(Icons.shopping_bag_outlined, size: 23),
             onPressed: () => _appeler(() => widget.api.get('/cart')),
           ),
+          const SizedBox(width: 6),
         ],
       ),
       body: Column(
@@ -1244,13 +1301,14 @@ class _ChatScreenState extends State<ChatScreen> {
             duration: TovoTheme.ample,
             curve: TovoTheme.courbe,
             child: _tours.length <= 1
-                ? _Accueil(prenom: _prenom)
+                ? _AccueilNouveau(prenom: _prenom)
                 : const SizedBox(width: double.infinity),
           ),
           Expanded(
             child: ListView.builder(
               controller: _scroll,
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
               itemCount: _tours.length,
               itemBuilder: (context, i) => _TourVue(
                 key: ValueKey(_tours[i]),
@@ -1271,7 +1329,7 @@ class _ChatScreenState extends State<ChatScreen> {
             curve: TovoTheme.courbe,
             child: _charge ? const _EnReflexion() : const SizedBox.shrink(),
           ),
-          _BarreDeSaisie(
+          _BarreDeSaisieNouveau(
             controller: _saisie,
             onSend: _envoyer,
             onCamera: () => unawaited(_choisirLaSource()),
@@ -1313,7 +1371,7 @@ class _EnReflexionState extends State<_EnReflexion>
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
+      padding: const EdgeInsets.fromLTRB(18, 4, 18, 12),
       child: Row(
         children: [
           for (var i = 0; i < 3; i++)
@@ -1325,9 +1383,9 @@ class _EnReflexionState extends State<_EnReflexion>
                 final phase = (_c.value + i / 3) % 1.0;
                 final montee = (sin(phase * 2 * pi) + 1) / 2;
                 return Container(
-                  width: 6,
-                  height: 6,
-                  margin: const EdgeInsets.only(right: 5),
+                  width: 5,
+                  height: 5,
+                  margin: const EdgeInsets.only(right: 4),
                   decoration: BoxDecoration(
                     color: Color.lerp(TovoTheme.line, TovoTheme.teal, montee),
                     shape: BoxShape.circle,
@@ -1379,7 +1437,12 @@ class _TourVueState extends State<_TourVue> {
     // Une image plus tard : poser l'état initial puis le changer dans la
     // même image ne déclencherait aucune transition.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() { _opacite = 1; _decalage = 0; });
+      if (mounted) {
+        setState(() {
+          _opacite = 1;
+          _decalage = 0;
+        });
+      }
     });
   }
 
@@ -1408,14 +1471,16 @@ class _TourVueState extends State<_TourVue> {
       return Align(
         alignment: Alignment.centerRight,
         child: Container(
-          margin: const EdgeInsets.only(bottom: 12, left: 48),
+          margin: const EdgeInsets.only(bottom: 18, left: 54),
           padding: photo == null
-              ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
-              : const EdgeInsets.all(6),
+              ? const EdgeInsets.symmetric(horizontal: 16, vertical: 12)
+              : const EdgeInsets.all(7),
           decoration: BoxDecoration(
-            color: TovoTheme.teal,
-            borderRadius: BorderRadius.circular(16)
-                .copyWith(bottomRight: const Radius.circular(4)),
+            color: TovoTheme.tealDeep,
+            borderRadius: BorderRadius.circular(
+              22,
+            ).copyWith(bottomRight: const Radius.circular(7)),
+            boxShadow: TovoTheme.ombre,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.end,
@@ -1423,7 +1488,7 @@ class _TourVueState extends State<_TourVue> {
             children: [
               if (photo != null)
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(17),
                   child: Image.file(
                     File(photo),
                     width: 168,
@@ -1441,9 +1506,10 @@ class _TourVueState extends State<_TourVue> {
                 child: Text(
                   tour.contenu,
                   style: const TextStyle(
-                    fontSize: 13,
+                    fontSize: 14,
                     color: Colors.white,
-                    height: 1.5,
+                    height: 1.45,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
@@ -1455,30 +1521,76 @@ class _TourVueState extends State<_TourVue> {
 
     final widgets = ComponentRegistry.buildAll(tour.composants, onInteraction);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (tour.contenu.isNotEmpty)
-          Container(
-            margin: const EdgeInsets.only(bottom: 12, right: 48),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: tour.enErreur ? const Color(0xFFFDECEA) : TovoTheme.tealSoft,
-              borderRadius: BorderRadius.circular(16)
-                  .copyWith(bottomLeft: const Radius.circular(4)),
-            ),
-            child: Text(
-              tour.contenu,
-              style: TextStyle(
-                fontSize: 13,
-                height: 1.5,
-                color: tour.enErreur ? TovoTheme.danger : TovoTheme.ink,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (tour.contenu.isNotEmpty)
+            Container(
+              margin: EdgeInsets.only(bottom: widgets.isEmpty ? 0 : 14, top: 2),
+              padding: tour.enErreur
+                  ? const EdgeInsets.all(12)
+                  : EdgeInsets.zero,
+              decoration: tour.enErreur
+                  ? BoxDecoration(
+                      color: TovoTheme.coralSoft,
+                      borderRadius: BorderRadius.circular(
+                        TovoTheme.radiusSmall,
+                      ),
+                    )
+                  : null,
+              child: _TexteAssistant(
+                tour.contenu,
+                couleur: tour.enErreur ? TovoTheme.danger : TovoTheme.ink,
               ),
             ),
-          ),
-        for (final widget in widgets)
-          Padding(padding: const EdgeInsets.only(bottom: 16), child: widget),
-      ],
+          for (final widget in widgets)
+            Padding(padding: const EdgeInsets.only(bottom: 14), child: widget),
+        ],
+      ),
+    );
+  }
+}
+
+class _TexteAssistant extends StatelessWidget {
+  const _TexteAssistant(this.texte, {required this.couleur});
+
+  final String texte;
+  final Color couleur;
+
+  @override
+  Widget build(BuildContext context) {
+    final morceaux = <InlineSpan>[];
+    final expression = RegExp(r'\*\*(.+?)\*\*', dotAll: true);
+    var debut = 0;
+
+    for (final correspondance in expression.allMatches(texte)) {
+      if (correspondance.start > debut) {
+        morceaux.add(
+          TextSpan(text: texte.substring(debut, correspondance.start)),
+        );
+      }
+      morceaux.add(
+        TextSpan(
+          text: correspondance.group(1),
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      );
+      debut = correspondance.end;
+    }
+    if (debut < texte.length) {
+      morceaux.add(TextSpan(text: texte.substring(debut)));
+    }
+
+    return SelectableText.rich(
+      TextSpan(children: morceaux),
+      style: TextStyle(
+        fontSize: 15.5,
+        height: 1.55,
+        fontWeight: FontWeight.w400,
+        color: couleur,
+      ),
     );
   }
 }
@@ -1511,9 +1623,10 @@ class _PointQuiBatState extends State<_PointQuiBat>
   @override
   Widget build(BuildContext context) {
     return FadeTransition(
-      opacity: Tween<double>(begin: 1, end: 0.25).animate(
-        CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
-      ),
+      opacity: Tween<double>(
+        begin: 1,
+        end: 0.25,
+      ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut)),
       child: Container(
         width: 10,
         height: 10,
@@ -1531,6 +1644,52 @@ class _PointQuiBatState extends State<_PointQuiBat>
 /// Deux lignes, beaucoup d'air, et une hiérarchie franche : le nom en grand,
 /// la question en gris. L'écran s'ouvrait jusqu'ici directement sur une
 /// grille de tuiles — utile, mais qui ne s'adresse à personne.
+class _AccueilNouveau extends StatelessWidget {
+  const _AccueilNouveau({required this.prenom});
+
+  final String? prenom;
+
+  String get _salut {
+    final heure = DateTime.now().hour;
+    return heure >= 5 && heure < 17 ? 'Bonjour' : 'Bonsoir';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final nom = prenom == null ? '' : ' $prenom';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$_salut$nom',
+            style: const TextStyle(
+              fontSize: 27,
+              height: 1.12,
+              letterSpacing: -0.8,
+              fontWeight: FontWeight.w700,
+              color: TovoTheme.ink,
+            ),
+          ),
+          const SizedBox(height: 7),
+          const Text(
+            "Qu'est-ce que Tovo peut faire pour vous ?",
+            style: TextStyle(
+              fontSize: 15,
+              height: 1.45,
+              fontWeight: FontWeight.w400,
+              color: TovoTheme.inkDoux,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ignore: unused_element
 class _Accueil extends StatelessWidget {
   const _Accueil({required this.prenom});
 
@@ -1583,6 +1742,173 @@ class _Accueil extends StatelessWidget {
   }
 }
 
+class _BarreDeSaisieNouveau extends StatelessWidget {
+  const _BarreDeSaisieNouveau({
+    required this.controller,
+    required this.onSend,
+    required this.onCamera,
+    required this.enregistre,
+    required this.onParoleTouche,
+    required this.onParoleAnnulee,
+  });
+
+  final TextEditingController controller;
+  final VoidCallback onSend;
+  final VoidCallback onCamera;
+  final bool enregistre;
+  final VoidCallback onParoleTouche;
+  final VoidCallback onParoleAnnulee;
+
+  Widget _action({
+    Key? key,
+    required IconData icon,
+    required VoidCallback onTap,
+    required String tooltip,
+    bool principal = false,
+  }) {
+    return Tooltip(
+      key: key,
+      message: tooltip,
+      child: Material(
+        color: principal ? TovoTheme.teal : TovoTheme.tealMist,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox.square(
+            dimension: principal ? 44 : 40,
+            child: Icon(
+              icon,
+              size: principal ? 20 : 19,
+              color: principal ? Colors.white : TovoTheme.teal,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _enEcoute() {
+    return Row(
+      children: [
+        _action(
+          icon: Icons.close_rounded,
+          onTap: onParoleAnnulee,
+          tooltip: 'Annuler',
+        ),
+        const SizedBox(width: 12),
+        const _PointQuiBat(),
+        const SizedBox(width: 10),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Je vous écoute',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+              ),
+              Text(
+                'Appuyez sur la flèche pour envoyer',
+                style: TextStyle(fontSize: 10.5, color: TovoTheme.muted),
+              ),
+            ],
+          ),
+        ),
+        _action(
+          icon: Icons.arrow_upward_rounded,
+          onTap: onParoleTouche,
+          tooltip: 'Envoyer le message vocal',
+          principal: true,
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      minimum: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 64),
+        padding: const EdgeInsets.fromLTRB(8, 7, 8, 7),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: TovoTheme.line),
+          boxShadow: TovoTheme.ombreFlottante,
+        ),
+        child: enregistre
+            ? _enEcoute()
+            : Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  _action(
+                    icon: Icons.center_focus_strong_rounded,
+                    onTap: onCamera,
+                    tooltip: 'Chercher avec une photo',
+                  ),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: TextField(
+                      controller: controller,
+                      minLines: 1,
+                      maxLines: 5,
+                      textCapitalization: TextCapitalization.sentences,
+                      textInputAction: TextInputAction.newline,
+                      onSubmitted: (_) {
+                        if (controller.text.trim().isNotEmpty) onSend();
+                      },
+                      decoration: const InputDecoration(
+                        hintText: 'Demandez à Tovo…',
+                        filled: false,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 11,
+                        ),
+                      ),
+                      style: const TextStyle(fontSize: 14.5, height: 1.35),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: controller,
+                    builder: (context, valeur, _) {
+                      final aDuTexte = valeur.text.trim().isNotEmpty;
+                      return AnimatedSwitcher(
+                        duration: TovoTheme.vif,
+                        transitionBuilder: (child, animation) =>
+                            ScaleTransition(
+                              scale: animation,
+                              child: FadeTransition(
+                                opacity: animation,
+                                child: child,
+                              ),
+                            ),
+                        child: _action(
+                          key: ValueKey(aDuTexte),
+                          icon: aDuTexte
+                              ? Icons.arrow_upward_rounded
+                              : Icons.mic_none_rounded,
+                          onTap: aDuTexte ? onSend : onParoleTouche,
+                          tooltip: aDuTexte ? 'Envoyer' : 'Parler à Tovo',
+                          principal: true,
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+// ignore: unused_element
 class _BarreDeSaisie extends StatelessWidget {
   const _BarreDeSaisie({
     required this.controller,
@@ -1600,6 +1926,7 @@ class _BarreDeSaisie extends StatelessWidget {
   /// Vrai pendant l'enregistrement : la barre change entièrement d'aspect,
   /// sinon l'utilisateur ne sait pas que le micro l'écoute.
   final bool enregistre;
+
   /// Appuyer démarre l'enregistrement ; appuyer de nouveau l'envoie.
   final VoidCallback onParoleTouche;
 
@@ -1636,8 +1963,15 @@ class _BarreDeSaisie extends StatelessWidget {
           child: Container(
             width: 44,
             height: 44,
-            decoration: const BoxDecoration(color: TovoTheme.teal, shape: BoxShape.circle),
-            child: const Icon(Icons.arrow_upward, size: 20, color: Colors.white),
+            decoration: const BoxDecoration(
+              color: TovoTheme.teal,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.arrow_upward,
+              size: 20,
+              color: Colors.white,
+            ),
           ),
         ),
       ],
@@ -1656,84 +1990,106 @@ class _BarreDeSaisie extends StatelessWidget {
         decoration: const BoxDecoration(
           color: Colors.white,
           boxShadow: [
-            BoxShadow(color: Color(0x0A000000), blurRadius: 16, offset: Offset(0, -4)),
+            BoxShadow(
+              color: Color(0x0A000000),
+              blurRadius: 16,
+              offset: Offset(0, -4),
+            ),
           ],
         ),
-        child: enregistre ? _enEcoute() : Row(
-          children: [
-            // La recherche par photo est ce que Tovo fait de mieux et que
-            // personne ne fait ici. Elle mérite un bouton permanent, pas
-            // d'être enfouie derrière une question de l'assistant.
-            IconButton(
-              onPressed: onCamera,
-              tooltip: 'Chercher par photo',
-              icon: const Icon(Icons.photo_camera_outlined, color: TovoTheme.teal),
-            ),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => onSend(),
-                decoration: InputDecoration(
-                  // Le salut d'accueil pose déjà la question ; la répéter mot
-                  // pour mot juste en dessous sonnait comme un bégaiement.
-                  hintText: 'Demandez ce que vous cherchez…',
-                  hintStyle: const TextStyle(fontSize: 14, color: TovoTheme.muted),
-                  filled: true,
-                  fillColor: TovoTheme.bloc,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(22),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            // Micro tant que rien n'est écrit, envoi dès qu'il y a du texte :
-            // deux boutons côte à côte encombreraient une barre déjà chargée,
-            // et l'un des deux serait toujours inutile.
-            ValueListenableBuilder<TextEditingValue>(
-              valueListenable: controller,
-              builder: (context, valeur, _) {
-                final vide = valeur.text.trim().isEmpty;
-                if (!vide) {
-                  return InkWell(
-                    borderRadius: BorderRadius.circular(999),
-                    onTap: onSend,
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: const BoxDecoration(
-                        color: TovoTheme.teal,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.arrow_upward, size: 18, color: Colors.white),
-                    ),
-                  );
-                }
-
-                // Un appui démarre, un appui envoie. Le maintien enfoncé a
-                // été retiré : la barre changeant d'aspect au démarrage, le
-                // détecteur de geste disparaissait avec elle et le
-                // relâchement n'atteignait plus rien.
-                return GestureDetector(
-                  onTap: onParoleTouche,
-                  child: Container(
-                    width: 44,
-                    height: 44,
-                    decoration: const BoxDecoration(
+        child: enregistre
+            ? _enEcoute()
+            : Row(
+                children: [
+                  // La recherche par photo est ce que Tovo fait de mieux et que
+                  // personne ne fait ici. Elle mérite un bouton permanent, pas
+                  // d'être enfouie derrière une question de l'assistant.
+                  IconButton(
+                    onPressed: onCamera,
+                    tooltip: 'Chercher par photo',
+                    icon: const Icon(
+                      Icons.photo_camera_outlined,
                       color: TovoTheme.teal,
-                      shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.mic_none_rounded, size: 20, color: Colors.white),
                   ),
-                );
-              },
-            ),
-          ],
-        ),
+                  Expanded(
+                    child: TextField(
+                      controller: controller,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => onSend(),
+                      decoration: InputDecoration(
+                        // Le salut d'accueil pose déjà la question ; la répéter mot
+                        // pour mot juste en dessous sonnait comme un bégaiement.
+                        hintText: 'Demandez ce que vous cherchez…',
+                        hintStyle: const TextStyle(
+                          fontSize: 14,
+                          color: TovoTheme.muted,
+                        ),
+                        filled: true,
+                        fillColor: TovoTheme.bloc,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 14,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(22),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Micro tant que rien n'est écrit, envoi dès qu'il y a du texte :
+                  // deux boutons côte à côte encombreraient une barre déjà chargée,
+                  // et l'un des deux serait toujours inutile.
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: controller,
+                    builder: (context, valeur, _) {
+                      final vide = valeur.text.trim().isEmpty;
+                      if (!vide) {
+                        return InkWell(
+                          borderRadius: BorderRadius.circular(999),
+                          onTap: onSend,
+                          child: Container(
+                            width: 40,
+                            height: 40,
+                            decoration: const BoxDecoration(
+                              color: TovoTheme.teal,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.arrow_upward,
+                              size: 18,
+                              color: Colors.white,
+                            ),
+                          ),
+                        );
+                      }
+
+                      // Un appui démarre, un appui envoie. Le maintien enfoncé a
+                      // été retiré : la barre changeant d'aspect au démarrage, le
+                      // détecteur de geste disparaissait avec elle et le
+                      // relâchement n'atteignait plus rien.
+                      return GestureDetector(
+                        onTap: onParoleTouche,
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: const BoxDecoration(
+                            color: TovoTheme.teal,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.mic_none_rounded,
+                            size: 20,
+                            color: Colors.white,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
       ),
     );
   }

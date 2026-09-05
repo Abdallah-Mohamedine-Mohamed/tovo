@@ -4,6 +4,7 @@ import { toHttpFailure } from '../lib/errors.js';
 import { envelope } from '../components/builders.js';
 import { ChatUnavailableError, orchestrate } from '../ai/orchestrator.js';
 import { LlmUnavailableError, llmEnabled } from '../ai/llmClient.js';
+import { EXECUTORS } from '../ai/tools.js';
 import { signaler } from '../lib/observability.js';
 
 /**
@@ -142,6 +143,17 @@ function libelleLisible(action: string, payload: Record<string, unknown>): strin
   }
 }
 
+function demandeUnColis(texte: string): boolean {
+  const reduit = texte
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  const objet = /\b(colis|paquet|document|documents|courrier)\b/.test(reduit);
+  const action = /\b(envoyer|livrer|expedier|deposer|remettre|transporter)\b/.test(reduit);
+  return objet && action;
+}
+
 export async function chatRoutes(app: FastifyInstance): Promise<void> {
   /**
    * La dernière conversation, pour la reprendre à l'ouverture.
@@ -240,13 +252,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/chat', { preHandler: app.requireAuth }, async (request, reply) => {
-    if (!llmEnabled) {
-      return reply.code(503).send({
-        error: "L'assistant n'est pas encore configuré.",
-        code: 'LLM_DISABLED',
-      });
-    }
-
     const body = chatSchema.safeParse(request.body);
     if (!body.success) {
       return reply.code(400).send({ error: 'requête invalide', details: body.error.issues });
@@ -281,9 +286,55 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // — on ne conserve pas l'enregistrement lui-même.
     const message = body.data.audio
       ? "L'utilisateur a parlé. Écoute l'enregistrement et traite sa demande comme s'il l'avait écrite."
-      : body.data.text
-        ? body.data.text
-        : interactionEnMessage(body.data.interaction!.action, body.data.interaction!.payload);
+        : body.data.text
+          ? body.data.text
+          : interactionEnMessage(body.data.interaction!.action, body.data.interaction!.payload);
+
+    // Un envoi de colis n'a rien à interpréter : il ouvre toujours le même
+    // formulaire. Le laisser au modèle lui faisait parfois appeler
+    // `mes_adresses`, puis traiter le choix comme une livraison de panier.
+    // C'est ainsi que « Livrer à Harobanda » finissait par « panier vide ».
+    if (body.data.text && demandeUnColis(body.data.text)) {
+      const executer = EXECUTORS['preparer_course'];
+      if (!executer) throw new Error('outil preparer_course absent');
+
+      const resultat = await executer(
+        {},
+        {
+          db,
+          userId,
+          ...(body.data.context ? { position: body.data.context } : {}),
+        },
+      );
+      const contenu =
+        'Bien sûr. Indiquez **le point de départ**, **le lieu de livraison** et **le numéro du destinataire**.';
+
+      await db.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'user',
+        content: body.data.text,
+        client_message_id: body.data.client_message_id,
+      });
+      await db.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: contenu,
+        components: resultat.components,
+      });
+
+      request.log.info({ conversationId }, 'formulaire colis ouvert sans interprétation');
+      return reply.send({
+        conversation_id: conversationId,
+        ...envelope(contenu, resultat.components),
+      });
+    }
+
+    if (!llmEnabled) {
+      return reply.code(503).send({
+        error: "L'assistant n'est pas encore configuré.",
+        code: 'LLM_DISABLED',
+      });
+    }
 
     try {
       // Ce que le client relira. Le vocal n'a pas de texte du tout, et la

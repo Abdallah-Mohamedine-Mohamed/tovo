@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/marque.dart';
 import '../../core/theme.dart';
 
 /// Le nom, demandé une fois et une seule.
@@ -71,6 +72,7 @@ class _DemandeDeNomState extends State<DemandeDeNom> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: TovoTheme.canvas,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -79,12 +81,25 @@ class _DemandeDeNomState extends State<DemandeDeNom> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(
+                    color: TovoTheme.teal,
+                    shape: BoxShape.circle,
+                    boxShadow: TovoTheme.ombreFlottante,
+                  ),
+                  child: const MarqueTovo(taille: 42, couleur: Colors.white),
+                ),
+                const SizedBox(height: 28),
                 const Text(
                   'Encore une chose',
                   style: TextStyle(
-                    fontSize: 28,
+                    fontSize: 32,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: -1,
+                    letterSpacing: -1.2,
+                    color: TovoTheme.tealDeep,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -104,7 +119,7 @@ class _DemandeDeNomState extends State<DemandeDeNom> {
                     // Dire à quoi sert l'information fait qu'on la donne.
                     helperText: 'Votre livreur le verra pour vous trouver.',
                     filled: true,
-                    fillColor: const Color(0xFFF2F2F2),
+                    fillColor: TovoTheme.tealMist,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 16,
@@ -124,14 +139,20 @@ class _DemandeDeNomState extends State<DemandeDeNom> {
                   onPressed: _occupe ? null : _enregistrer,
                   child: Text(
                     _occupe ? 'Un instant…' : 'Continuer',
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 if (_erreur != null) ...[
                   const SizedBox(height: 14),
                   Text(
                     _erreur!,
-                    style: const TextStyle(fontSize: 12, color: TovoTheme.danger),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: TovoTheme.danger,
+                    ),
                   ),
                 ],
               ],

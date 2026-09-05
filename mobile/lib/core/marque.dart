@@ -101,16 +101,20 @@ class _SymboleTovo extends CustomPainter {
 
 /// Le symbole immobile, à la taille voulue.
 class MarqueTovo extends StatelessWidget {
-  const MarqueTovo({super.key, this.taille = 40, this.couleur = TovoTheme.teal});
+  const MarqueTovo({
+    super.key,
+    this.taille = 40,
+    this.couleur = TovoTheme.teal,
+  });
 
   final double taille;
   final Color couleur;
 
   @override
   Widget build(BuildContext context) => CustomPaint(
-        size: Size.square(taille),
-        painter: _SymboleTovo(couleur: couleur, rotation: 0),
-      );
+    size: Size.square(taille),
+    painter: _SymboleTovo(couleur: couleur, rotation: 0),
+  );
 }
 
 /// Fond animé : le symbole tourne lentement, très large et très pâle.
@@ -129,7 +133,8 @@ class FondAnime extends StatefulWidget {
   State<FondAnime> createState() => _FondAnimeState();
 }
 
-class _FondAnimeState extends State<FondAnime> with SingleTickerProviderStateMixin {
+class _FondAnimeState extends State<FondAnime>
+    with SingleTickerProviderStateMixin {
   /// Quarante secondes le tour : assez lent pour qu'on ne le regarde pas,
   /// assez présent pour que l'écran ne paraisse pas figé.
   late final AnimationController _c = AnimationController(
@@ -150,12 +155,31 @@ class _FondAnimeState extends State<FondAnime> with SingleTickerProviderStateMix
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF00807F), TovoTheme.teal, Color(0xFF004D4D)],
+          colors: [Color(0xFF0A7A76), TovoTheme.teal, TovoTheme.tealDeep],
         ),
       ),
       child: Stack(
         fit: StackFit.expand,
         children: [
+          Positioned(
+            left: -70,
+            top: 40,
+            child: Container(
+              width: 190,
+              height: 190,
+              decoration: BoxDecoration(
+                color: TovoTheme.coral.withValues(alpha: 0.18),
+                shape: BoxShape.circle,
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x33FF735C),
+                    blurRadius: 80,
+                    spreadRadius: 18,
+                  ),
+                ],
+              ),
+            ),
+          ),
           // Débordant volontairement : un cercle coupé par les bords donne
           // une impression d'échelle qu'un symbole entier, posé au milieu,
           // n'aurait pas.
