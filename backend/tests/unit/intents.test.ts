@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   boutiquesCorrespondantes,
+  boutiquesMentionnees,
   demandeDeProximite,
   demandeDeRepas,
   demandeGeneraleDeRepas,
+  nomBoutiqueApresMarqueur,
   normaliserIntention,
 } from '../../src/ai/intents.js';
 
@@ -49,5 +51,31 @@ describe('intentions de catalogue', () => {
       'otakoss-centre',
       'otakoss-marche',
     ]);
+  });
+
+  it('reconnait une boutique dans le message sans dependre du modele', () => {
+    expect(boutiquesMentionnees("Garba d'or", BOUTIQUES).map((b) => b.id)).toEqual([
+      'garba',
+    ]);
+    expect(
+      boutiquesMentionnees("Je veux manger chez Garda d'or", BOUTIQUES).map((b) => b.id),
+    ).toEqual(['garba']);
+    expect(
+      boutiquesMentionnees("Montre les plats de GARBA D'OR", BOUTIQUES).map((b) => b.id),
+    ).toEqual(['garba']);
+  });
+
+  it('ne confond pas un aliment et une boutique du meme nom', () => {
+    const avecPoulet = [...BOUTIQUES, { id: 'poulet', name: 'POULET' }];
+    expect(boutiquesMentionnees('Je veux manger du poulet', avecPoulet)).toEqual([]);
+    expect(boutiquesMentionnees('Poulet', avecPoulet)).toEqual([]);
+    expect(boutiquesMentionnees('chez Poulet', avecPoulet).map((b) => b.id)).toEqual([
+      'poulet',
+    ]);
+  });
+
+  it('ne croit le filtre boutique du modele que si le client en designe une', () => {
+    expect(nomBoutiqueApresMarqueur('Je veux manger du poulet')).toBeNull();
+    expect(nomBoutiqueApresMarqueur('Montre-moi les plats chez Poulet')).toBe('poulet');
   });
 });

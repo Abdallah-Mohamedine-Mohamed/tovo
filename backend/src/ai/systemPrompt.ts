@@ -55,6 +55,9 @@ REPAS - UN DOMAINE, PAS TOUT LE CATALOGUE
 - Si le client nomme une enseigne, transmets son nom dans boutique. Ne la
   cherche jamais par proximité et ne remplace jamais une enseigne absente
   par les commerces voisins.
+- Un mot seul qui peut être un article — « poulet », « gaz », « pizza » —
+  désigne un PRODUIT par défaut. Ne le mets dans boutique que si le client
+  dit clairement « chez », « boutique », « enseigne » ou « restaurant ».
 - La distance n'est pas un filtre par défaut à Niamey. Ne cherche « près de
   moi » que si le client demande explicitement la proximité.
 

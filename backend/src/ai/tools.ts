@@ -18,8 +18,10 @@ import { serviceClient } from '../services/supabase.js';
 import { decrireImage } from '../services/vision.js';
 import {
   boutiquesCorrespondantes,
+  boutiquesMentionnees,
   demandeDeProximite,
   demandeDeRepas,
+  nomBoutiqueApresMarqueur,
   normaliserIntention,
 } from './intents.js';
 
@@ -137,19 +139,49 @@ const listerCategories: Executor = async (_args, ctx) => {
  * Rend une liste vide plutôt que de deviner. Une boutique introuvable doit
  * être annoncée au client, pas remplacée en silence par une autre.
  */
-async function boutiquesNommees(ctx: ToolContext, nom: string): Promise<string[]> {
+type BoutiqueNommee = { id: string; name: string };
+
+async function catalogueBoutiques(ctx: ToolContext): Promise<BoutiqueNommee[]> {
   const { data } = await ctx.db
     .from('merchants')
     .select('id, name')
     .eq('is_approved', true)
     .limit(500);
 
-  const boutiques = (data ?? []) as Array<{ id: string; name: string }>;
+  return (data ?? []) as BoutiqueNommee[];
+}
+
+async function boutiquesNommees(ctx: ToolContext, nom: string): Promise<BoutiqueNommee[]> {
+  const boutiques = await catalogueBoutiques(ctx);
 
   // TOUTES les correspondances, pas la première. « chez otakoss » désigne
   // l'enseigne, et O'TAKOSS a deux adresses : en retenir une masquerait la
   // moitié de sa carte sans que rien ne le signale.
-  return boutiquesCorrespondantes(nom, boutiques).map((boutique) => boutique.id);
+  return boutiquesCorrespondantes(nom, boutiques);
+}
+
+async function boutiquesDuMessage(
+  ctx: ToolContext,
+  message: string,
+): Promise<BoutiqueNommee[]> {
+  const boutiques = await catalogueBoutiques(ctx);
+  return boutiquesMentionnees(message, boutiques);
+}
+
+async function existeProduitNomme(ctx: ToolContext, requete: string): Promise<boolean> {
+  const terme = requete.replace(/[%_*]/g, ' ').trim();
+  if (terme.length < 2) return false;
+
+  const { data, error } = await ctx.db
+    .from('products')
+    .select('id, merchants!inner(id)')
+    .ilike('name', `%${terme}%`)
+    .eq('is_available', true)
+    .eq('merchants.is_approved', true)
+    .limit(1);
+
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
 }
 
 async function categorieRestaurants(ctx: ToolContext): Promise<string | null> {
@@ -272,22 +304,45 @@ const rechercherProduits: Executor = async (args, ctx) => {
 
   const pos = position(args, ctx);
 
-  const nomBoutique = texte(args, 'boutique');
-  const boutiqueIds = nomBoutique ? await boutiquesNommees(ctx, nomBoutique) : [];
+  const nomBoutiqueExplicite = texte(args, 'boutique');
+  const boutiquesCertaines = await boutiquesDuMessage(ctx, ctx.currentMessage ?? '');
+  const nomPropose = nomBoutiqueExplicite || requete;
+  const boutiquesProposees = await boutiquesNommees(ctx, nomPropose);
+
+  let boutiques = boutiquesCertaines;
+  if (boutiques.length === 0 && boutiquesProposees.length > 0) {
+    const candidateUnMot = boutiquesProposees.every(
+      (boutique) => normaliserIntention(boutique.name).split(' ').length === 1,
+    );
+    const produitExiste = candidateUnMot && await existeProduitNomme(ctx, requete);
+    if (!produitExiste) boutiques = boutiquesProposees;
+  }
+
+  const boutiqueIds = boutiques.map((boutique) => boutique.id);
+  const nomBoutique = boutiques[0]?.name || nomBoutiqueExplicite || '';
 
   // Nom donné mais introuvable : on ne cherche PAS partout. Rendre les tacos
   // du voisin à qui demande ceux d'otakoss est pire que de ne rien rendre,
   // parce que rien ne signale la substitution.
-  if (nomBoutique && boutiqueIds.length === 0) {
+  if (
+    nomBoutiqueExplicite
+    && boutiquesProposees.length === 0
+    && nomBoutiqueApresMarqueur(ctx.currentMessage ?? '')
+  ) {
     return {
-      summary: { resultats: 0, requete, boutique_introuvable: nomBoutique },
+      summary: { resultats: 0, requete, boutique_introuvable: nomBoutiqueExplicite },
       components: [],
     };
   }
 
   // « Les plats de Garba d'Or » demande la carte de l'enseigne, pas les
   // huit produits dont le vecteur ressemble le plus au mot « plats ».
-  if (boutiqueIds.length === 1 && demandeCarteComplete(requete)) {
+  const requeteEstLeNomDeLaBoutique = boutiques.length > 0
+    && boutiquesCorrespondantes(requete, boutiques).length > 0;
+  if (
+    boutiqueIds.length === 1
+    && (demandeCarteComplete(requete) || requeteEstLeNomDeLaBoutique)
+  ) {
     const merchantId = boutiqueIds[0]!;
     const { data: boutique } = await ctx.db
       .from('merchants')
@@ -1180,7 +1235,7 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
           "Écris 'repas' quand l'utilisateur veut manger un plat préparé. Cela exclut le marché, l'électronique, la beauté et la pharmacie.",
         ),
         boutique: S.string(
-          "Nom de la boutique, quand l'utilisateur en désigne une — « chez otakoss ». Écris-le tel qu'il l'a dit : la correspondance est tolérante aux apostrophes et aux capitales. N'APPELLE PAS boutiques_proches pour cela, elle ne cherche que par la géographie.",
+          "Nom de la boutique seulement quand l'utilisateur la désigne clairement — par exemple « chez otakoss ». Un mot seul comme « poulet », « gaz » ou « pizza » est un PRODUIT par défaut, pas une boutique. Écris le nom tel qu'il l'a dit : la correspondance tolère apostrophes et capitales. N'APPELLE PAS boutiques_proches pour cela, elle ne cherche que par la géographie.",
         ),
         rayon_m: S.number('Rayon de recherche en mètres'),
       },

@@ -22,6 +22,12 @@ export function demandeDeProximite(texte: string): boolean {
   );
 }
 
+export function nomBoutiqueApresMarqueur(texte: string): string | null {
+  return normaliserIntention(texte).match(
+    /\b(?:chez|boutique|enseigne|restaurant|resto)\s+(.+)$/,
+  )?.[1] ?? null;
+}
+
 const MOTS_REPAS_GENERAUX = new Set([
   'a',
   'ai',
@@ -136,4 +142,42 @@ export function boutiquesCorrespondantes<T extends { id: string; name: string }>
   return classees
     .filter(({ score }) => score >= meilleur - 0.02)
     .map(({ boutique }) => boutique);
+}
+
+export function boutiquesMentionnees<T extends { id: string; name: string }>(
+  message: string,
+  boutiques: T[],
+): T[] {
+  const normalise = normaliserIntention(message);
+  if (!normalise) return [];
+
+  // Apres « chez », « boutique » ou « restaurant », le client est en train
+  // de nommer une enseigne. On conserve alors la tolerance aux apostrophes
+  // et aux petites fautes de frappe du rapprochement existant.
+  const apresMarqueur = nomBoutiqueApresMarqueur(message);
+  if (apresMarqueur) return boutiquesCorrespondantes(apresMarqueur, boutiques);
+
+  // Une enseigne composee ecrite en entier est une intention forte, meme
+  // au milieu d'une phrase : « les plats de GARBA D'OR » ne doit jamais
+  // devenir une recherche globale sur le mot « garba ». Pour un nom d'un
+  // seul mot, on exige en revanche une formulation sans vocabulaire de
+  // repas : sinon une boutique POULET capturerait « manger du poulet ».
+  const exactes = boutiques.filter((boutique) => {
+    const nom = normaliserIntention(boutique.name);
+    const nomCompose = nom.split(' ').length > 1;
+    return nom.length >= 5 && nomCompose && normalise.includes(nom);
+  });
+  if (exactes.length > 0) return exactes;
+
+  // Un message court sans vocabulaire de repas est souvent simplement le
+  // nom de la boutique (« Garba d'or », « Garda d'or »). En revanche,
+  // « je veux manger du poulet » ne doit surtout pas se verrouiller sur une
+  // boutique qui s'appellerait POULET.
+  if (!demandeDeRepas(message) && normalise.split(' ').length <= 6) {
+    return boutiquesCorrespondantes(message, boutiques).filter(
+      (boutique) => normaliserIntention(boutique.name).split(' ').length > 1,
+    );
+  }
+
+  return [];
 }
