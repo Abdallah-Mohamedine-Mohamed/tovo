@@ -14,6 +14,7 @@ import {
 } from '../components/builders.js';
 import { anonClient } from '../services/supabase.js';
 import { embed, embeddingsEnabled } from '../services/embeddings.js';
+import { demandeDeRepas } from '../ai/intents.js';
 
 /**
  * Catalogue — le parcours sans IA de la Phase 2.
@@ -204,13 +205,24 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       ? await embed(query.data.q, 'query').catch(() => null)
       : null;
 
+    let categorieId: string | null = null;
+    if (demandeDeRepas(query.data.q)) {
+      const { data: categorie } = await db(request)
+        .from('categories')
+        .select('id')
+        .eq('slug', 'restaurants-m3')
+        .eq('is_active', true)
+        .maybeSingle();
+      categorieId = (categorie?.id as string | undefined) ?? null;
+    }
+
     const { data, error } = await db(request).rpc('search_products', {
       query_text: query.data.q,
       query_embedding: vecteur ? JSON.stringify(vecteur) : null,
       origin_lat: query.data.lat ?? null,
       origin_lng: query.data.lng ?? null,
       radius_m: null,
-      filter_category: null,
+      filter_category: categorieId,
       match_count: null,
     });
 
@@ -318,7 +330,7 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       p_category_id: params.data.categoryId,
       p_lat: query.data.lat ?? null,
       p_lng: query.data.lng ?? null,
-      p_limite: 20,
+      p_limite: 50,
     });
 
     if (error) {

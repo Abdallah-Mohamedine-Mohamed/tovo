@@ -83,6 +83,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   const ctx: ToolContext = {
     db: input.db,
     userId: input.userId,
+    currentMessage: input.message,
     position: input.position,
   };
 
@@ -144,6 +145,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
         history.push({
           role: 'tool',
           toolName: appel.name,
+          ...(appel.id ? { toolCallId: appel.id } : {}),
           content: JSON.stringify({ erreur: `outil inconnu : ${appel.name}` }),
         });
         continue;
@@ -158,11 +160,19 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
           collectIds(composant.data, idsAutorises);
         }
 
-        composantsDuTour.push(...resultat.components);
+        // Une tentative plus précise remplace la précédente. Sans cette
+        // règle, le modèle pouvait d'abord lister les boutiques proches,
+        // puis trouver Garba d'Or : l'écran conservait les deux réponses et
+        // affichait pharmacie, marché et Tovo Shop avant les bons produits.
+        if (resultat.components.length > 0) {
+          composantsDuTour.length = 0;
+          composantsDuTour.push(...resultat.components);
+        }
 
         history.push({
           role: 'tool',
           toolName: appel.name,
+          ...(appel.id ? { toolCallId: appel.id } : {}),
           // Le texte des boutiquiers passe par le neutraliseur avant
           // d'entrer dans le contexte du modèle.
           content: JSON.stringify(sanitizeToolResult(resultat.summary)),
@@ -171,6 +181,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
         history.push({
           role: 'tool',
           toolName: appel.name,
+          ...(appel.id ? { toolCallId: appel.id } : {}),
           content: JSON.stringify({
             erreur: cause instanceof Error ? cause.message : 'échec',
           }),

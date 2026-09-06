@@ -53,7 +53,7 @@ const schema = z.object({
   // Version explicite, jamais un alias comme `gemini-flash-latest` : un
   // alias change de modèle sans prévenir, et le comportement du function
   // calling se décale un matin sans que rien dans le dépôt ne l'explique.
-  GEMINI_MODEL: z.string().default('gemini-3.5-flash-lite'),
+  GEMINI_MODEL: z.string().default('gemini-3.8-flash'),
 
   REDIS_URL: z.string().optional(),
   SENTRY_DSN: z.string().optional(),

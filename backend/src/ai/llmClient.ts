@@ -21,6 +21,8 @@ export interface LlmToolDefinition {
 }
 
 export interface LlmToolCall {
+  /** Identifiant attribue par Gemini, a renvoyer avec le resultat. */
+  id?: string;
   name: string;
   args: Record<string, unknown>;
   /**
@@ -39,6 +41,7 @@ export interface LlmTurn {
   /** Texte, ou résultat d'outil sérialisé selon le rôle. */
   content: string;
   toolName?: string;
+  toolCallId?: string;
   toolCalls?: LlmToolCall[];
   /**
    * Parole de l'utilisateur, transmise telle quelle au modèle.
@@ -91,8 +94,8 @@ interface GeminiPart {
   text?: string;
   inlineData?: { mimeType: string; data: string };
   thoughtSignature?: string;
-  functionCall?: { name: string; args?: Record<string, unknown> };
-  functionResponse?: { name: string; response: Record<string, unknown> };
+  functionCall?: { id?: string; name: string; args?: Record<string, unknown> };
+  functionResponse?: { id?: string; name: string; response: Record<string, unknown> };
 }
 
 interface GeminiContent {
@@ -112,6 +115,7 @@ function versGemini(history: LlmTurn[]): GeminiContent[] {
             functionResponse: {
               name: tour.toolName ?? 'inconnu',
               response: { result: safeParse(tour.content) },
+              ...(tour.toolCallId ? { id: tour.toolCallId } : {}),
             },
           },
         ],
@@ -122,7 +126,11 @@ function versGemini(history: LlmTurn[]): GeminiContent[] {
       return {
         role: 'model' as const,
         parts: tour.toolCalls.map((appel) => ({
-          functionCall: { name: appel.name, args: appel.args },
+          functionCall: {
+            name: appel.name,
+            args: appel.args,
+            ...(appel.id ? { id: appel.id } : {}),
+          },
           ...(appel.signature ? { thoughtSignature: appel.signature } : {}),
         })),
       };
@@ -204,13 +212,11 @@ export class GeminiClient implements LlmClient {
           }),
       contents: versGemini(history),
       generationConfig: {
-        temperature: 0.3,
         maxOutputTokens: 1024,
-        // Budget de réflexion volontairement bas. Choisir un outil parmi
-        // douze et rédiger une phrase courte ne demande pas de raisonnement
-        // profond ; sur Gemini 3, la réflexion consomme à la fois du temps
-        // et le budget de sortie.
-        thinkingConfig: { thinkingBudget: 128 },
+        // Une conversation de commande doit rester rapide. Gemini 3.8
+        // remplace les budgets numeriques par low / medium / high ; low
+        // suffit pour choisir un outil et rediger une reponse courte.
+        thinkingConfig: { thinkingLevel: 'low' },
       },
     };
 
@@ -258,6 +264,7 @@ export class GeminiClient implements LlmClient {
           .map((p) => ({
             name: p.functionCall!.name,
             args: p.functionCall!.args ?? {},
+            ...(p.functionCall!.id ? { id: p.functionCall!.id } : {}),
             ...(p.thoughtSignature ? { signature: p.thoughtSignature } : {}),
           })),
         usage: {

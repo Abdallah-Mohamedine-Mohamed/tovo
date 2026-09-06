@@ -16,6 +16,12 @@ import {
 import { embed, embedImage } from '../services/embeddings.js';
 import { serviceClient } from '../services/supabase.js';
 import { decrireImage } from '../services/vision.js';
+import {
+  boutiquesCorrespondantes,
+  demandeDeProximite,
+  demandeDeRepas,
+  normaliserIntention,
+} from './intents.js';
 
 /**
  * Les outils de l'assistant.
@@ -42,6 +48,7 @@ export interface ToolContext {
   /** Client Supabase portant le JWT de l'utilisateur : la RLS s'applique. */
   db: SupabaseClient;
   userId: string;
+  currentMessage?: string | undefined;
   position?: { lat: number; lng: number } | undefined;
 }
 
@@ -131,10 +138,6 @@ const listerCategories: Executor = async (_args, ctx) => {
  * être annoncée au client, pas remplacée en silence par une autre.
  */
 async function boutiquesNommees(ctx: ToolContext, nom: string): Promise<string[]> {
-  const reduire = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const cible = reduire(nom);
-  if (cible.length < 3) return [];
-
   const { data } = await ctx.db
     .from('merchants')
     .select('id, name')
@@ -146,11 +149,63 @@ async function boutiquesNommees(ctx: ToolContext, nom: string): Promise<string[]
   // TOUTES les correspondances, pas la première. « chez otakoss » désigne
   // l'enseigne, et O'TAKOSS a deux adresses : en retenir une masquerait la
   // moitié de sa carte sans que rien ne le signale.
-  const exactes = boutiques.filter((b) => reduire(b.name) === cible);
-  if (exactes.length > 0) return exactes.map((b) => b.id);
-
-  return boutiques.filter((b) => reduire(b.name).includes(cible)).map((b) => b.id);
+  return boutiquesCorrespondantes(nom, boutiques).map((boutique) => boutique.id);
 }
+
+async function categorieRestaurants(ctx: ToolContext): Promise<string | null> {
+  const { data } = await ctx.db
+    .from('categories')
+    .select('id')
+    .eq('slug', 'restaurants-m3')
+    .eq('is_active', true)
+    .maybeSingle();
+
+  return (data?.id as string | undefined) ?? null;
+}
+
+function demandeCarteComplete(requete: string): boolean {
+  return /\b(menu|carte|produit|produits|article|articles|plat|plats|propose|proposent)\b/.test(
+    normaliserIntention(requete),
+  );
+}
+
+const listerRestaurants: Executor = async (_args, ctx) => {
+  const categorieId = await categorieRestaurants(ctx);
+  if (!categorieId) return vide;
+
+  const { data, error } = await ctx.db.rpc('category_merchants', {
+    p_category_id: categorieId,
+    p_lat: null,
+    p_lng: null,
+    p_limite: 50,
+  });
+  if (error) throw error;
+
+  const boutiques = (data ?? []) as Array<Record<string, unknown>>;
+  return {
+    summary: {
+      resultats: boutiques.length,
+      boutiques: boutiques.map((boutique) => ({
+        id: boutique['id'],
+        nom: boutique['name'],
+        ouverte: boutique['is_open'],
+      })),
+    },
+    components: boutiques.map((boutique) =>
+      merchantCard({
+        id: boutique['id'] as string,
+        name: boutique['name'] as string,
+        description: (boutique['description'] as string | null) ?? null,
+        logo_url: (boutique['logo_url'] as string | null) ?? null,
+        address_hint: (boutique['address_hint'] as string | null) ?? '',
+        is_open: (boutique['is_open'] as boolean) ?? false,
+        rating: Number(boutique['rating'] ?? 5),
+        prep_time_min: (boutique['prep_time_min'] as number) ?? 20,
+        distance_m: null,
+      }),
+    ),
+  };
+};
 
 /**
  * Les options qui répondent à la demande du client.
@@ -230,6 +285,56 @@ const rechercherProduits: Executor = async (args, ctx) => {
     };
   }
 
+  // « Les plats de Garba d'Or » demande la carte de l'enseigne, pas les
+  // huit produits dont le vecteur ressemble le plus au mot « plats ».
+  if (boutiqueIds.length === 1 && demandeCarteComplete(requete)) {
+    const merchantId = boutiqueIds[0]!;
+    const { data: boutique } = await ctx.db
+      .from('merchants')
+      .select('name, is_open')
+      .eq('id', merchantId)
+      .maybeSingle();
+    const { data } = await ctx.db
+      .from('products')
+      .select('id, name, description, image_url, price, is_available, merchant_id, merchants(name)')
+      .eq('merchant_id', merchantId)
+      .eq('is_available', true)
+      .order('name')
+      .limit(30);
+
+    const produits = ((data ?? []) as Array<Record<string, unknown>>).map((produit) => ({
+      id: produit['id'] as string,
+      name: produit['name'] as string,
+      description: (produit['description'] as string | null) ?? null,
+      image_url: (produit['image_url'] as string | null) ?? null,
+      price: produit['price'] as number,
+      is_available: produit['is_available'] as boolean,
+      merchant_id: produit['merchant_id'] as string,
+      merchant_name: (produit['merchants'] as { name?: string } | null)?.name ?? null,
+      merchant_open: (boutique?.is_open as boolean | null) ?? null,
+    }));
+
+    return {
+      summary: {
+        boutique: boutique?.name ?? nomBoutique,
+        resultats: produits.length,
+        produits: produits.map(resumeProduit),
+      },
+      components: produits.length > 0
+        ? [productCarousel(produits, (boutique?.name as string | null) ?? nomBoutique)]
+        : [],
+    };
+  }
+
+  let categorieId = texte(args, 'categorie_id') || null;
+  const domaineRepas =
+    texte(args, 'domaine') === 'repas'
+    || demandeDeRepas(ctx.currentMessage ?? '')
+    || demandeDeRepas(requete);
+  if (!categorieId && boutiqueIds.length === 0 && domaineRepas) {
+    categorieId = await categorieRestaurants(ctx);
+  }
+
   const vecteur = await embed(requete, 'query').catch(() => null);
 
   const { data, error } = await ctx.db.rpc('search_products', {
@@ -237,8 +342,10 @@ const rechercherProduits: Executor = async (args, ctx) => {
     query_embedding: vecteur ? JSON.stringify(vecteur) : null,
     origin_lat: pos?.lat ?? null,
     origin_lng: pos?.lng ?? null,
-    radius_m: nombre(args, 'rayon_m') ?? null,
-    filter_category: texte(args, 'categorie_id') || null,
+    radius_m: demandeDeProximite(ctx.currentMessage ?? requete)
+      ? nombre(args, 'rayon_m') ?? null
+      : null,
+    filter_category: categorieId,
     match_count: null,
     filter_merchants: boutiqueIds.length > 0 ? boutiqueIds : null,
   });
@@ -411,14 +518,35 @@ async function chercherEnRaccourcissant(
 }
 
 const boutiquesProches: Executor = async (args, ctx) => {
+  const message = ctx.currentMessage ?? '';
+  const estUneDemandeDeRepas = demandeDeRepas(message);
+
+  // La position reçue par l'application ne transforme pas toute demande en
+  // recherche locale. Pour un repas, cet outil n'est permis que si le client
+  // a réellement demandé « près de moi », « dans le coin », etc.
+  if (estUneDemandeDeRepas && !demandeDeProximite(message)) {
+    return {
+      summary: {
+        erreur: 'proximite_non_demandee',
+        conseil: 'utiliser rechercher_produits, ou lister_restaurants pour une demande generale',
+      },
+      components: [],
+    };
+  }
+
   const pos = position(args, ctx);
   if (!pos) return { summary: { erreur: 'position inconnue' }, components: [] };
+
+  let categorieId = texte(args, 'categorie_id') || null;
+  if (!categorieId && estUneDemandeDeRepas) {
+    categorieId = await categorieRestaurants(ctx);
+  }
 
   const { data, error } = await ctx.db.rpc('nearby_merchants', {
     origin_lat: pos.lat,
     origin_lng: pos.lng,
     radius_m: nombre(args, 'rayon_m') ?? 5000,
-    filter_category: texte(args, 'categorie_id') || null,
+    filter_category: categorieId,
     match_count: 8,
   });
 
@@ -1034,6 +1162,12 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
     parameters: { type: 'object', properties: {} },
   },
   {
+    name: 'lister_restaurants',
+    description:
+      "Liste tous les restaurants disponibles, sans favoriser ceux qui sont proches. À utiliser quand l'utilisateur dit seulement qu'il veut manger, qu'il a faim ou qu'il cherche un restaurant sans nommer de plat précis.",
+    parameters: { type: 'object', properties: {} },
+  },
+  {
     name: 'rechercher_produits',
     description:
       "Cherche des produits par description en langage naturel. Comprend le sens et tolère les fautes. À utiliser dès que l'utilisateur nomme ou décrit ce qu'il veut manger ou acheter.",
@@ -1042,6 +1176,9 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
       properties: {
         requete: S.string("Ce que cherche l'utilisateur, dans ses mots"),
         categorie_id: S.string('Identifiant de catégorie, si la recherche doit être restreinte'),
+        domaine: S.string(
+          "Écris 'repas' quand l'utilisateur veut manger un plat préparé. Cela exclut le marché, l'électronique, la beauté et la pharmacie.",
+        ),
         boutique: S.string(
           "Nom de la boutique, quand l'utilisateur en désigne une — « chez otakoss ». Écris-le tel qu'il l'a dit : la correspondance est tolérante aux apostrophes et aux capitales. N'APPELLE PAS boutiques_proches pour cela, elle ne cherche que par la géographie.",
         ),
@@ -1236,6 +1373,7 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
 
 export const EXECUTORS: Record<string, Executor> = {
   lister_categories: listerCategories,
+  lister_restaurants: listerRestaurants,
   rechercher_produits: rechercherProduits,
   rechercher_par_image: rechercherParImage,
   boutiques_proches: boutiquesProches,

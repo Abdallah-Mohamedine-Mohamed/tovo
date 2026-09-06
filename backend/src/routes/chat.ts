@@ -5,6 +5,7 @@ import { envelope } from '../components/builders.js';
 import { ChatUnavailableError, orchestrate } from '../ai/orchestrator.js';
 import { LlmUnavailableError, llmEnabled } from '../ai/llmClient.js';
 import { EXECUTORS } from '../ai/tools.js';
+import { demandeGeneraleDeRepas } from '../ai/intents.js';
 import { signaler } from '../lib/observability.js';
 
 /**
@@ -323,6 +324,46 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       });
 
       request.log.info({ conversationId }, 'formulaire colis ouvert sans interprétation');
+      return reply.send({
+        conversation_id: conversationId,
+        ...envelope(contenu, resultat.components),
+      });
+    }
+
+    // « Je veux manger » n'est ni une recherche de proximité, ni une
+    // recherche du produit nommé « manger ». On ouvre directement la porte
+    // Restaurants, classée par ouverture et qualité, sans mélanger marché,
+    // électronique, beauté ou pharmacie.
+    if (body.data.text && demandeGeneraleDeRepas(body.data.text)) {
+      const executer = EXECUTORS['lister_restaurants'];
+      if (!executer) throw new Error('outil lister_restaurants absent');
+
+      const resultat = await executer(
+        {},
+        {
+          db,
+          userId,
+          currentMessage: body.data.text,
+          position: body.data.context,
+        },
+      );
+      const contenu =
+        'Avec plaisir. Voici les **restaurants** disponibles — choisissez celui qui vous fait envie.';
+
+      await db.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'user',
+        content: body.data.text,
+        client_message_id: body.data.client_message_id,
+      });
+      await db.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: contenu,
+        components: resultat.components,
+      });
+
+      request.log.info({ conversationId }, 'restaurants ouverts sans recherche de proximite');
       return reply.send({
         conversation_id: conversationId,
         ...envelope(contenu, resultat.components),
