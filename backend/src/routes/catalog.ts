@@ -13,7 +13,7 @@ import {
   type ProductRow,
 } from '../components/builders.js';
 import { anonClient } from '../services/supabase.js';
-import { embed, embeddingsEnabled } from '../services/embeddings.js';
+import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, merchantMenu } from '../services/catalogue.js';
 import { demandeDeRepas } from '../ai/intents.js';
 
 /**
@@ -40,48 +40,6 @@ import { demandeDeRepas } from '../ai/intents.js';
  * combien d'articles, chez combien de boutiques, à quelle distance, et
  * combien sont fermées. Aucun appel au modèle, aucune latence.
  */
-function resumeDeRecherche(items: ProductRow[]): string {
-  const nombres = ['', 'Un', 'Deux', 'Trois', 'Quatre', 'Cinq', 'Six', 'Sept', 'Huit', 'Neuf', 'Dix'];
-  const enLettres = (n: number) => (n <= 10 ? nombres[n]! : String(n));
-
-  const ouverts = items.filter((i) => i.merchant_open !== false);
-  const fermes = items.length - ouverts.length;
-
-  if (ouverts.length === 0) {
-    return `${enLettres(items.length)} article${items.length > 1 ? 's' : ''}, mais tout est fermé en ce moment.`;
-  }
-
-  const boutiques = new Set(ouverts.map((i) => i.merchant_id));
-  const seule = boutiques.size === 1 ? ouverts[0]!.merchant_name : null;
-
-  // Le nom de la boutique quand il n'y en a qu'une : c'est l'information la
-  // plus utile pour décider, et elle tient dans la phrase.
-  let phrase =
-    ouverts.length === 1
-      ? `Un seul article${seule ? `, chez ${seule}` : ''}.`
-      : seule
-        ? `${enLettres(ouverts.length)} articles chez ${seule}.`
-        : `${enLettres(ouverts.length)} articles, dans ${enLettres(boutiques.size).toLowerCase()} boutiques.`;
-
-  // La distance du plus proche, quand la position est connue. Sur un réseau
-  // où chaque livraison se négocie en minutes de moto, c'est ce qui départage.
-  const distances = ouverts
-    .map((i) => i.distance_m)
-    .filter((d): d is number => typeof d === 'number');
-  if (distances.length > 0) {
-    const proche = Math.min(...distances);
-    const lisible =
-      proche >= 1000 ? `${(proche / 1000).toFixed(1).replace('.', ',')} km` : `${proche} m`;
-    phrase += ` Le plus proche est à ${lisible}.`;
-  }
-
-  if (fermes > 0) {
-    phrase += ` ${enLettres(fermes)} autre${fermes > 1 ? 's sont fermés' : ' est fermé'}.`;
-  }
-
-  return phrase;
-}
-
 /**
  * « Comme la dernière fois ? »
  *
@@ -190,70 +148,63 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
    * chemin change, pas la qualité du classement.
    */
   app.get('/search', async (request, reply) => {
-    const query = z
-      .object({
-        q: z.string().min(2).max(120),
-        lat: z.coerce.number().min(-90).max(90).optional(),
-        lng: z.coerce.number().min(-180).max(180).optional(),
-      })
-      .safeParse(request.query);
+    const query = z.object({ q: z.string().trim().min(2).max(120) }).safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: 'requête invalide' });
-
-    // Sans clé Gemini, on garde la moitié lexicale : une recherche
-    // approximative vaut mieux qu'une page blanche.
-    const vecteur = embeddingsEnabled
-      ? await embed(query.data.q, 'query').catch(() => null)
-      : null;
-
-    let categorieId: string | null = null;
-    if (demandeDeRepas(query.data.q)) {
-      const { data: categorie } = await db(request)
-        .from('categories')
-        .select('id')
-        .eq('slug', 'restaurants-m3')
-        .eq('is_active', true)
-        .maybeSingle();
-      categorieId = (categorie?.id as string | undefined) ?? null;
-    }
-
-    const { data, error } = await db(request).rpc('search_products', {
-      query_text: query.data.q,
-      query_embedding: vecteur ? JSON.stringify(vecteur) : null,
-      origin_lat: query.data.lat ?? null,
-      origin_lng: query.data.lng ?? null,
-      radius_m: null,
-      filter_category: categorieId,
-      match_count: null,
-    });
-
-    if (error) {
+    try {
+      const intent = await resolveCatalogueIntent(db(request), query.data.q);
+      const menu = await merchantIntentAnswer(db(request), intent);
+      if (menu) return reply.send(envelope(menu.content, menu.components));
+      let categoryId: string | undefined;
+      if (demandeDeRepas(query.data.q) && !intent.merchants.length) {
+        const { data, error } = await db(request).from('categories').select('id').eq('slug', 'restaurants-m3').maybeSingle();
+        if (error) throw error;
+        categoryId = data?.id as string | undefined;
+      }
+      const filter = {
+        q: intent.query, category_id: categoryId, limit: 8,
+        merchant_ids: intent.merchants.length ? intent.merchants.map((merchant) => merchant.id) : undefined,
+      };
+      const page = await cataloguePage(db(request), filter);
+      const result = searchAnswer(page, filter);
+      return reply.send(envelope(result.content, result.components));
+    } catch (error) {
       const failure = toHttpFailure(error);
       return reply.code(failure.status).send(failure.body);
     }
+  });
 
-    const items: ProductRow[] = ((data ?? []) as Record<string, unknown>[]).map((p) => ({
-      id: p['id'] as string,
-      name: p['name'] as string,
-      description: (p['description'] as string | null) ?? null,
-      image_url: (p['image_url'] as string | null) ?? null,
-      price: p['price'] as number,
-      is_available: p['is_available'] as boolean,
-      merchant_id: p['merchant_id'] as string,
-      merchant_name: (p['merchant_name'] as string | null) ?? null,
-      merchant_open: (p['merchant_open'] as boolean | null) ?? null,
-      distance_m: (p['distance_m'] as number | null) ?? null,
-    }));
-
-    // Zéro résultat : on le dit sans composant. L'app enchaîne alors sur
-    // l'assistant, qui saura peut-être interpréter ce que la base n'a pas
-    // reconnu.
-    if (items.length === 0) {
-      return reply.send(envelope(`Rien trouvé pour « ${query.data.q} ».`));
+  app.get('/catalog/products', async (request, reply) => {
+    const query = z.object({
+      q: z.string().trim().max(120).default(''),
+      merchant_id: z.string().uuid().optional(),
+      merchant_ids: z.string().transform((value) => value.split(',')).pipe(z.array(z.string().uuid()).max(20)).optional(),
+      category_id: z.string().uuid().optional(),
+      offset: z.coerce.number().int().min(0).max(100000).default(0),
+      limit: z.coerce.number().int().min(1).max(60).default(24),
+    }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'requête invalide' });
+    try {
+      const filter = { ...query.data, merchant_ids: query.data.merchant_id ? [query.data.merchant_id] : query.data.merchant_ids };
+      const page = await cataloguePage(db(request), filter);
+      let merchant: Record<string, unknown> | null = null;
+      let categories: unknown[] = [];
+      if (query.data.merchant_id) {
+        const result = await db(request).from('merchants')
+          .select('id, name, logo_url, address_hint, description').eq('id', query.data.merchant_id).eq('is_approved', true).maybeSingle();
+        if (result.error) throw result.error;
+        if (!result.data) return reply.code(404).send({ error: 'boutique introuvable' });
+        const hours = await db(request).rpc('merchant_open_now', { p_merchant_id: query.data.merchant_id });
+        if (hours.error) throw hours.error;
+        merchant = { ...result.data, is_open: hours.data };
+        const sections = await db(request).rpc('merchant_categories', { p_merchant_id: query.data.merchant_id });
+        if (sections.error) throw sections.error;
+        categories = sections.data ?? [];
+      }
+      return reply.send({ ...page, merchant, categories });
+    } catch (error) {
+      const failure = toHttpFailure(error);
+      return reply.code(failure.status).send(failure.body);
     }
-
-    return reply.send(
-      envelope(resumeDeRecherche(items), [productCarousel(items, query.data.q)]),
-    );
   });
 
   /**
@@ -449,92 +400,22 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get('/merchants/:merchantId/products', async (request, reply) => {
     const params = z.object({ merchantId: z.string().uuid() }).safeParse(request.params);
-    if (!params.success) return reply.code(400).send({ error: 'identifiant invalide' });
-
-    const query = z
-      .object({ category: z.string().uuid().optional() })
-      .safeParse(request.query);
-    if (!query.success) return reply.code(400).send({ error: 'requête invalide' });
-
-    const { data: boutique } = await db(request)
-      .from('merchants')
-      .select('name, is_open')
-      .eq('id', params.data.merchantId)
-      .maybeSingle();
-
-    // La RLS masque les boutiques non approuvées : une réponse vide veut
-    // dire « pas pour vous » autant que « inexistante », et on ne distingue
-    // pas les deux — la différence renseignerait un curieux.
-    if (!boutique) return reply.code(404).send({ error: 'boutique introuvable' });
-
-    const nom = (boutique.name as string | null) ?? 'Cette boutique';
-    // Le fait qu'une boutique soit fermée se dit ici, pas à la commande :
-    // découvrir au moment de payer que personne ne prépare est bien pire.
-    const suffixe = boutique.is_open === false ? ' — fermée' : '';
-
-    // Sans rayon demandé, on regarde d'abord comment la boutique est
-    // organisée. GALAXIE a 131 produits en 9 rayons : les déverser d'un bloc
-    // n'est pas plus utilisable que les tronquer à douze, ce que l'app
-    // faisait sans le dire.
-    if (!query.data.category) {
-      const { data: rayons } = await db(request).rpc('merchant_categories', {
-        p_merchant_id: params.data.merchantId,
-      });
-
-      const sections = ((rayons ?? []) as Record<string, unknown>[]).map((c) => ({
-        id: c['id'] as string,
-        name: c['name'] as string,
-        icon: (c['icon'] as string | null) ?? null,
-        image_url: (c['image_url'] as string | null) ?? null,
-        merchant_id: params.data.merchantId,
-        produits: (c['produits'] as number | null) ?? null,
-      }));
-
-      const total = sections.reduce((n, s) => n + (s.produits ?? 0), 0);
-
-      // Un détour par les rayons ne se justifie que s'il y a de quoi s'y
-      // perdre. Pour une boutique de six articles, c'est un geste de plus
-      // pour rien.
-      if (sections.length > 1 && total > 12) {
-        return reply.send(
-          envelope(
-            `${nom}${suffixe} — ${total} produits`,
-            [categoryGrid(sections, 'Que cherchez-vous ici ?')],
-          ),
-        );
+    const query = z.object({ category: z.string().uuid().optional() }).safeParse(request.query);
+    if (!params.success || !query.success) return reply.code(400).send({ error: 'requête invalide' });
+    try {
+      if (!query.data.category) {
+        const result = await merchantMenu(db(request), params.data.merchantId);
+        return reply.send(envelope(result.content, result.components));
       }
-    }
-
-    const { data, error } = await db(request).rpc('merchant_products', {
-      p_merchant_id: params.data.merchantId,
-      p_category_id: query.data.category ?? null,
-      p_limite: 40,
-    });
-
-    if (error) {
+      const filter = { merchant_ids: [params.data.merchantId], category_id: query.data.category, limit: 8 };
+      const page = await cataloguePage(db(request), filter);
+      return reply.send(envelope(`**${page.total} produits** dans cette catégorie.`, [
+        productCarousel(page.items, 'Les produits', { merchant_id: params.data.merchantId, category_id: query.data.category, total: page.total }),
+      ]));
+    } catch (error) {
       const failure = toHttpFailure(error);
       return reply.code(failure.status).send(failure.body);
     }
-
-    const items: ProductRow[] = ((data ?? []) as Record<string, unknown>[]).map((p) => ({
-      id: p['id'] as string,
-      name: p['name'] as string,
-      description: (p['description'] as string | null) ?? null,
-      image_url: (p['image_url'] as string | null) ?? null,
-      price: p['price'] as number,
-      is_available: p['is_available'] as boolean,
-      merchant_id: p['merchant_id'] as string,
-      merchant_name: (p['merchant_name'] as string | null) ?? null,
-      merchant_open: boutique.is_open as boolean,
-    }));
-
-    if (items.length === 0) {
-      return reply.send(envelope(`${nom} n'a rien de disponible en ce moment.`));
-    }
-
-    return reply.send(
-      envelope(`${nom}${suffixe}`, [productCarousel(items, nom)]),
-    );
   });
 
   /**

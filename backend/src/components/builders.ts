@@ -88,6 +88,7 @@ export interface ProductRow {
    * est vide. Mieux vaut montrer et dire.
    */
   merchant_open?: boolean | null;
+  requires_options?: boolean;
   distance_m?: number | null;
 }
 
@@ -100,6 +101,7 @@ function productItem(p: ProductRow): Record<string, unknown> {
     image_url: p.image_url,
     price: p.price,
     is_available: p.is_available,
+    requires_options: p.requires_options ?? false,
     distance_m: p.distance_m ?? null,
   };
 }
@@ -111,10 +113,10 @@ function productItem(p: ProductRow): Record<string, unknown> {
  */
 const MAX_ITEMS = 8;
 
-export function productCarousel(items: ProductRow[], title: string): Component {
+export function productCarousel(items: ProductRow[], title: string, browse?: Record<string, unknown>): Component {
   return {
     type: 'product_carousel',
-    data: { title, items: items.slice(0, MAX_ITEMS).map(productItem) },
+    data: { title, items: items.slice(0, MAX_ITEMS).map(productItem), ...(browse ? { browse } : {}) },
   };
 }
 

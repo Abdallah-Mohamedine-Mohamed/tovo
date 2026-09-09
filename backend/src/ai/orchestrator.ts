@@ -4,6 +4,7 @@ import { SYSTEM_PROMPT, contexteUtilisateur } from './systemPrompt.js';
 import { EXECUTORS, TOOL_DEFINITIONS, type ToolContext } from './tools.js';
 import { collectIds, sanitizeToolResult, validateComponents } from './validate.js';
 import { envelope, type ChatEnvelope, type Component } from '../components/builders.js';
+import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type PendingMerchantChoice } from '../services/catalogue.js';
 
 /**
  * Boucle d'orchestration.
@@ -73,6 +74,24 @@ export class ChatUnavailableError extends Error {
 }
 
 export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateOutput> {
+  const previous = await chargerHistorique(input.db, input.conversationId);
+  const intent = input.audio ? undefined : await resolveCatalogueIntent(input.db, input.message, previous.pending);
+  let direct = intent ? await merchantIntentAnswer(input.db, intent) : null;
+  const keyword = input.message.trim().split(/\s+/).length <= 4
+    && !/[?]/.test(input.message)
+    && !/\b(je|veux|manger|merci|bonjour|salut|oui|non|annule|commande|livreur|colis|panier|deuxieme|premier)\b/i.test(input.message);
+  const selectedBranch = previous.pending && intent?.merchants.length === 1 && intent.query === previous.pending.query;
+  if (!direct && intent && (keyword || selectedBranch) && !input.audio) {
+    const filter = { q: intent.query, limit: 8,
+      merchant_ids: intent.merchants.length ? intent.merchants.map((merchant) => merchant.id) : undefined };
+    const page = await cataloguePage(input.db, filter);
+    if (page.total > 0) direct = searchAnswer(page, filter);
+  }
+  if (direct) {
+    const messageId = await persister(input, direct.content, direct.components);
+    return { ...envelope(direct.content, direct.components), messageId, rejected: [],
+      usage: { input: 0, output: 0, cached: 0, cycles: 0 } };
+  }
   const client = llmClient();
   if (!client) {
     throw new ChatUnavailableError(
@@ -83,11 +102,12 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   const ctx: ToolContext = {
     db: input.db,
     userId: input.userId,
-    currentMessage: input.message,
+    currentMessage: input.audio ? undefined : input.message,
+    catalogueIntent: intent,
     position: input.position,
   };
 
-  const history = await chargerHistorique(input.db, input.conversationId);
+  const history = previous.history;
 
   history.push({
     role: 'user',
@@ -164,7 +184,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
         // règle, le modèle pouvait d'abord lister les boutiques proches,
         // puis trouver Garba d'Or : l'écran conservait les deux réponses et
         // affichait pharmacie, marché et Tovo Shop avant les bons produits.
-        if (resultat.components.length > 0) {
+        if (resultat.components.length > 0 || ['rechercher_produits', 'produits_de_boutique', 'lister_categories', 'lister_restaurants', 'boutiques_proches'].includes(appel.name)) {
           composantsDuTour.length = 0;
           composantsDuTour.push(...resultat.components);
         }
@@ -226,22 +246,28 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
 async function chargerHistorique(
   db: SupabaseClient,
   conversationId: string,
-): Promise<LlmTurn[]> {
+): Promise<{ history: LlmTurn[]; pending?: PendingMerchantChoice }> {
   const { data } = await db
     .from('messages')
-    .select('role, content')
+    .select('role, content, components')
     .eq('conversation_id', conversationId)
     .in('role', ['user', 'assistant'])
     .order('created_at', { ascending: false })
     .limit(HISTORIQUE);
 
-  return (data ?? [])
+  const latest = data?.[0];
+  const choices = latest?.role === 'assistant' && Array.isArray(latest.components)
+    ? (latest.components as Component[]).filter((component) => component.type === 'merchant_card' && component.data.choose_branch === true)
+    : [];
+  const pending = choices.length ? { merchant_ids: choices.map((choice) => choice.data.id as string), query: choices[0]?.data.pending_query as string ?? '' } : undefined;
+  const history = (data ?? [])
     .reverse()
     .map((m) => ({
       role: m.role === 'assistant' ? ('model' as const) : ('user' as const),
       content: (m.content as string) ?? '',
     }))
     .filter((t) => t.content.length > 0);
+  return { history, ...(pending ? { pending } : {}) };
 }
 
 /**

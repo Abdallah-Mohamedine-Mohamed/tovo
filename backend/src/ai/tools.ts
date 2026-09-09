@@ -15,14 +15,11 @@ import {
 } from '../components/builders.js';
 import { embed, embedImage } from '../services/embeddings.js';
 import { serviceClient } from '../services/supabase.js';
+import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, merchantMenu, type CatalogueIntent } from '../services/catalogue.js';
 import { decrireImage } from '../services/vision.js';
 import {
-  boutiquesCorrespondantes,
-  boutiquesMentionnees,
   demandeDeProximite,
   demandeDeRepas,
-  nomBoutiqueApresMarqueur,
-  normaliserIntention,
 } from './intents.js';
 
 /**
@@ -51,6 +48,7 @@ export interface ToolContext {
   db: SupabaseClient;
   userId: string;
   currentMessage?: string | undefined;
+  catalogueIntent?: CatalogueIntent | undefined;
   position?: { lat: number; lng: number } | undefined;
 }
 
@@ -111,6 +109,12 @@ function resumeProduit(p: ProductRow) {
 // =====================================================================
 
 const listerCategories: Executor = async (_args, ctx) => {
+  if (ctx.currentMessage) {
+    const intent = await catalogueDuContexte(ctx);
+    const answer = await merchantIntentAnswer(ctx.db, intent);
+    if (answer) return answer;
+    if (intent.merchants.length) return rechercherProduits({ requete: intent.query }, ctx);
+  }
   // Seulement celles qui mènent à des produits : proposer une catégorie
   // vide fait croire au client que l'application l'est aussi.
   const { data } = await ctx.db.rpc('browsable_categories');
@@ -139,51 +143,6 @@ const listerCategories: Executor = async (_args, ctx) => {
  * Rend une liste vide plutôt que de deviner. Une boutique introuvable doit
  * être annoncée au client, pas remplacée en silence par une autre.
  */
-type BoutiqueNommee = { id: string; name: string };
-
-async function catalogueBoutiques(ctx: ToolContext): Promise<BoutiqueNommee[]> {
-  const { data } = await ctx.db
-    .from('merchants')
-    .select('id, name')
-    .eq('is_approved', true)
-    .limit(500);
-
-  return (data ?? []) as BoutiqueNommee[];
-}
-
-async function boutiquesNommees(ctx: ToolContext, nom: string): Promise<BoutiqueNommee[]> {
-  const boutiques = await catalogueBoutiques(ctx);
-
-  // TOUTES les correspondances, pas la première. « chez otakoss » désigne
-  // l'enseigne, et O'TAKOSS a deux adresses : en retenir une masquerait la
-  // moitié de sa carte sans que rien ne le signale.
-  return boutiquesCorrespondantes(nom, boutiques);
-}
-
-async function boutiquesDuMessage(
-  ctx: ToolContext,
-  message: string,
-): Promise<BoutiqueNommee[]> {
-  const boutiques = await catalogueBoutiques(ctx);
-  return boutiquesMentionnees(message, boutiques);
-}
-
-async function existeProduitNomme(ctx: ToolContext, requete: string): Promise<boolean> {
-  const terme = requete.replace(/[%_*]/g, ' ').trim();
-  if (terme.length < 2) return false;
-
-  const { data, error } = await ctx.db
-    .from('products')
-    .select('id, merchants!inner(id)')
-    .ilike('name', `%${terme}%`)
-    .eq('is_available', true)
-    .eq('merchants.is_approved', true)
-    .limit(1);
-
-  if (error) throw error;
-  return (data?.length ?? 0) > 0;
-}
-
 async function categorieRestaurants(ctx: ToolContext): Promise<string | null> {
   const { data } = await ctx.db
     .from('categories')
@@ -195,13 +154,20 @@ async function categorieRestaurants(ctx: ToolContext): Promise<string | null> {
   return (data?.id as string | undefined) ?? null;
 }
 
-function demandeCarteComplete(requete: string): boolean {
-  return /\b(menu|carte|produit|produits|article|articles|plat|plats|propose|proposent)\b/.test(
-    normaliserIntention(requete),
-  );
+async function catalogueDuContexte(ctx: ToolContext, interpretedMessage?: string): Promise<CatalogueIntent> {
+  if (!ctx.currentMessage && interpretedMessage) {
+    ctx.catalogueIntent = await resolveCatalogueIntent(ctx.db, interpretedMessage);
+  } else if (!ctx.catalogueIntent) {
+    ctx.catalogueIntent = await resolveCatalogueIntent(ctx.db, ctx.currentMessage ?? '');
+  }
+  return ctx.catalogueIntent;
 }
 
 const listerRestaurants: Executor = async (_args, ctx) => {
+  const intent = await catalogueDuContexte(ctx);
+  const answer = await merchantIntentAnswer(ctx.db, intent);
+  if (answer) return answer;
+  if (intent.merchants.length) return rechercherProduits({ requete: intent.query }, ctx);
   const categorieId = await categorieRestaurants(ctx);
   if (!categorieId) return vide;
 
@@ -301,138 +267,28 @@ async function optionsCorrespondantes(
 const rechercherProduits: Executor = async (args, ctx) => {
   const requete = texte(args, 'requete');
   if (!requete) return vide;
-
-  const pos = position(args, ctx);
-
-  const nomBoutiqueExplicite = texte(args, 'boutique');
-  const boutiquesCertaines = await boutiquesDuMessage(ctx, ctx.currentMessage ?? '');
-  const nomPropose = nomBoutiqueExplicite || requete;
-  const boutiquesProposees = await boutiquesNommees(ctx, nomPropose);
-
-  let boutiques = boutiquesCertaines;
-  if (boutiques.length === 0 && boutiquesProposees.length > 0) {
-    const candidateUnMot = boutiquesProposees.every(
-      (boutique) => normaliserIntention(boutique.name).split(' ').length === 1,
-    );
-    const produitExiste = candidateUnMot && await existeProduitNomme(ctx, requete);
-    if (!produitExiste) boutiques = boutiquesProposees;
+  const boutique = texte(args, 'boutique');
+  const intent = await catalogueDuContexte(ctx, boutique ? `${requete} chez ${boutique}` : requete);
+  const menu = await merchantIntentAnswer(ctx.db, intent);
+  if (menu) return menu;
+  let categorieId = texte(args, 'categorie_id') || undefined;
+  const domaineRepas = texte(args, 'domaine') === 'repas' || demandeDeRepas(ctx.currentMessage ?? '');
+  if (!categorieId && !intent.merchants.length && domaineRepas) {
+    categorieId = await categorieRestaurants(ctx) ?? undefined;
   }
-
-  const boutiqueIds = boutiques.map((boutique) => boutique.id);
-  const nomBoutique = boutiques[0]?.name || nomBoutiqueExplicite || '';
-
-  // Nom donné mais introuvable : on ne cherche PAS partout. Rendre les tacos
-  // du voisin à qui demande ceux d'otakoss est pire que de ne rien rendre,
-  // parce que rien ne signale la substitution.
-  if (
-    nomBoutiqueExplicite
-    && boutiquesProposees.length === 0
-    && nomBoutiqueApresMarqueur(ctx.currentMessage ?? '')
-  ) {
-    return {
-      summary: { resultats: 0, requete, boutique_introuvable: nomBoutiqueExplicite },
-      components: [],
-    };
-  }
-
-  // « Les plats de Garba d'Or » demande la carte de l'enseigne, pas les
-  // huit produits dont le vecteur ressemble le plus au mot « plats ».
-  const requeteEstLeNomDeLaBoutique = boutiques.length > 0
-    && boutiquesCorrespondantes(requete, boutiques).length > 0;
-  if (
-    boutiqueIds.length === 1
-    && (demandeCarteComplete(requete) || requeteEstLeNomDeLaBoutique)
-  ) {
-    const merchantId = boutiqueIds[0]!;
-    const { data: boutique } = await ctx.db
-      .from('merchants')
-      .select('name, is_open')
-      .eq('id', merchantId)
-      .maybeSingle();
-    const { data } = await ctx.db
-      .from('products')
-      .select('id, name, description, image_url, price, is_available, merchant_id, merchants(name)')
-      .eq('merchant_id', merchantId)
-      .eq('is_available', true)
-      .order('name')
-      .limit(30);
-
-    const produits = ((data ?? []) as Array<Record<string, unknown>>).map((produit) => ({
-      id: produit['id'] as string,
-      name: produit['name'] as string,
-      description: (produit['description'] as string | null) ?? null,
-      image_url: (produit['image_url'] as string | null) ?? null,
-      price: produit['price'] as number,
-      is_available: produit['is_available'] as boolean,
-      merchant_id: produit['merchant_id'] as string,
-      merchant_name: (produit['merchants'] as { name?: string } | null)?.name ?? null,
-      merchant_open: (boutique?.is_open as boolean | null) ?? null,
-    }));
-
-    return {
-      summary: {
-        boutique: boutique?.name ?? nomBoutique,
-        resultats: produits.length,
-        produits: produits.map(resumeProduit),
-      },
-      components: produits.length > 0
-        ? [productCarousel(produits, (boutique?.name as string | null) ?? nomBoutique)]
-        : [],
-    };
-  }
-
-  let categorieId = texte(args, 'categorie_id') || null;
-  const domaineRepas =
-    texte(args, 'domaine') === 'repas'
-    || demandeDeRepas(ctx.currentMessage ?? '')
-    || demandeDeRepas(requete);
-  if (!categorieId && boutiqueIds.length === 0 && domaineRepas) {
-    categorieId = await categorieRestaurants(ctx);
-  }
-
-  const vecteur = await embed(requete, 'query').catch(() => null);
-
-  const { data, error } = await ctx.db.rpc('search_products', {
-    query_text: requete,
-    query_embedding: vecteur ? JSON.stringify(vecteur) : null,
-    origin_lat: pos?.lat ?? null,
-    origin_lng: pos?.lng ?? null,
-    radius_m: demandeDeProximite(ctx.currentMessage ?? requete)
-      ? nombre(args, 'rayon_m') ?? null
-      : null,
-    filter_category: categorieId,
-    match_count: null,
-    filter_merchants: boutiqueIds.length > 0 ? boutiqueIds : null,
-  });
-
-  if (error) throw error;
-
-  const produits = ((data ?? []) as Record<string, unknown>[]).map(versProductRow);
-  if (produits.length === 0) {
-    return { summary: { resultats: 0, requete }, components: [] };
-  }
-
-  // Ce qui, dans les OPTIONS, répond à la demande. Le modèle peut alors
-  // dire « le Tacos M existe, la boulette est une garniture à +600 F »
-  // au lieu de « je n'ai pas de tacos aux boulettes ».
-  const options = await optionsCorrespondantes(
-    ctx,
-    requete,
-    produits.map((p) => p.id),
-  );
-
-  return {
-    summary: {
-      resultats: produits.length,
-      produits: produits.map((p) => {
-        const trouvees = options.get(p.id);
-        return trouvees && trouvees.length > 0
-          ? { ...resumeProduit(p), options_disponibles: trouvees }
-          : resumeProduit(p);
-      }),
-    },
-    components: [productCarousel(produits, requete)],
+  const filter = {
+    q: intent.merchants.length ? intent.query : requete,
+    merchant_ids: intent.merchants.length ? intent.merchants.map((merchant) => merchant.id) : undefined,
+    category_id: categorieId, limit: 8,
   };
+  const page = await cataloguePage(ctx.db, filter);
+  const result = searchAnswer(page, filter);
+  const options = await optionsCorrespondantes(ctx, filter.q, page.items.map((product) => product.id));
+  result.summary.produits = page.items.map((product) => ({
+    ...resumeProduit(product), a_personnaliser: product.requires_options ?? false,
+    options_disponibles: options.get(product.id) ?? [],
+  }));
+  return result;
 };
 
 const rechercherParImage: Executor = async (args, ctx) => {
@@ -573,6 +429,11 @@ async function chercherEnRaccourcissant(
 }
 
 const boutiquesProches: Executor = async (args, ctx) => {
+  const intent = await catalogueDuContexte(ctx);
+  const answer = await merchantIntentAnswer(ctx.db, intent);
+  if (answer) return answer;
+  if (intent.merchants.length) return rechercherProduits({ requete: intent.query }, ctx);
+
   const message = ctx.currentMessage ?? '';
   const estUneDemandeDeRepas = demandeDeRepas(message);
 
@@ -931,51 +792,13 @@ const suivreCommande: Executor = async (args, ctx) => {
  * rien trouvé. Le client concluait que la boutique était vide.
  */
 const produitsDeBoutique: Executor = async (args, ctx) => {
-  const merchantId = texte(args, 'merchant_id');
-  if (!merchantId) return { summary: { erreur: 'identifiant manquant' }, components: [] };
-
-  const limite = Math.min(nombre(args, 'limite') ?? 12, 30);
-
-  const { data: boutique } = await ctx.db
-    .from('merchants')
-    .select('name, is_open')
-    .eq('id', merchantId)
-    .maybeSingle();
-
-  const { data } = await ctx.db
-    .from('products')
-    .select('id, name, description, image_url, price, is_available, merchant_id, merchants(name)')
-    .eq('merchant_id', merchantId)
-    .eq('is_available', true)
-    .order('name')
-    .limit(limite);
-
-  const lignes = (data ?? []) as Array<Record<string, unknown>>;
-  const nom = (boutique?.name as string | null) ?? 'Cette boutique';
-
-  if (lignes.length === 0) {
-    return { summary: { boutique: nom, produits: 0 }, components: [] };
-  }
-
-  const items = lignes.map((p) => ({
-    id: p['id'] as string,
-    name: p['name'] as string,
-    description: (p['description'] as string | null) ?? null,
-    image_url: (p['image_url'] as string | null) ?? null,
-    price: p['price'] as number,
-    is_available: p['is_available'] as boolean,
-    merchant_id: p['merchant_id'] as string,
-    merchant_name: (p['merchants'] as { name?: string } | null)?.name ?? null,
-  }));
-
-  return {
-    summary: {
-      boutique: nom,
-      ouverte: boutique?.is_open ?? null,
-      produits: items.map((i) => ({ id: i.id, nom: i.name, prix: i.price })),
-    },
-    components: [productCarousel(items, nom)],
-  };
+  const intent = await catalogueDuContexte(ctx);
+  const menu = await merchantIntentAnswer(ctx.db, intent);
+  if (menu) return menu;
+  if (intent.merchants.length && intent.query) return rechercherProduits({ requete: intent.query }, ctx);
+  const merchantId = intent.merchants[0]?.id ?? texte(args, 'merchant_id');
+  if (!merchantId) return vide;
+  return merchantMenu(ctx.db, merchantId);
 };
 
 /**
@@ -1389,7 +1212,6 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
       type: 'object',
       properties: {
         merchant_id: S.string('Identifiant de la boutique'),
-        limite: S.number('Nombre de produits, 12 par défaut'),
       },
       required: ['merchant_id'],
     },

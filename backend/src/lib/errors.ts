@@ -1,4 +1,3 @@
-import type { PostgrestError } from '@supabase/supabase-js';
 
 /**
  * Traduction des erreurs Postgres en réponses HTTP.
@@ -23,8 +22,9 @@ export interface HttpFailure {
   body: { error: string; code?: string };
 }
 
-export function toHttpFailure(error: PostgrestError): HttpFailure {
-  const code = error.code ?? '';
+export function toHttpFailure(error: unknown): HttpFailure {
+  const failure = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+  const code = typeof failure.code === 'string' ? failure.code : '';
 
   const status =
     code === 'P0002'
@@ -42,7 +42,7 @@ export function toHttpFailure(error: PostgrestError): HttpFailure {
   // précision utile après un deux-points (« option obligatoire non
   // renseignée : Portion »), qu'il ne faut surtout pas amputer.
   const message = MESSAGES_TRANSMISSIBLES.has(code)
-    ? error.message.trim() || 'requête invalide'
+    ? (typeof failure.message === 'string' ? failure.message.trim() : '') || 'requête invalide'
     : status === 403
       ? 'accès refusé'
       : status === 500
