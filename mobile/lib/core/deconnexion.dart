@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'push.dart';
+import 'read_cache.dart';
 import 'theme.dart';
 
 /// Se déconnecter, depuis n'importe laquelle des trois apps.
@@ -43,6 +44,7 @@ Future<void> confirmerDeconnexion(BuildContext context) async {
   // supprimer que ses propres jetons, et après `signOut` il n'y a plus de
   // « soi » pour le faire.
   await TovoPush.oublier();
+  await TovoReadCache.clearPrivateCaches();
   await Supabase.instance.client.auth.signOut();
 
   // Aucune navigation ici : `AuthGate` écoute l'état de session et bascule de

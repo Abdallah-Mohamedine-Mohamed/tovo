@@ -72,6 +72,9 @@ export interface LlmRequest {
   system: string;
   history: LlmTurn[];
   tools: LlmToolDefinition[];
+  cachePrompt?: boolean;
+  responseSchema?: Record<string, unknown>;
+  onText?: (text: string) => void;
 }
 
 export interface LlmClient {
@@ -92,6 +95,7 @@ export class LlmUnavailableError extends Error {
 
 interface GeminiPart {
   text?: string;
+  thought?: boolean;
   inlineData?: { mimeType: string; data: string };
   thoughtSignature?: string;
   functionCall?: { id?: string; name: string; args?: Record<string, unknown> };
@@ -173,28 +177,37 @@ export class GeminiClient implements LlmClient {
   async generate(requete: LlmRequest): Promise<LlmResponse> {
     // Un cache absent n'est pas une erreur : on repart alors sur le prompt
     // en clair, exactement comme avant qu'il existe.
-    const cache = await cacheDuPrompt(requete.system, requete.tools, this.model);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cache = requete.cachePrompt === false ? null : await Promise.race([
+      cacheDuPrompt(requete.system, requete.tools, this.model),
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 80); }),
+    ]).finally(() => { if (timer) clearTimeout(timer); });
+    let emitted = false;
+    const streamingRequest = requete.onText ? { ...requete, onText: (text: string) => {
+      emitted = true;
+      requete.onText?.(text);
+    } } : requete;
 
     try {
-      return await this.appeler(requete, cache);
+      return await this.appeler(streamingRequest, cache);
     } catch (cause) {
       // Un cache peut disparaître chez Gemini avant l'heure annoncée. Le
       // client, lui, attend sa réponse : on rejoue sans cache plutôt que de
       // lui afficher une panne.
-      if (cache && cause instanceof LlmUnavailableError) {
+      if (cache && !emitted && cause instanceof LlmUnavailableError) {
         oublierCache(cache);
-        return this.appeler(requete, null);
+        return this.appeler(streamingRequest, null);
       }
       throw cause;
     }
   }
 
   private async appeler(
-    { system, history, tools }: LlmRequest,
+    { system, history, tools, responseSchema, onText }: LlmRequest,
     cache: string | null,
   ): Promise<LlmResponse> {
     const url =
-      `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`;
+      `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:${onText ? 'streamGenerateContent?alt=sse' : 'generateContent'}`;
 
     // Le prompt et les outils sont DANS le cache : les renvoyer en plus
     // ferait refuser la requête, et paierait deux fois ce qu'on cherche à
@@ -213,6 +226,7 @@ export class GeminiClient implements LlmClient {
       contents: versGemini(history),
       generationConfig: {
         maxOutputTokens: 1024,
+        ...(responseSchema ? { responseMimeType: 'application/json', responseSchema } : {}),
         // Une conversation de commande doit rester rapide. Gemini 3.8
         // remplace les budgets numeriques par low / medium / high ; low
         // suffit pour choisir un outil et rediger une reponse courte.
@@ -243,7 +257,7 @@ export class GeminiClient implements LlmClient {
         );
       }
 
-      const json = (await reponse.json()) as {
+      type GeminiResponse = {
         candidates?: Array<{ content?: { parts?: GeminiPart[] } }>;
         usageMetadata?: {
           promptTokenCount?: number;
@@ -252,7 +266,46 @@ export class GeminiClient implements LlmClient {
         };
       };
 
-      const parts = json.candidates?.[0]?.content?.parts ?? [];
+      let json: GeminiResponse;
+      if (onText && reponse.body) {
+        const reader = reponse.body.getReader();
+        const decoder = new TextDecoder();
+        let pending = '';
+        const chunks: GeminiPart[] = [];
+        let usage: GeminiResponse['usageMetadata'];
+        const consume = (line: string) => {
+          if (!line.startsWith('data:')) return;
+          const data = line.slice(5).trim();
+          if (!data || data === '[DONE]') return;
+          const chunk = JSON.parse(data) as GeminiResponse;
+          for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
+            if (part.thought) continue;
+            chunks.push(part);
+            if (part.text) onText(part.text);
+          }
+          usage = chunk.usageMetadata ?? usage;
+        };
+        try {
+          for (;;) {
+            const next = await reader.read();
+            pending += decoder.decode(next.value, { stream: !next.done });
+            let end: number;
+            while ((end = pending.indexOf('\n')) >= 0) {
+              consume(pending.slice(0, end).trimEnd());
+              pending = pending.slice(end + 1);
+            }
+            if (next.done) break;
+          }
+          if (pending.trim()) consume(pending.trimEnd());
+        } finally {
+          reader.releaseLock();
+        }
+        json = { candidates: [{ content: { parts: chunks } }], ...(usage ? { usageMetadata: usage } : {}) };
+      } else {
+        json = await reponse.json() as GeminiResponse;
+      }
+
+      const parts = (json.candidates?.[0]?.content?.parts ?? []).filter((part) => !part.thought);
 
       return {
         text: parts

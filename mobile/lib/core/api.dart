@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../components/registry.dart';
 import 'config.dart';
+import 'read_cache.dart';
 
 /// Client du backend Tovo.
 ///
@@ -18,16 +19,43 @@ class TovoApi {
     http.Client? client,
     FutureOr<String?> Function()? tokenProvider,
     Future<bool> Function()? onRenouveler,
-  })  : _client = client ?? http.Client(),
-        _token = tokenProvider ?? _tokenDepuisSupabase,
-        // Un jeton fourni de l'extérieur appartient à l'appelant : le
-        // renouveler auprès de Supabase, que les tests n'initialisent pas,
-        // planterait au lieu d'aider. D'où le renouvellement injectable, sans
-        // quoi le second essai sur 401 ne serait vérifiable nulle part.
-        _renouveler =
-            onRenouveler ?? (tokenProvider == null ? _renouvelerSupabase : null);
+    this.cache,
+  }) : _client = client ?? http.Client(),
+       _token = tokenProvider ?? _tokenDepuisSupabase,
+       // Un jeton fourni de l'extérieur appartient à l'appelant : le
+       // renouveler auprès de Supabase, que les tests n'initialisent pas,
+       // planterait au lieu d'aider. D'où le renouvellement injectable, sans
+       // quoi le second essai sur 401 ne serait vérifiable nulle part.
+       _renouveler =
+           onRenouveler ?? (tokenProvider == null ? _renouvelerSupabase : null);
 
   final http.Client _client;
+  final TovoReadCache? cache;
+  final _reads = <String, Future<TovoResponse>>{};
+
+  Future<TovoResponse?> cachedGet(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    final body = await cache?.read(TovoReadCache.key(path, query));
+    return body == null
+        ? null
+        : TovoResponse.success(
+            content: body['content'] as String? ?? '',
+            components: _components(body),
+            raw: body,
+          );
+  }
+
+  Future<void> remember(
+    String path,
+    Map<String, dynamic> body, {
+    Map<String, dynamic>? query,
+  }) async {
+    if (TovoReadCache.accepts(path)) {
+      await cache?.write(TovoReadCache.key(path, query), body);
+    }
+  }
 
   final Future<bool> Function()? _renouveler;
 
@@ -57,8 +85,12 @@ class TovoApi {
     if (session == null) return null;
 
     final expire = session.expiresAt;
-    final bientot = expire != null &&
-        DateTime.now().toUtc().add(const Duration(seconds: 60)).isAfter(
+    final bientot =
+        expire != null &&
+        DateTime.now()
+            .toUtc()
+            .add(const Duration(seconds: 60))
+            .isAfter(
               DateTime.fromMillisecondsSinceEpoch(expire * 1000, isUtc: true),
             );
     if (!bientot) return session.accessToken;
@@ -97,28 +129,131 @@ class TovoApi {
     );
   }
 
-  Future<TovoResponse> get(String path, {Map<String, dynamic>? query}) =>
-      _send(() async => _client.get(_uri(path, query), headers: await _headers));
+  Future<TovoResponse> get(String path, {Map<String, dynamic>? query}) {
+    final key = TovoReadCache.key(path, query);
+    return _reads.putIfAbsent(key, () async {
+      try {
+        final response = await _send(
+          () async => _client.get(_uri(path, query), headers: await _headers),
+          retryNetwork: true,
+        );
+        if (response.ok) unawaited(remember(path, response.raw, query: query));
+        return response;
+      } finally {
+        _reads.remove(key);
+      }
+    });
+  }
 
   Future<TovoResponse> post(String path, Map<String, dynamic> body) => _send(
-      () async => _client.post(_uri(path), headers: await _headers, body: jsonEncode(body)));
+    () async => _client.post(
+      _uri(path),
+      headers: await _headers,
+      body: jsonEncode(body),
+    ),
+  );
 
   Future<TovoResponse> patch(String path, Map<String, dynamic> body) => _send(
-      () async => _client.patch(_uri(path), headers: await _headers, body: jsonEncode(body)));
+    () async => _client.patch(
+      _uri(path),
+      headers: await _headers,
+      body: jsonEncode(body),
+    ),
+  );
 
   Future<TovoResponse> delete(String path) =>
       _send(() async => _client.delete(_uri(path), headers: await _headers));
 
-  /// Envoie, avec un second essai sur coupure réseau.
-  ///
-  /// Rejouer est SÛR ici : le corps de la requête est construit avant
-  /// l'appel, donc un réessai renvoie le même `client_message_id` et la même
-  /// commande. Le backend reconnaît le rejeu et ne refacture pas le modèle.
-  ///
-  /// Sans ça, une seule coupure d'une seconde — le quotidien d'un réseau
-  /// mobile à Niamey — affichait « Connexion perdue » et laissait le client
-  /// appuyer une deuxième fois lui-même.
-  Future<TovoResponse> _send(Future<http.Response> Function() request) async {
+  Future<TovoResponse> chat(
+    Map<String, dynamic> body, {
+    required void Function(Map<String, dynamic>) onEvent,
+  }) async {
+    try {
+      for (var attempt = 0; attempt < 2; attempt++) {
+        final request = http.Request('POST', _uri('/chat'))
+          ..headers.addAll({
+            ...await _headers,
+            'accept': 'application/x-ndjson',
+          })
+          ..body = jsonEncode(body);
+        final response = await _client
+            .send(request)
+            .timeout(const Duration(seconds: 30));
+        if (response.statusCode == 401 && attempt == 0 && _renouveler != null) {
+          await response.stream.drain<void>();
+          if (await _renouveler()) continue;
+          return TovoResponse.failure(
+            message: 'Session expirée.',
+            statusCode: 401,
+            components: const [],
+          );
+        }
+        if (response.headers['content-type']?.contains(
+              'application/x-ndjson',
+            ) !=
+            true) {
+          final raw =
+              jsonDecode(
+                    await response.stream.bytesToString().timeout(
+                      const Duration(seconds: 30),
+                    ),
+                  )
+                  as Map<String, dynamic>;
+          return _chatResponse(raw, response.statusCode);
+        }
+        TovoResponse? result;
+        await for (final line
+            in response.stream
+                .timeout(const Duration(seconds: 30))
+                .transform(utf8.decoder)
+                .transform(const LineSplitter())) {
+          if (line.trim().isEmpty) continue;
+          final event = jsonDecode(line) as Map<String, dynamic>;
+          if (event['type'] == 'done' || event['type'] == 'error') {
+            result = _chatResponse(event, event['status'] as int? ?? 200);
+          } else {
+            onEvent(event);
+          }
+        }
+        if (result != null) return result;
+        break;
+      }
+    } on Exception {
+      return TovoResponse.failure(
+        message:
+            'Réponse interrompue. Vérifiez votre historique avant de réessayer.',
+        statusCode: 0,
+        components: const [],
+      );
+    }
+    return TovoResponse.failure(
+      message:
+          'Réponse incomplète. Retrouvez cette conversation dans votre historique.',
+      statusCode: 0,
+      components: const [],
+    );
+  }
+
+  static TovoResponse _chatResponse(Map<String, dynamic> raw, int status) =>
+      status >= 400
+      ? TovoResponse.failure(
+          message:
+              raw['error'] as String? ??
+              raw['content'] as String? ??
+              'Réponse indisponible.',
+          statusCode: status,
+          components: _components(raw),
+        )
+      : TovoResponse.success(
+          content: raw['content'] as String? ?? '',
+          components: _components(raw),
+          raw: raw,
+        );
+
+  Future<TovoResponse> _send(
+    Future<http.Response> Function() request, {
+    bool retryNetwork = false,
+  }) async {
     var jetonRenouvele = false;
 
     for (var essai = 1; ; essai++) {
@@ -140,7 +275,7 @@ class TovoApi {
 
       if (resultat != null) return resultat;
 
-      if (essai >= 2) {
+      if (!retryNetwork || essai >= 2) {
         return TovoResponse.failure(
           message: 'Connexion perdue. Réessayez dans un instant.',
           statusCode: 0,
@@ -171,7 +306,9 @@ class TovoApi {
   /// Un essai. Renvoie `null` si le réseau a lâché — donc s'il vaut la peine
   /// de recommencer. Une réponse du serveur, même en erreur, est un
   /// résultat : la rejouer donnerait exactement la même chose.
-  Future<TovoResponse?> _tenter(Future<http.Response> Function() request) async {
+  Future<TovoResponse?> _tenter(
+    Future<http.Response> Function() request,
+  ) async {
     try {
       // 30 s et non 20 : une conversation demande au modèle de choisir un
       // outil, de l'exécuter et de rédiger. Mesuré à 3,5 s depuis une bonne
@@ -203,7 +340,8 @@ class TovoApi {
           // Le conflit de panier le faisait, et l'écran montrait « Une
           // erreur est survenue » suivi de deux boutons dont rien
           // n'expliquait l'objet.
-          message: (decoded['error'] as String?) ??
+          message:
+              (decoded['error'] as String?) ??
               (decoded['content'] as String?) ??
               'Une erreur est survenue.',
           statusCode: response.statusCode,
@@ -247,27 +385,25 @@ class TovoResponse {
     required String content,
     required List<TovoComponent> components,
     Map<String, dynamic> raw = const {},
-  }) =>
-      TovoResponse._(
-        ok: true,
-        content: content,
-        components: components,
-        statusCode: 200,
-        raw: raw,
-      );
+  }) => TovoResponse._(
+    ok: true,
+    content: content,
+    components: components,
+    statusCode: 200,
+    raw: raw,
+  );
 
   factory TovoResponse.failure({
     required String message,
     required int statusCode,
     required List<TovoComponent> components,
-  }) =>
-      TovoResponse._(
-        ok: false,
-        content: message,
-        components: components,
-        statusCode: statusCode,
-        raw: const {},
-      );
+  }) => TovoResponse._(
+    ok: false,
+    content: message,
+    components: components,
+    statusCode: statusCode,
+    raw: const {},
+  );
 
   final bool ok;
   final String content;

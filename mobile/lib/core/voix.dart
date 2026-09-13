@@ -10,14 +10,11 @@ import 'package:record/record.dart';
 /// c'est probablement le raccourci le plus utile de l'application pour qui
 /// n'écrit pas à l'aise.
 ///
-/// L'enregistrement est envoyé tel quel à l'assistant, qui comprend l'audio
-/// directement : pas de transcription intermédiaire, donc pas de service
-/// tiers à qui confier la voix des clients, et rien n'est conservé nulle
-/// part une fois la réponse rendue.
 class VoixTovo {
   VoixTovo._();
 
-  static final AudioRecorder _enregistreur = AudioRecorder();
+  static AudioRecorder? _recorder;
+  static AudioRecorder get _enregistreur => _recorder ??= AudioRecorder();
   static String? _fichier;
 
   /// Au-delà, ce n'est plus une commande mais un monologue : le modèle
@@ -44,7 +41,8 @@ class VoixTovo {
     if (!await _enregistreur.hasPermission()) return false;
 
     final dossier = Directory.systemTemp.path;
-    final chemin = '$dossier/tovo_voix_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    final chemin =
+        '$dossier/tovo_voix_${DateTime.now().millisecondsSinceEpoch}.m4a';
 
     await _enregistreur.start(
       // AAC et non WAV : six secondes de WAV pèsent 286 Ko, une minute d'AAC
@@ -93,8 +91,13 @@ class VoixTovo {
     if (chemin == null) return;
 
     await _enregistreur.stop();
-    await File(chemin).delete().catchError((e) => e as File);
+    final fichier = File(chemin);
+    await fichier.delete().catchError((_) => fichier);
   }
 
-  static Future<void> liberer() => _enregistreur.dispose();
+  static Future<void> liberer() async {
+    final recorder = _recorder;
+    _recorder = null;
+    await recorder?.dispose();
+  }
 }

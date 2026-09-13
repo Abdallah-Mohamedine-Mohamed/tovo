@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/api.dart';
 import '../../core/deconnexion.dart';
 import '../../core/theme.dart';
+import '../../components/widgets/read_placeholder.dart';
 
 /// La liste des conversations, en tiroir.
 ///
@@ -34,6 +35,7 @@ class TiroirConversations extends StatefulWidget {
 class _TiroirConversationsState extends State<TiroirConversations> {
   List<Map<String, dynamic>> _conversations = const [];
   bool _charge = true;
+  String? _error;
 
   @override
   void initState() {
@@ -42,11 +44,25 @@ class _TiroirConversationsState extends State<TiroirConversations> {
   }
 
   Future<void> _recharger() async {
-    final reponse = await widget.api.get('/conversations');
+    final request = widget.api.get('/conversations');
+    final cached = await widget.api.cachedGet('/conversations');
+    if (!mounted) return;
+    if (cached != null) {
+      setState(() {
+        _conversations = cached.list('conversations');
+        _charge = false;
+      });
+    }
+    final reponse = await request;
     if (!mounted) return;
 
     setState(() {
       _charge = false;
+      if (!reponse.ok) {
+        _error = reponse.content;
+        return;
+      }
+      _error = null;
       _conversations = ((reponse.raw['conversations'] as List?) ?? const [])
           .whereType<Map<String, dynamic>>()
           .toList();
@@ -138,18 +154,22 @@ class _TiroirConversationsState extends State<TiroirConversations> {
               ),
             ),
             const SizedBox(height: 6),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  children: [
+                    Text(_error!, style: const TextStyle(fontSize: 12)),
+                    TextButton(
+                      onPressed: _recharger,
+                      child: const Text('Réessayer'),
+                    ),
+                  ],
+                ),
+              ),
             Expanded(
               child: _charge
-                  ? const Center(
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: TovoTheme.teal,
-                        ),
-                      ),
-                    )
+                  ? const ReadPlaceholder()
                   : _conversations.isEmpty
                   ? const Padding(
                       padding: EdgeInsets.fromLTRB(22, 20, 22, 0),

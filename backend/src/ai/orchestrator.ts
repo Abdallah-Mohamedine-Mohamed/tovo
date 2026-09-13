@@ -57,6 +57,7 @@ export interface OrchestrateInput {
    */
   audio?: { mime: string; data: string } | undefined;
   position?: { lat: number; lng: number } | undefined;
+  onEvent?: ((event: Record<string, unknown>) => void) | undefined;
 }
 
 export interface OrchestrateOutput extends ChatEnvelope {
@@ -88,6 +89,8 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     if (page.total > 0) direct = searchAnswer(page, filter);
   }
   if (direct) {
+    input.onEvent?.({ type: 'results', components: direct.components });
+    input.onEvent?.({ type: 'text', text: direct.content });
     const messageId = await persister(input, direct.content, direct.components);
     return { ...envelope(direct.content, direct.components), messageId, rejected: [],
       usage: { input: 0, output: 0, cached: 0, cycles: 0 } };
@@ -136,12 +139,17 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
 
   for (; cycles < MAX_CYCLES; cycles++) {
     const dernierCycle = cycles === MAX_CYCLES - 1;
+    input.onEvent?.({ type: 'text_start' });
 
     const reponse = await client.generate({
       system: SYSTEM_PROMPT,
       history,
       // Au dernier cycle, plus d'outils : le modèle doit conclure.
       tools: dernierCycle ? [] : TOOL_DEFINITIONS,
+      ...(input.onEvent ? {
+        cachePrompt: !dernierCycle,
+        onText: (text: string) => input.onEvent?.({ type: 'text', text }),
+      } : {}),
     });
 
     entree += reponse.usage?.input ?? 0;
@@ -208,6 +216,8 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
         });
       }
     }
+    const verified = validateComponents(composantsDuTour, idsAutorises);
+    input.onEvent?.({ type: 'results', components: verified.components });
   }
 
   const { components, rejected } = validateComponents(composantsDuTour, idsAutorises);

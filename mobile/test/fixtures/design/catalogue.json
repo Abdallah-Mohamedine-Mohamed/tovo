@@ -1,0 +1,71 @@
+{
+  "merchant": {
+    "id": "garba",
+    "name": "GARBA D'OR",
+    "logo_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/1e8743d5-8c89-4327-9697-4d7651dc85b1/logo/2025-10-02-68de7b5911283.webp",
+    "address_hint": "BOBIEL, station Kachallah",
+    "is_open": true
+  },
+  "products": [
+    {
+      "id": "ba654967-971f-4588-a6b1-84ccfdd32424",
+      "name": "Attieke Poulet",
+      "price": 3000,
+      "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/1e8743d5-8c89-4327-9697-4d7651dc85b1/ba654967-971f-4588-a6b1-84ccfdd32424/2025-10-02-68de84412d4ff.webp",
+      "fixture": "ba654967-971f-4588-a6b1-84ccfdd32424.webp",
+      "merchant_id": "garba",
+      "merchant_name": "GARBA D'OR",
+      "is_available": true
+    },
+    {
+      "id": "32a51a5e-2b3e-4301-a793-8180016e6f1d",
+      "name": "Attieke Demi Poulet",
+      "price": 4000,
+      "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/1e8743d5-8c89-4327-9697-4d7651dc85b1/32a51a5e-2b3e-4301-a793-8180016e6f1d/2025-10-02-68de86e1d39fb.webp",
+      "fixture": "32a51a5e-2b3e-4301-a793-8180016e6f1d.webp",
+      "merchant_id": "garba",
+      "merchant_name": "GARBA D'OR",
+      "is_available": true
+    },
+    {
+      "id": "58d513fe-4ab3-4da9-a100-d4ed856e2143",
+      "name": "Attieke Poisson Carpe",
+      "price": 3000,
+      "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/1e8743d5-8c89-4327-9697-4d7651dc85b1/58d513fe-4ab3-4da9-a100-d4ed856e2143/2025-10-02-68de813cbb48c.webp",
+      "fixture": "58d513fe-4ab3-4da9-a100-d4ed856e2143.webp",
+      "merchant_id": "garba",
+      "merchant_name": "GARBA D'OR",
+      "is_available": true
+    },
+    {
+      "id": "f124817c-9eae-4459-a684-bd118c732021",
+      "name": "Attieke Poisson Carpe",
+      "price": 6000,
+      "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/1e8743d5-8c89-4327-9697-4d7651dc85b1/f124817c-9eae-4459-a684-bd118c732021/2025-10-02-68de82387c0cb.webp",
+      "fixture": "f124817c-9eae-4459-a684-bd118c732021.webp",
+      "merchant_id": "garba",
+      "merchant_name": "GARBA D'OR",
+      "is_available": true
+    },
+    {
+      "id": "2ab29f79-5045-4bbc-b205-57ed615e45b4",
+      "name": "Garba",
+      "price": 2000,
+      "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/1e8743d5-8c89-4327-9697-4d7651dc85b1/2ab29f79-5045-4bbc-b205-57ed615e45b4/2025-10-02-68de801a99781.webp",
+      "fixture": "2ab29f79-5045-4bbc-b205-57ed615e45b4.webp",
+      "merchant_id": "garba",
+      "merchant_name": "GARBA D'OR",
+      "is_available": true
+    },
+    {
+      "id": "ad22ca25-dc98-4111-be3c-596a53f14efc",
+      "name": "Attieke Poulet Entier",
+      "price": 6000,
+      "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/1e8743d5-8c89-4327-9697-4d7651dc85b1/ad22ca25-dc98-4111-be3c-596a53f14efc/2025-10-02-68de8ad56d682.png",
+      "fixture": "ad22ca25-dc98-4111-be3c-596a53f14efc.png",
+      "merchant_id": "garba",
+      "merchant_name": "GARBA D'OR",
+      "is_available": true
+    }
+  ]
+}

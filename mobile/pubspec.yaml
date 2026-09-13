@@ -22,6 +22,7 @@ dependencies:
   supabase_flutter: ^2.8.0
 
   http: ^1.2.2
+  cached_network_image: ^3.4.1
 
   # Adressage par épingle GPS : à Niamey l'adresse postale n'existe pas,
   # le point GPS fait foi.
@@ -102,6 +103,7 @@ flutter:
   # neuf allers-retours pour économiser un millième de l'APK.
   assets:
     - assets/icons/categories/
+    - assets/branding/
 
   # DM Sans, embarquée et non chargée à l'exécution.
   #

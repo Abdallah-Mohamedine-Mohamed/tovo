@@ -7,6 +7,8 @@ import { LlmUnavailableError, llmEnabled } from '../ai/llmClient.js';
 import { EXECUTORS } from '../ai/tools.js';
 import { demandeGeneraleDeRepas } from '../ai/intents.js';
 import { signaler } from '../lib/observability.js';
+import { transcribe } from '../services/transcription.js';
+import { chatStream } from '../lib/chatStream.js';
 
 /**
  * POST /chat — le fil conversationnel.
@@ -156,6 +158,19 @@ function demandeUnColis(texte: string): boolean {
 }
 
 export async function chatRoutes(app: FastifyInstance): Promise<void> {
+  app.post('/transcriptions', { preHandler: app.requireAuth }, async (request, reply) => {
+    const body = z.object({ audio: audioSchema }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: 'enregistrement invalide' });
+    const started = performance.now();
+    try {
+      const transcript = await transcribe(body.data.audio);
+      request.log.info({ duration_ms: Math.round(performance.now() - started) }, 'transcription terminee');
+      if (!transcript) return reply.code(422).send({ error: 'Je n’ai pas distingué de paroles. Réessayez dans un endroit plus calme.' });
+      return reply.send({ transcript });
+    } catch {
+      return reply.code(503).send({ error: 'La transcription est indisponible. Réessayez ou écrivez votre demande.' });
+    }
+  });
   /**
    * La dernière conversation, pour la reprendre à l'ouverture.
    *
@@ -260,6 +275,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     const db = request.supabase!;
     const userId = request.user!.id;
+    const streaming = request.headers.accept?.includes('application/x-ndjson') === true;
+    const output = chatStream(reply, streaming);
+    const started = performance.now();
+    let firstResultMs: number | undefined;
+    let firstTextMs: number | undefined;
+    const emit = (event: Record<string, unknown>) => {
+      const elapsed = Math.round(performance.now() - started);
+      if (event.type === 'results' && firstResultMs === undefined) firstResultMs = elapsed;
+      if (event.type === 'text' && firstTextMs === undefined) firstTextMs = elapsed;
+      output.emit(event);
+    };
 
     // Conversation : celle fournie, ou une nouvelle. La RLS garantit qu'on
     // ne peut pas écrire dans celle d'un autre.
@@ -280,7 +306,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Idempotence : si ce message a déjà été traité, on renvoie la réponse
     // existante sans rappeler le modèle.
     const dejaTraite = await reponseExistante(db, conversationId, body.data.client_message_id);
-    if (dejaTraite) return reply.send(dejaTraite);
+    if (dejaTraite) return output.finish(dejaTraite);
 
     // Le message vocal n'a pas de texte : la consigne qui accompagne l'audio
     // dit au modèle quoi en faire, et sert aussi de trace dans l'historique
@@ -310,6 +336,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       const contenu =
         'Bien sûr. Indiquez **le point de départ**, **le lieu de livraison** et **le numéro du destinataire**.';
 
+      emit({ type: 'conversation', conversation_id: conversationId });
+      emit({ type: 'results', components: resultat.components });
+      emit({ type: 'text', text: contenu });
+
       await db.from('messages').insert({
         conversation_id: conversationId,
         role: 'user',
@@ -324,7 +354,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       });
 
       request.log.info({ conversationId }, 'formulaire colis ouvert sans interprétation');
-      return reply.send({
+      return output.finish({
         conversation_id: conversationId,
         ...envelope(contenu, resultat.components),
       });
@@ -350,6 +380,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       const contenu =
         'Avec plaisir. Voici les **restaurants** disponibles — choisissez celui qui vous fait envie.';
 
+      emit({ type: 'conversation', conversation_id: conversationId });
+      emit({ type: 'results', components: resultat.components });
+      emit({ type: 'text', text: contenu });
+
       await db.from('messages').insert({
         conversation_id: conversationId,
         role: 'user',
@@ -364,7 +398,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       });
 
       request.log.info({ conversationId }, 'restaurants ouverts sans recherche de proximite');
-      return reply.send({
+      return output.finish({
         conversation_id: conversationId,
         ...envelope(contenu, resultat.components),
       });
@@ -387,6 +421,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           ? libelleLisible(body.data.interaction.action, body.data.interaction.payload)
           : null;
 
+      output.emit({ type: 'conversation', conversation_id: conversationId });
       const resultat = await orchestrate({
         db,
         userId,
@@ -396,6 +431,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         clientMessageId: body.data.client_message_id,
         ...(body.data.audio ? { audio: body.data.audio } : {}),
         position: body.data.context,
+        ...(streaming ? { onEvent: emit } : {}),
       });
 
       if (resultat.rejected.length > 0) {
@@ -414,11 +450,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       }
 
       request.log.info(
-        { usage: resultat.usage, conversationId },
+        { usage: resultat.usage, conversationId, duration_ms: Math.round(performance.now() - started),
+          first_result_ms: firstResultMs, first_text_ms: firstTextMs },
         'tour de conversation',
       );
 
-      return reply.send({
+      return output.finish({
         conversation_id: conversationId,
         content: resultat.content,
         components: resultat.components,
@@ -427,13 +464,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     } catch (cause) {
       if (cause instanceof ChatUnavailableError || cause instanceof LlmUnavailableError) {
         request.log.error({ cause: cause.message }, 'assistant indisponible');
-        return reply.code(503).send(
-          envelope(
+        return output.finish(
+          { ...envelope(
             "Je n'arrive pas à répondre pour le moment. Choisissez une catégorie en attendant.",
-          ),
+          ) }, 503,
         );
       }
-      throw cause;
+      request.log.error({ cause }, 'conversation interrompue');
+      return output.finish({ error: 'La réponse a été interrompue. Retrouvez la conversation dans votre historique.' }, 503);
     }
   });
 }

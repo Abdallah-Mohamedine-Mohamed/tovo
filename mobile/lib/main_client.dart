@@ -5,6 +5,7 @@ import 'components/register_all.dart';
 import 'core/api.dart';
 import 'core/config.dart';
 import 'core/push.dart';
+import 'core/read_cache.dart';
 import 'core/theme.dart';
 import 'features/auth/auth_gate.dart';
 import 'features/chat/chat_screen.dart';
@@ -52,12 +53,16 @@ class TovoClientApp extends StatelessWidget {
     return MaterialApp(
       title: 'Tovo',
       debugShowCheckedModeBanner: false,
-      theme: TovoTheme.build(),
+      theme: TovoTheme.client(),
       home: AuthGate(
         appPush: 'client',
         titre: 'TOVO',
         sousTitre: 'Livraison, coursier, comparateur de prix à Niamey.',
-        child: () => ChatScreen(api: TovoApi()),
+        child: () => ChatScreen(
+          api: TovoApi(
+            cache: TovoReadCache(Supabase.instance.client.auth.currentUser!.id),
+          ),
+        ),
       ),
     );
   }
@@ -70,7 +75,7 @@ class _EcranDeConfiguration extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: TovoTheme.build(),
+      theme: TovoTheme.client(),
       home: Scaffold(
         body: Center(
           child: Padding(

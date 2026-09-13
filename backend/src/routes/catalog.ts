@@ -185,18 +185,25 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
     if (!query.success) return reply.code(400).send({ error: 'requête invalide' });
     try {
       const filter = { ...query.data, merchant_ids: query.data.merchant_id ? [query.data.merchant_id] : query.data.merchant_ids };
-      const page = await cataloguePage(db(request), filter);
+      const database = db(request);
+      const merchantId = query.data.merchant_id;
+      const [page, details] = await Promise.all([
+        cataloguePage(database, filter),
+        merchantId ? Promise.all([
+          database.from('merchants').select('id, name, logo_url, address_hint, description')
+            .eq('id', merchantId).eq('is_approved', true).maybeSingle(),
+          database.rpc('merchant_open_now', { p_merchant_id: merchantId }),
+          database.rpc('merchant_categories', { p_merchant_id: merchantId }),
+        ]) : null,
+      ]);
       let merchant: Record<string, unknown> | null = null;
       let categories: unknown[] = [];
-      if (query.data.merchant_id) {
-        const result = await db(request).from('merchants')
-          .select('id, name, logo_url, address_hint, description').eq('id', query.data.merchant_id).eq('is_approved', true).maybeSingle();
+      if (details) {
+        const [result, hours, sections] = details;
         if (result.error) throw result.error;
         if (!result.data) return reply.code(404).send({ error: 'boutique introuvable' });
-        const hours = await db(request).rpc('merchant_open_now', { p_merchant_id: query.data.merchant_id });
         if (hours.error) throw hours.error;
         merchant = { ...result.data, is_open: hours.data };
-        const sections = await db(request).rpc('merchant_categories', { p_merchant_id: query.data.merchant_id });
         if (sections.error) throw sections.error;
         categories = sections.data ?? [];
       }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../core/catalog_image.dart';
 import '../registry.dart';
 
 /// `product_card` et `merchant_card` — deux fiches, un même fichier.
@@ -98,9 +99,12 @@ class MerchantCard extends StatelessWidget {
     final id = component.str('id');
     final logo = component.str('logo_url');
     final adresse = component.str('address_hint');
+    final total = component.data['total_products'] as num?;
 
-    return Opacity(
-      opacity: ouverte ? 1 : 0.72,
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0xFFEEF0F0))),
+      ),
       child: Material(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
@@ -109,15 +113,18 @@ class MerchantCard extends StatelessWidget {
           onTap: id.isEmpty
               ? null
               : () => onInteraction(
-                  TovoInteraction('select_merchant', {'merchant_id': id}),
+                  TovoInteraction('select_merchant', {
+                    'merchant_id': id,
+                    'query': component.str('pending_query'),
+                  }),
                 ),
           child: Padding(
             padding: const EdgeInsets.all(10),
             child: Row(
               children: [
                 SizedBox(
-                  width: 82,
-                  height: 82,
+                  width: 64,
+                  height: 64,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(14),
                     child: _LogoBoutique(url: logo.isEmpty ? null : logo),
@@ -130,7 +137,7 @@ class MerchantCard extends StatelessWidget {
                     children: [
                       Text(
                         component.str('name'),
-                        maxLines: 1,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 15.5,
@@ -138,6 +145,17 @@ class MerchantCard extends StatelessWidget {
                           color: TovoTheme.ink,
                         ),
                       ),
+                      if (total != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            'Ouvrir la carte · ${total.toInt()} produits',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: TovoTheme.teal,
+                            ),
+                          ),
+                        ),
                       if (adresse.isNotEmpty) ...[
                         const SizedBox(height: 3),
                         Text(
@@ -228,9 +246,9 @@ class _LogoBoutique extends StatelessWidget {
     );
     if (url == null) return repli;
 
-    return Image.network(
+    return CatalogImage(
       url!,
-      fit: BoxFit.cover,
+      fit: BoxFit.contain,
       errorBuilder: (_, __, ___) => repli,
     );
   }
@@ -339,7 +357,7 @@ class _Vignette extends StatelessWidget {
 
     if (url == null || url!.isEmpty) return placeholder;
 
-    return Image.network(
+    return CatalogImage(
       url!,
       height: hauteur,
       width: double.infinity,

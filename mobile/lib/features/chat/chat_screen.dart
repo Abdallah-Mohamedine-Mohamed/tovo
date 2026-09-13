@@ -4,16 +4,21 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../components/registry.dart';
+import '../../components/widgets/read_placeholder.dart';
 import '../../core/api.dart';
 import '../../core/location.dart';
 import '../../core/theme.dart';
 import '../../core/voix.dart';
 import 'conversations_drawer.dart';
+import '../catalog/catalog_screen.dart';
+import '../catalog/product_screen.dart';
+import '../catalog/cart_screen.dart';
 
 /// Le fil conversationnel.
 ///
@@ -87,9 +92,18 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<_Tour> _tours = [];
   final ScrollController _scroll = ScrollController();
   final TextEditingController _saisie = TextEditingController();
+  bool _scrollScheduled = false;
 
   bool _charge = false;
   String? _conversationId;
+  int _navigation = 0;
+  int _voiceGeneration = 0;
+  bool _voiceAction = false;
+  bool _loadingHistory = false;
+  bool _transcribing = false;
+  bool _voiceDraft = false;
+  String? _voiceError;
+  Map<String, dynamic>? _pendingAudio;
 
   /// Conservé entre deux tentatives : un rejeu après coupure doit présenter
   /// le MÊME identifiant, sinon l'idempotence ne sert à rien.
@@ -115,8 +129,9 @@ class _ChatScreenState extends State<ChatScreen> {
   /// la reprise du fil, elle, la remplit depuis le serveur. Dans l'autre
   /// sens, la photo récupérée serait écrasée avant même d'être vue.
   Future<void> _demarrer() async {
+    final navigation = _navigation;
     await _accueil();
-    if (mounted) await _recupererPhotoPerdue();
+    if (mounted && navigation == _navigation) await _recupererPhotoPerdue();
   }
 
   @override
@@ -142,7 +157,40 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Les deux ne s'excluent pas : on remet le fil, puis on pose le suivi à la
   /// fin, là où le regard tombe.
   Future<void> _accueil() async {
-    final commandes = await widget.api.get('/orders', query: {'limit': 5});
+    final navigation = _navigation;
+    final ordersRequest = widget.api.get('/orders', query: {'limit': 5});
+    final historyRequest = widget.api.get('/conversations/last');
+    final categoriesRequest = widget.api.get('/categories');
+    final saved = await widget.api.cachedGet('/conversations/last');
+    if (!mounted || navigation != _navigation) return;
+    if (saved != null && saved.list('messages').isNotEmpty) {
+      _showHistory(saved);
+    } else {
+      final categories = await widget.api.cachedGet('/categories');
+      if (!mounted || navigation != _navigation) return;
+      if (categories != null) _showCategories(categories);
+    }
+    unawaited(
+      categoriesRequest.then((categories) {
+        if (mounted &&
+            navigation == _navigation &&
+            _conversationId == null &&
+            categories.ok) {
+          _showCategories(categories);
+        }
+      }),
+    );
+    final history = await historyRequest;
+    if (!mounted || navigation != _navigation) return;
+    if (history.ok && history.list('messages').isNotEmpty) {
+      _showHistory(history);
+    } else if (history.ok || _conversationId == null) {
+      final categories = await categoriesRequest;
+      if (!mounted || navigation != _navigation) return;
+      if (categories.ok) _showCategories(categories);
+    }
+    final commandes = await ordersRequest;
+    if (!mounted || navigation != _navigation) return;
 
     Map<String, dynamic>? enCours;
     if (commandes.ok) {
@@ -153,16 +201,9 @@ class _ChatScreenState extends State<ChatScreen> {
       }).firstOrNull;
     }
 
-    if (!mounted) return;
-    final filRepris = await _reprendreLaConversation();
-
     if (enCours != null && mounted) {
       await _appeler(() => widget.api.get('/orders/${enCours!['id']}'));
-      return;
     }
-
-    if (filRepris) return;
-    if (mounted) await _appeler(() => widget.api.get('/categories'));
   }
 
   /// Le prénom, pour le salut d'accueil.
@@ -195,16 +236,14 @@ class _ChatScreenState extends State<ChatScreen> {
   /// chaque lancement ouvrait un fil neuf, et ce que le client avait dit la
   /// veille disparaissait. Il repartait de zéro sans comprendre pourquoi
   /// l'assistant ne se souvenait de rien.
-  Future<bool> _reprendreLaConversation() async {
-    final reponse = await widget.api.get('/conversations/last');
-    if (!reponse.ok || !mounted) return false;
-
+  void _showHistory(TovoResponse reponse) {
     final id = reponse.raw['conversation_id'];
     final messages = (reponse.raw['messages'] as List?) ?? const [];
-    if (id is! String || messages.isEmpty) return false;
+    if (id is! String) return;
 
     setState(() {
       _conversationId = id;
+      _tours.clear();
       for (final m in messages.cast<Map<String, dynamic>>()) {
         _tours.add(
           _Tour(
@@ -220,7 +259,47 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
     _versLeBas();
-    return true;
+  }
+
+  void _showCategories(TovoResponse response) {
+    setState(() {
+      _conversationId = null;
+      _tours.clear();
+      _tours.add(
+        _Tour(
+          deLAssistant: true,
+          contenu: response.content,
+          composants: response.components,
+        ),
+      );
+    });
+  }
+
+  void _rememberConversation() {
+    final id = _conversationId;
+    if (id == null) return;
+    final body = <String, dynamic>{
+      'conversation_id': id,
+      'messages': _tours
+          .where((tour) => !tour.enErreur)
+          .map(
+            (tour) => {
+              'role': tour.deLAssistant ? 'assistant' : 'user',
+              'content': tour.contenu,
+              'components': tour.composants
+                  .map(
+                    (component) => {
+                      'type': component.type,
+                      'data': component.data,
+                    },
+                  )
+                  .toList(),
+            },
+          )
+          .toList(),
+    };
+    unawaited(widget.api.remember('/conversations/$id', body));
+    unawaited(widget.api.remember('/conversations/last', body));
   }
 
   // ------------------------------------------------------------------
@@ -235,9 +314,10 @@ class _ChatScreenState extends State<ChatScreen> {
     Future<TovoResponse> Function() requete, {
     bool remplaceLeDernier = false,
   }) async {
+    final navigation = _navigation;
     setState(() => _charge = true);
     final reponse = await requete();
-    if (!mounted) return;
+    if (!mounted || navigation != _navigation) return;
 
     final tour = _Tour(
       deLAssistant: true,
@@ -267,7 +347,13 @@ class _ChatScreenState extends State<ChatScreen> {
       if (id is String) _conversationId = id;
     });
 
-    if (!remplaceLeDernier) _versLeBas();
+    if (!remplaceLeDernier &&
+        !(_tours.length == 1 &&
+            _tours.first.composants.any(
+              (component) => component.type == 'category_grid',
+            ))) {
+      _versLeBas();
+    }
   }
 
   /// Deux tours montrent-ils le même composant ?
@@ -277,17 +363,78 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   /// Parle à l'assistant. Texte libre ou interaction à interpréter.
-  Future<void> _parler({String? texte, Map<String, dynamic>? interaction}) {
-    return _appeler(
-      () => widget.api.post('/chat', {
+  Future<void> _parler({
+    String? texte,
+    Map<String, dynamic>? interaction,
+  }) async {
+    final navigation = _navigation;
+    setState(() => _charge = true);
+    final index = _tours.length;
+    var partialText = '';
+    List<TovoComponent> partialComponents = [];
+    final response = await widget.api.chat(
+      {
         'client_message_id': _nouvelIdentifiant(),
         if (_conversationId != null) 'conversation_id': _conversationId,
         if (texte != null) 'text': texte,
         if (interaction != null) 'interaction': interaction,
         if (_position != null)
           'context': {'lat': _position!.$1, 'lng': _position!.$2},
-      }),
+      },
+      onEvent: (event) {
+        if (!mounted || navigation != _navigation) return;
+        final follow =
+            !_scroll.hasClients || _scroll.position.extentAfter < 160;
+        setState(() {
+          if (event['conversation_id'] is String) {
+            _conversationId = event['conversation_id'] as String;
+          }
+          if (event['type'] == 'text_start') partialText = '';
+          if (event['type'] == 'text') {
+            partialText += event['text'] as String? ?? '';
+          }
+          if (event['type'] == 'results') {
+            partialComponents = (event['components'] as List? ?? [])
+                .whereType<Map<String, dynamic>>()
+                .map(TovoComponent.fromJson)
+                .toList();
+          }
+          if (partialText.isNotEmpty || partialComponents.isNotEmpty) {
+            final tour = _Tour(
+              deLAssistant: true,
+              contenu: partialText,
+              composants: partialComponents,
+            );
+            if (_tours.length == index) {
+              _tours.add(tour);
+            } else {
+              _tours[index] = tour;
+            }
+          }
+        });
+        if (follow) _versLeBas(animate: false);
+      },
     );
+    if (!mounted || navigation != _navigation) return;
+    setState(() {
+      _charge = false;
+      final tour = _Tour(
+        deLAssistant: true,
+        contenu: response.content,
+        composants: response.components,
+        enErreur: !response.ok,
+      );
+      if (_tours.length == index) {
+        _tours.add(tour);
+      } else {
+        _tours[index] = tour;
+      }
+      if (response.raw['conversation_id'] is String) {
+        _conversationId = response.raw['conversation_id'] as String;
+      }
+    });
+    if (response.ok) _rememberConversation();
+    _versLeBas();
   }
 
   // ------------------------------------------------------------------
@@ -303,7 +450,6 @@ class _ChatScreenState extends State<ChatScreen> {
   /// C'est aussi ici qu'on demande l'accès au micro, jamais pendant l'appui
   /// long : la boîte de dialogue Android interromprait le geste, et
   /// l'enregistrement démarrerait après coup, sans personne pour l'arrêter.
-  /// Un appui démarre, un appui envoie.
   ///
   /// Le maintien enfoncé a été retiré, pour deux raisons.
   ///
@@ -317,23 +463,26 @@ class _ChatScreenState extends State<ChatScreen> {
   /// est pénible, et impossible si l'on veut faire autre chose en même
   /// temps. Deux appuis coûtent un geste de plus et rendent la main.
   Future<void> _toucherLeMicro() async {
-    if (_enregistreLaVoix) {
-      await _envoyerLaParole();
-      return;
-    }
-
-    if (!await VoixTovo.autorisation()) {
+    if (_charge || _transcribing || _voiceAction) return;
+    _voiceAction = true;
+    final generation = _voiceGeneration;
+    try {
+      if (_enregistreLaVoix) {
+        await _envoyerLaParole();
+      } else {
+        _navigation++;
+        await _demarrerLaParole(generation);
+      }
+    } on Exception {
+      await _annulerLaParole();
       if (!mounted) return;
       _messageAssistant(
-        "Je n'ai pas accès au micro. Autorisez-le dans les réglages du "
-        'téléphone, ou écrivez votre demande.',
+        "L'enregistrement n'a pas abouti. Réessayez ou écrivez votre demande.",
         enErreur: true,
       );
-      return;
+    } finally {
+      _voiceAction = false;
     }
-
-    if (!mounted) return;
-    await _demarrerLaParole();
   }
 
   void _messageAssistant(String texte, {bool enErreur = false}) {
@@ -343,12 +492,12 @@ class _ChatScreenState extends State<ChatScreen> {
     _versLeBas();
   }
 
-  Future<void> _demarrerLaParole() async {
+  Future<void> _demarrerLaParole(int generation) async {
     // L'autorisation est réglée par l'appui court : si elle manque encore,
     // on ne l'ouvre pas ici, on explique. Ouvrir la boîte de dialogue
     // pendant l'appui long laisserait un enregistrement orphelin.
     if (!await VoixTovo.autorisation()) {
-      if (!mounted) return;
+      if (!mounted || generation != _voiceGeneration) return;
       _messageAssistant(
         "Je n'ai pas accès au micro. Autorisez-le dans les réglages du "
         'téléphone, ou écrivez votre demande.',
@@ -357,8 +506,12 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
+    if (!mounted || generation != _voiceGeneration) return;
     final autorise = await VoixTovo.demarrer();
-    if (!mounted) return;
+    if (!mounted || generation != _voiceGeneration) {
+      await VoixTovo.annuler();
+      return;
+    }
 
     if (!autorise) {
       _messageAssistant(
@@ -377,15 +530,14 @@ class _ChatScreenState extends State<ChatScreen> {
       _debutParole = DateTime.now();
     });
 
-    // Un doigt qui reste posé — poche, distraction — enverrait des minutes
-    // de silence à facturer. On coupe et on envoie ce qui a été dit.
     _minuterieParole = Timer(VoixTovo.dureeMax, () {
-      if (mounted && _enregistreLaVoix) unawaited(_envoyerLaParole());
+      if (mounted && _enregistreLaVoix) unawaited(_toucherLeMicro());
     });
   }
 
   Future<void> _envoyerLaParole() async {
     if (!_enregistreLaVoix) return;
+    final generation = _voiceGeneration;
     _minuterieParole?.cancel();
 
     final duree = DateTime.now().difference(_debutParole ?? DateTime.now());
@@ -397,7 +549,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // pourquoi rien n'est parti, sinon il recommence à l'identique.
     if (duree < VoixTovo.dureeMin) {
       await VoixTovo.annuler();
-      if (!mounted) return;
+      if (!mounted || generation != _voiceGeneration) return;
       _messageAssistant(
         "C'était trop court. Appuyez, parlez, puis appuyez à nouveau.",
       );
@@ -405,22 +557,53 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     final audio = await VoixTovo.arreter();
-    if (!mounted || audio == null) return;
+    if (!mounted || generation != _voiceGeneration) return;
+    if (audio == null) {
+      _messageAssistant(
+        "Je n'ai pas reçu de son. Réessayez ou écrivez votre demande.",
+      );
+      return;
+    }
 
     unawaited(HapticFeedback.lightImpact());
-    _ajouterTourUtilisateur('🎤 Message vocal');
-    await _appeler(
-      () => widget.api.post('/chat', {
-        'client_message_id': _nouvelIdentifiant(),
-        if (_conversationId != null) 'conversation_id': _conversationId,
-        'audio': {'mime': audio.mime, 'data': audio.data},
-        if (_position != null)
-          'context': {'lat': _position!.$1, 'lng': _position!.$2},
-      }),
-    );
+    _pendingAudio = {'mime': audio.mime, 'data': audio.data};
+    unawaited(_transcribeVoice());
+  }
+
+  Future<void> _transcribeVoice() async {
+    if (_transcribing || _pendingAudio == null) return;
+    final navigation = _navigation;
+    setState(() {
+      _transcribing = true;
+      _voiceError = null;
+    });
+    final response = await widget.api.post('/transcriptions', {
+      'audio': _pendingAudio,
+    });
+    if (!mounted || navigation != _navigation) return;
+    final transcript = response.raw['transcript'];
+    setState(() {
+      _transcribing = false;
+      if (response.ok && transcript is String && transcript.trim().isNotEmpty) {
+        _saisie.text = [
+          _saisie.text.trim(),
+          transcript.trim(),
+        ].where((part) => part.isNotEmpty).join(' ');
+        _saisie.selection = TextSelection.collapsed(
+          offset: _saisie.text.length,
+        );
+        _voiceDraft = true;
+        _pendingAudio = null;
+      } else {
+        _voiceError = response.statusCode == 404
+            ? 'La transcription nécessite la mise à jour du serveur.'
+            : response.content;
+      }
+    });
   }
 
   Future<void> _annulerLaParole() async {
+    _voiceGeneration++;
     _minuterieParole?.cancel();
     if (mounted) setState(() => _enregistreLaVoix = false);
     await VoixTovo.annuler();
@@ -447,14 +630,21 @@ class _ChatScreenState extends State<ChatScreen> {
     _versLeBas();
   }
 
-  void _versLeBas() {
+  void _versLeBas({bool animate = true}) {
+    if (_scrollScheduled) return;
+    _scrollScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollScheduled = false;
       if (!_scroll.hasClients) return;
-      _scroll.animateTo(
-        _scroll.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
+      if (animate) {
+        _scroll.animateTo(
+          _scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      } else {
+        _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      }
     });
   }
 
@@ -463,6 +653,8 @@ class _ChatScreenState extends State<ChatScreen> {
   // ------------------------------------------------------------------
 
   void _interaction(TovoInteraction interaction) {
+    if (_charge || _transcribing || _enregistreLaVoix || _voiceAction) return;
+    _navigation++;
     final p = interaction.payload;
 
     switch (interaction.action) {
@@ -472,30 +664,27 @@ class _ChatScreenState extends State<ChatScreen> {
       // mélangés ne correspond ni à la structure des données ni à la façon
       // dont on choisit — on décide d'abord où, puis quoi.
       case 'select_category':
-        // Un rayon de boutique porte son `merchant_id` : il mène aux
-        // produits de CETTE boutique, pas à toutes les boutiques de la
-        // catégorie.
-        final boutique = p['merchant_id'] as String?;
-        if (boutique != null) {
-          _appeler(
-            () => widget.api.get(
-              '/merchants/$boutique/products',
-              query: {'category': p['category_id']},
-            ),
-          );
-        } else {
-          _appeler(
-            () => widget.api.get(
-              '/categories/${p['category_id']}/merchants',
-              query: _position == null
-                  ? null
-                  : {'lat': _position!.$1, 'lng': _position!.$2},
-            ),
-          );
-        }
+        _ouvrirCatalogue(
+          merchantId: p['merchant_id'] as String?,
+          categoryId: p['category_id'] as String?,
+          directory: p['merchant_id'] == null,
+        );
+
+      case 'browse_catalog':
+        _ouvrirCatalogue(
+          merchantId: p['merchant_id'] as String?,
+          merchantIds:
+              (p['merchant_ids'] as List?)?.whereType<String>().toList() ??
+              const [],
+          categoryId: p['category_id'] as String?,
+          query: p['query'] as String? ?? '',
+        );
 
       case 'select_product':
-        _appeler(() => widget.api.get('/products/${p['product_id']}'));
+        _ouvrirProduit(
+          '${p['product_id']}',
+          p['product'] as Map<String, dynamic>?,
+        );
 
       case 'add_to_cart':
         _appeler(
@@ -538,8 +727,9 @@ class _ChatScreenState extends State<ChatScreen> {
       // le faire et répondait « je n'ai rien trouvé » — un aller-retour au
       // modèle, facturé, pour une réponse fausse.
       case 'select_merchant':
-        _appeler(
-          () => widget.api.get('/merchants/${p['merchant_id']}/products'),
+        _ouvrirCatalogue(
+          merchantId: p['merchant_id'] as String?,
+          query: p['query'] as String? ?? '',
         );
 
       // --- interprétation nécessaire : l'assistant -------------------
@@ -618,6 +808,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// l'application appareil photo habituelle, qui a la mise au point et la
   /// stabilisation du constructeur.
   Future<void> _choisirLaSource() async {
+    if (_charge || _transcribing || _enregistreLaVoix || _voiceAction) return;
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       showDragHandle: true,
@@ -659,6 +850,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _chercherParPhoto(ImageSource source) async {
+    final navigation = ++_navigation;
     final fichier = await ImagePicker().pickImage(
       source: source,
       // Compression avant l'envoi : une photo brute de 4 Mo depuis Niamey
@@ -667,7 +859,7 @@ class _ChatScreenState extends State<ChatScreen> {
       maxWidth: 1024,
       imageQuality: 75,
     );
-    if (fichier == null || !mounted) return;
+    if (fichier == null || !mounted || navigation != _navigation) return;
     await _envoyerLaPhoto(fichier);
   }
 
@@ -677,6 +869,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// emprunte exactement le même chemin : deux chemins d'envoi divergeraient
   /// au premier correctif.
   Future<void> _envoyerLaPhoto(XFile fichier) async {
+    final navigation = ++_navigation;
     _ajouterTourUtilisateur('📷 Photo envoyée', photoLocale: fichier.path);
     setState(() => _charge = true);
 
@@ -696,7 +889,7 @@ class _ChatScreenState extends State<ChatScreen> {
             fileOptions: const FileOptions(contentType: 'image/jpeg'),
           );
 
-      if (!mounted) return;
+      if (!mounted || navigation != _navigation) return;
       setState(() => _charge = false);
 
       // Seul le CHEMIN part vers l'assistant. Les octets de l'image
@@ -709,7 +902,7 @@ class _ChatScreenState extends State<ChatScreen> {
         },
       );
     } on Exception catch (cause) {
-      if (!mounted) return;
+      if (!mounted || navigation != _navigation) return;
       setState(() {
         _charge = false;
         _tours.add(
@@ -744,6 +937,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final paiement = await _choisirPaiement();
     if (!mounted || paiement == null) return;
+    if (!await _confirmerCommande(destination, paiement) || !mounted) return;
 
     // Le geste qui engage de l'argent mérite un retour franc.
     unawaited(HapticFeedback.mediumImpact());
@@ -906,6 +1100,175 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Choisir Nita ne retient rien : la commande part chez le boutiquier et
   /// le client règle quand il veut, avant ou à la livraison. On le dit ici,
   /// sinon il croit devoir payer d'abord.
+  Future<bool> _confirmerCommande(
+    _Destination destination,
+    String paiement,
+  ) async {
+    final response = await widget.api.get(
+      '/cart',
+      query: {'lat': destination.lat, 'lng': destination.lng},
+    );
+    if (!mounted) return false;
+    final cart = response.components
+        .where((component) => component.type == 'cart_summary')
+        .firstOrNull;
+    if (!response.ok || cart == null || !cart.flag('can_checkout')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            !response.ok
+                ? response.content
+                : cart?.str(
+                        'blocked_reason',
+                        'Votre panier ne peut pas être commandé.',
+                      ) ??
+                      'Votre panier est vide.',
+          ),
+        ),
+      );
+      return false;
+    }
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.68,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: ListView(
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Tout est prêt.',
+                              style: TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.8,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Annuler la confirmation',
+                            onPressed: () => Navigator.pop(sheetContext, false),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        cart.str('merchant_name'),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Livrer à',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: TovoTheme.inkDoux,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        destination.repere,
+                        style: const TextStyle(fontSize: 15),
+                      ),
+                      const SizedBox(height: 20),
+                      const Text(
+                        'Paiement',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: TovoTheme.inkDoux,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        paiement == 'cash' ? 'Espèces à la livraison' : 'Nita',
+                        style: const TextStyle(fontSize: 15),
+                      ),
+                      const SizedBox(height: 24),
+                      for (final amount in [
+                        ('Articles', cart.money('items_total')),
+                        ('Livraison', cart.money('delivery_fee')),
+                        if (cart.money('discount') > 0)
+                          ('Réduction', -cart.money('discount')),
+                      ])
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 7),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  amount.$1,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    color: TovoTheme.inkDoux,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                Money.format(amount.$2),
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Total',
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        Money.format(cart.money('total')),
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(sheetContext, true),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 14),
+                    child: Text('Confirmer la commande'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    return confirmed == true;
+  }
+
   Future<String?> _choisirPaiement() {
     return showModalBottomSheet<String>(
       context: context,
@@ -1079,106 +1442,77 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _envoyer() {
+    if (_charge ||
+        _transcribing ||
+        _enregistreLaVoix ||
+        _voiceAction ||
+        _loadingHistory) {
+      return;
+    }
     unawaited(HapticFeedback.selectionClick());
     final texte = _saisie.text.trim();
     if (texte.isEmpty) return;
+    _navigation++;
+    _voiceDraft = false;
+    _voiceError = null;
+    _pendingAudio = null;
     _saisie.clear();
     _ajouterTourUtilisateur(texte);
     _rafraichirPosition();
     unawaited(_chercherPuisDemander(texte));
   }
 
-  /// Un mot-clé, ou une phrase adressée à quelqu'un ?
-  ///
-  /// C'est cette distinction qui décide si la base répond seule ou si
-  /// l'assistant est appelé. Elle porte sur la FORME de ce qui est écrit,
-  /// et non sur le fait que la recherche trouve quelque chose.
-  ///
-  /// L'ancien critère était le second : on cherchait, et l'assistant ne
-  /// prenait le relais que sur un échec. « Je veux du poulet dont le prix ne
-  /// dépasse pas 5000 francs CFA » contient « poulet », la recherche
-  /// trouvait donc du poulet, et le client recevait « Voici ce que j'ai
-  /// trouvé pour "je veux du poulet dont le prix ne dépasse pas 5000 francs
-  /// CFA" » — sa propre phrase renvoyée en écho, la contrainte de prix
-  /// ignorée, et l'assistant jamais consulté.
-  ///
-  /// Une recherche qui aboutit n'est pas une conversation réussie.
-  ///
-  /// « tacos » ou « souris sans fil » restent sur la voie rapide : la base
-  /// répond en 200 ms, contre 3,5 secondes et un appel facturé. C'est le cas
-  /// courant et il ne mérite pas d'interprétation.
-  static bool _estUnePhrase(String texte) {
-    final t = texte.trim().toLowerCase();
-    if (t.endsWith('?')) return true;
-
-    final mots = t.split(RegExp(r'[\s,]+')).where((m) => m.isNotEmpty).toList();
-    if (mots.length >= 5) return true;
-
-    // Pronoms, interrogatifs, verbes de demande, contraintes de prix : autant
-    // de signes qu'on s'adresse à quelqu'un plutôt qu'on ne nomme un produit.
-    // Un nom de produit n'en contient jamais.
-    const marqueurs = {
-      'je', 'j', 'tu', 'vous', 'nous', 'moi', 'mon', 'ma', 'mes',
-      'quoi', 'où', 'comment', 'combien', 'pourquoi', 'quel', 'quelle',
-      'veux', 'voudrais', 'cherche', 'aimerais', 'faut', 'peux', 'peut',
-      'propose', 'conseille', 'donne', 'montre', 'trouve',
-      'moins', 'maximum', 'budget', 'cher', 'dépasse', 'entre',
-      // Ni des produits, ni des recherches : les chercher dans le catalogue
-      // était un aller-retour pour rien, avant de finir chez l'assistant.
-      'oui', 'non', 'merci', 'bonjour', 'bonsoir', 'salut',
-      'annule', 'annuler', 'attends', 'stop',
-    };
-    return mots.any(marqueurs.contains);
+  void _envoyerSuggestion(String texte) {
+    _saisie.text = texte;
+    _envoyer();
   }
 
-  /// La recherche d'abord pour un mot-clé, l'assistant pour une phrase.
-  ///
-  /// Ce que la voie rapide coûte : l'assistant ne voit pas passer ces
-  /// recherches, donc un « le deuxième » qui suivrait un mot-clé ne
-  /// trouverait pas de contexte. C'est acceptable pour un mot-clé, ça ne
-  /// l'était pas pour une phrase — quelqu'un qui écrit une phrase attend
-  /// qu'on lui réponde, pas qu'on lui renvoie une liste.
-  Future<void> _chercherPuisDemander(String texte) async {
-    // Une phrase va droit à l'assistant : la recherche saurait peut-être y
-    // répondre, mais pas en tenir compte.
-    if (_estUnePhrase(texte)) {
-      await _parler(texte: texte);
-      return;
-    }
-
-    setState(() => _charge = true);
-
-    final recherche = await widget.api.get(
-      '/search',
-      query: {
-        'q': texte,
-        if (_position != null) 'lat': _position!.$1,
-        if (_position != null) 'lng': _position!.$2,
-      },
+  Future<void> _ouvrirProduit(String id, Map<String, dynamic>? product) async {
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ProductScreen(
+          api: widget.api,
+          productId: id,
+          initialProduct: product ?? const {},
+        ),
+      ),
     );
-
-    if (!mounted) return;
-
-    // Des résultats : on s'arrête là, sans appel au modèle.
-    if (recherche.ok && recherche.components.isNotEmpty) {
-      setState(() {
-        _charge = false;
-        _tours.add(
-          _Tour(
-            deLAssistant: true,
-            contenu: recherche.content,
-            composants: recherche.components,
-          ),
-        );
-      });
-      _versLeBas();
-      return;
-    }
-
-    // Rien trouvé, ou route indisponible : l'assistant prend le relais.
-    setState(() => _charge = false);
-    await _parler(texte: texte);
   }
+
+  Future<void> _ouvrirPanier() async {
+    if (_charge || _transcribing || _enregistreLaVoix || _voiceAction) return;
+    _navigation++;
+    final checkout = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => CartScreen(api: widget.api)),
+    );
+    if (mounted && checkout == true) await _commander();
+  }
+
+  Future<void> _ouvrirCatalogue({
+    String? merchantId,
+    List<String> merchantIds = const [],
+    String? categoryId,
+    String query = '',
+    bool directory = false,
+  }) async {
+    final checkout = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => CatalogScreen(
+          api: widget.api,
+          merchantId: merchantId,
+          merchantIds: merchantIds,
+          categoryId: categoryId,
+          query: query,
+          directory: directory,
+        ),
+      ),
+    );
+    if (mounted && checkout == true) {
+      await _commander();
+    }
+  }
+
+  Future<void> _chercherPuisDemander(String texte) => _parler(texte: texte);
 
   static String _nouvelIdentifiant() {
     const chiffres = '0123456789abcdef';
@@ -1202,34 +1536,36 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// Ouvre une conversation enregistrée.
   Future<void> _ouvrirConversation(String id) async {
+    final navigation = ++_navigation;
+    unawaited(_annulerLaParole());
     setState(() {
       _tours.clear();
-      _charge = true;
-      _conversationId = id;
-    });
-
-    final reponse = await widget.api.get('/conversations/$id');
-    if (!mounted) return;
-
-    setState(() {
+      _saisie.clear();
+      _loadingHistory = true;
       _charge = false;
-      for (final m
-          in ((reponse.raw['messages'] as List?) ?? const [])
-              .whereType<Map<String, dynamic>>()) {
-        _tours.add(
-          _Tour(
-            deLAssistant: m['role'] != 'user',
-            contenu: '${m['content'] ?? ''}',
-            composants: ((m['components'] as List?) ?? const [])
-                .whereType<Map<String, dynamic>>()
-                .map(TovoComponent.fromJson)
-                .where((c) => c.type.isNotEmpty)
-                .toList(),
-          ),
-        );
-      }
+      _conversationId = id;
+      _transcribing = false;
+      _voiceDraft = false;
+      _voiceError = null;
+      _pendingAudio = null;
     });
-    _versLeBas();
+    final request = widget.api.get('/conversations/$id');
+    final cached = await widget.api.cachedGet('/conversations/$id');
+    if (!mounted || navigation != _navigation) return;
+    if (cached != null) {
+      _showHistory(cached);
+      setState(() => _loadingHistory = false);
+    }
+    final response = await request;
+    if (!mounted || navigation != _navigation) return;
+    setState(() => _loadingHistory = false);
+    if (response.ok) {
+      _showHistory(response);
+    } else {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(response.content)));
+    }
   }
 
   /// Repart de zéro.
@@ -1237,18 +1573,32 @@ class _ChatScreenState extends State<ChatScreen> {
   /// On oublie simplement l'identifiant : la conversation précédente reste
   /// en base et dans le tiroir. Le prochain message en ouvrira une nouvelle
   /// côté serveur.
-  void _nouvelleConversation() {
+  Future<void> _nouvelleConversation() async {
+    final navigation = ++_navigation;
     setState(() {
       _tours.clear();
+      _loadingHistory = false;
       _conversationId = null;
+      _charge = false;
+      _saisie.clear();
+      _transcribing = false;
+      _voiceDraft = false;
+      _voiceError = null;
+      _pendingAudio = null;
     });
-    unawaited(_appeler(() => widget.api.get('/categories')));
+    unawaited(_annulerLaParole());
+    final cached = await widget.api.cachedGet('/categories');
+    if (!mounted || navigation != _navigation) return;
+    if (cached != null) _showCategories(cached);
+    final response = await widget.api.get('/categories');
+    if (!mounted || navigation != _navigation) return;
+    if (response.ok) _showCategories(response);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: TovoTheme.canvas,
+      backgroundColor: Colors.white,
       drawer: TiroirConversations(
         api: widget.api,
         conversationCourante: _conversationId,
@@ -1271,54 +1621,69 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ),
         leadingWidth: 52,
-        titleSpacing: 2,
-        title: const Text(
-          'Assistant',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: TovoTheme.ink,
-          ),
+        centerTitle: true,
+        title: SvgPicture.asset(
+          'assets/branding/tovo-logo.svg',
+          width: 88,
+          height: 28,
         ),
         actions: [
           IconButton(
             tooltip: 'Mon panier',
             icon: const Icon(Icons.shopping_bag_outlined, size: 23),
-            onPressed: () => _appeler(() => widget.api.get('/cart')),
+            onPressed: _ouvrirPanier,
           ),
           const SizedBox(width: 6),
         ],
       ),
       body: Column(
         children: [
-          // Le salut d'accueil, et rien d'autre au-dessus du fil.
-          //
-          // Il ne survit pas au premier échange : une bannière permanente
-          // vole la place du contenu, et sur un téléphone la place est ce
-          // qu'on a de plus rare. Il disparaît donc dès que la conversation
-          // commence, sans que personne ne le remarque — c'est le but.
-          AnimatedSize(
-            duration: TovoTheme.ample,
-            curve: TovoTheme.courbe,
-            child: _tours.length <= 1
-                ? _AccueilNouveau(prenom: _prenom)
-                : const SizedBox(width: double.infinity),
-          ),
           Expanded(
-            child: ListView.builder(
-              controller: _scroll,
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
-              itemCount: _tours.length,
-              itemBuilder: (context, i) => _TourVue(
-                key: ValueKey(_tours[i]),
-                tour: _tours[i],
-                onInteraction: _interaction,
-                // Seul le dernier message s'anime. Animer toute la liste la
-                // ferait frémir à chaque défilement, et le client croirait
-                // que quelque chose se recharge.
-                anime: i == _tours.length - 1,
-              ),
+            child: Builder(
+              builder: (context) {
+                if (_loadingHistory && _tours.isEmpty) {
+                  return const ReadPlaceholder();
+                }
+                final afficheAccueil =
+                    _tours.isEmpty ||
+                    (_tours.length == 1 &&
+                        _tours.first.deLAssistant &&
+                        _tours.first.composants.any(
+                          (component) => component.type == 'category_grid',
+                        ));
+                final decalage = afficheAccueil ? 1 : 0;
+
+                return ListView.builder(
+                  controller: _scroll,
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  padding: const EdgeInsets.only(bottom: 18),
+                  itemCount: _tours.length + decalage,
+                  itemBuilder: (context, i) {
+                    if (afficheAccueil && i == 0) {
+                      return _AccueilNouveau(
+                        prenom: _prenom,
+                        onSuggestion: _envoyerSuggestion,
+                        onCamera: () => unawaited(_choisirLaSource()),
+                      );
+                    }
+
+                    final tourIndex = i - decalage;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: IgnorePointer(
+                        ignoring: _charge && tourIndex == _tours.length - 1,
+                        child: _TourVue(
+                          key: ValueKey('$_navigation:$tourIndex'),
+                          tour: _tours[tourIndex],
+                          onInteraction: _interaction,
+                          anime: !_charge && tourIndex == _tours.length - 1,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
             ),
           ),
           // Un trait de progression ne dit rien de ce qui se passe. Trois
@@ -1329,6 +1694,46 @@ class _ChatScreenState extends State<ChatScreen> {
             curve: TovoTheme.courbe,
             child: _charge ? const _EnReflexion() : const SizedBox.shrink(),
           ),
+          if (_transcribing || _voiceError != null || _voiceDraft)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _transcribing
+                          ? 'Transcription en cours…'
+                          : _voiceError ??
+                                'Vocal transcrit · modifiez puis envoyez',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _voiceError == null
+                            ? TovoTheme.muted
+                            : TovoTheme.danger,
+                      ),
+                    ),
+                  ),
+                  if (_voiceError != null && _pendingAudio != null)
+                    TextButton(
+                      onPressed: _transcribeVoice,
+                      child: const Text('Réessayer'),
+                    ),
+                  if (_transcribing || _voiceError != null)
+                    IconButton(
+                      tooltip: 'Annuler la transcription',
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () {
+                        _navigation++;
+                        setState(() {
+                          _transcribing = false;
+                          _voiceError = null;
+                          _pendingAudio = null;
+                        });
+                      },
+                    ),
+                ],
+              ),
+            ),
           _BarreDeSaisieNouveau(
             controller: _saisie,
             onSend: _envoyer,
@@ -1476,11 +1881,10 @@ class _TourVueState extends State<_TourVue> {
               ? const EdgeInsets.symmetric(horizontal: 16, vertical: 12)
               : const EdgeInsets.all(7),
           decoration: BoxDecoration(
-            color: TovoTheme.tealDeep,
+            color: const Color(0xFFF0F2F2),
             borderRadius: BorderRadius.circular(
               22,
             ).copyWith(bottomRight: const Radius.circular(7)),
-            boxShadow: TovoTheme.ombre,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.end,
@@ -1506,8 +1910,8 @@ class _TourVueState extends State<_TourVue> {
                 child: Text(
                   tour.contenu,
                   style: const TextStyle(
-                    fontSize: 14,
-                    color: Colors.white,
+                    fontSize: 15,
+                    color: TovoTheme.ink,
                     height: 1.45,
                     fontWeight: FontWeight.w500,
                   ),
@@ -1586,7 +1990,7 @@ class _TexteAssistant extends StatelessWidget {
     return SelectableText.rich(
       TextSpan(children: morceaux),
       style: TextStyle(
-        fontSize: 15.5,
+        fontSize: 16,
         height: 1.55,
         fontWeight: FontWeight.w400,
         color: couleur,
@@ -1645,48 +2049,122 @@ class _PointQuiBatState extends State<_PointQuiBat>
 /// la question en gris. L'écran s'ouvrait jusqu'ici directement sur une
 /// grille de tuiles — utile, mais qui ne s'adresse à personne.
 class _AccueilNouveau extends StatelessWidget {
-  const _AccueilNouveau({required this.prenom});
-
+  const _AccueilNouveau({
+    required this.prenom,
+    required this.onSuggestion,
+    required this.onCamera,
+  });
   final String? prenom;
-
-  String get _salut {
-    final heure = DateTime.now().hour;
-    return heure >= 5 && heure < 17 ? 'Bonjour' : 'Bonsoir';
-  }
+  final ValueChanged<String> onSuggestion;
+  final VoidCallback onCamera;
 
   @override
   Widget build(BuildContext context) {
-    final nom = prenom == null ? '' : ' $prenom';
-
+    final heure = DateTime.now().hour;
+    final salut = heure >= 5 && heure < 17 ? 'Bonjour' : 'Bonsoir';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '$_salut$nom',
-            style: const TextStyle(
-              fontSize: 27,
-              height: 1.12,
-              letterSpacing: -0.8,
-              fontWeight: FontWeight.w700,
-              color: TovoTheme.ink,
-            ),
+            '$salut${prenom == null ? '' : ', $prenom'}',
+            style: const TextStyle(fontSize: 14, color: TovoTheme.inkDoux),
           ),
-          const SizedBox(height: 7),
-          const Text(
-            "Qu'est-ce que Tovo peut faire pour vous ?",
-            style: TextStyle(
-              fontSize: 15,
-              height: 1.45,
-              fontWeight: FontWeight.w400,
-              color: TovoTheme.inkDoux,
-            ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Expanded(
+                child: Text(
+                  'Votre envie,\nlivrée.',
+                  style: TextStyle(
+                    fontSize: 31,
+                    height: 1.08,
+                    letterSpacing: -1.1,
+                    fontWeight: FontWeight.w700,
+                    color: TovoTheme.ink,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ExcludeSemantics(
+                child: Image.asset(
+                  MediaQuery.disableAnimationsOf(context)
+                      ? 'assets/branding/accueil-burger-statique.webp'
+                      : 'assets/branding/accueil-burger-anime.webp',
+                  width: 100,
+                  height: 114,
+                  fit: BoxFit.contain,
+                  gaplessPlayback: true,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 22),
+          Row(
+            children: [
+              Expanded(
+                child: _SuggestionAccueil(
+                  icon: Icons.local_shipping_outlined,
+                  label: 'Envoyer un colis',
+                  onTap: () => onSuggestion('Je veux envoyer un colis'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _SuggestionAccueil(
+                  icon: Icons.center_focus_strong_rounded,
+                  label: 'Trouver en photo',
+                  onTap: onCamera,
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
+}
+
+class _SuggestionAccueil extends StatelessWidget {
+  const _SuggestionAccueil({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: const Color(0xFFF5F6F6),
+    borderRadius: BorderRadius.circular(14),
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: TovoTheme.ink),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: TovoTheme.ink,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 // ignore: unused_element
@@ -1770,13 +2248,13 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
       key: key,
       message: tooltip,
       child: Material(
-        color: principal ? TovoTheme.teal : TovoTheme.tealMist,
+        color: principal ? TovoTheme.ink : Colors.transparent,
         shape: const CircleBorder(),
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: onTap,
           child: SizedBox.square(
-            dimension: principal ? 44 : 40,
+            dimension: 44,
             child: Icon(
               icon,
               size: principal ? 20 : 19,
@@ -1809,16 +2287,16 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
               ),
               Text(
-                'Appuyez sur la flèche pour envoyer',
+                'Arrêtez pour relire votre message',
                 style: TextStyle(fontSize: 10.5, color: TovoTheme.muted),
               ),
             ],
           ),
         ),
         _action(
-          icon: Icons.arrow_upward_rounded,
+          icon: Icons.stop_rounded,
           onTap: onParoleTouche,
-          tooltip: 'Envoyer le message vocal',
+          tooltip: 'Arrêter et transcrire',
           principal: true,
         ),
       ],
@@ -1835,9 +2313,8 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(8, 7, 8, 7),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(28),
+          borderRadius: BorderRadius.circular(24),
           border: Border.all(color: TovoTheme.line),
-          boxShadow: TovoTheme.ombreFlottante,
         ),
         child: enregistre
             ? _enEcoute()
@@ -1845,7 +2322,7 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   _action(
-                    icon: Icons.center_focus_strong_rounded,
+                    icon: Icons.add_rounded,
                     onTap: onCamera,
                     tooltip: 'Chercher avec une photo',
                   ),
@@ -1879,25 +2356,13 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
                     valueListenable: controller,
                     builder: (context, valeur, _) {
                       final aDuTexte = valeur.text.trim().isNotEmpty;
-                      return AnimatedSwitcher(
-                        duration: TovoTheme.vif,
-                        transitionBuilder: (child, animation) =>
-                            ScaleTransition(
-                              scale: animation,
-                              child: FadeTransition(
-                                opacity: animation,
-                                child: child,
-                              ),
-                            ),
-                        child: _action(
-                          key: ValueKey(aDuTexte),
-                          icon: aDuTexte
-                              ? Icons.arrow_upward_rounded
-                              : Icons.mic_none_rounded,
-                          onTap: aDuTexte ? onSend : onParoleTouche,
-                          tooltip: aDuTexte ? 'Envoyer' : 'Parler à Tovo',
-                          principal: true,
-                        ),
+                      return _action(
+                        icon: aDuTexte
+                            ? Icons.arrow_upward_rounded
+                            : Icons.mic_none_rounded,
+                        onTap: aDuTexte ? onSend : onParoleTouche,
+                        tooltip: aDuTexte ? 'Envoyer' : 'Parler à Tovo',
+                        principal: true,
                       );
                     },
                   ),

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../core/catalog_image.dart';
 import '../registry.dart';
 
-/// `product_carousel` et `product_list` — deux rendus, une même donnée.
 class ProductCollection extends StatelessWidget {
   const ProductCollection({
     super.key,
@@ -11,7 +11,6 @@ class ProductCollection extends StatelessWidget {
     required this.onInteraction,
     required this.horizontal,
   });
-
   final TovoComponent component;
   final InteractionCallback onInteraction;
   final bool horizontal;
@@ -20,274 +19,212 @@ class ProductCollection extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = component.list('items');
     if (items.isEmpty) return const SizedBox.shrink();
-
-    final title = component.str('title');
-
+    final browse = component.map('browse');
+    final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    final height =
+        258.0 +
+        (scale - 1).clamp(0, 2) * 126 +
+        (items.any((item) => item['requires_options'] == true) ? 28 : 0);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (title.isNotEmpty)
+        if (component.str('title').isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(bottom: TovoTheme.gap),
+            padding: const EdgeInsets.only(bottom: 16),
             child: Text(
-              title,
+              component.str('title'),
               style: const TextStyle(
                 fontSize: 18,
-                letterSpacing: -0.3,
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.35,
                 color: TovoTheme.ink,
               ),
             ),
           ),
         if (horizontal)
           SizedBox(
-            height: 248,
+            height: height,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: items.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (context, i) => SizedBox(
-                width: 174,
+              separatorBuilder: (_, __) => const SizedBox(width: 16),
+              itemBuilder: (_, index) => SizedBox(
+                width: 190,
                 child: _ProductTile(
-                  data: items[i],
+                  data: items[index],
                   onInteraction: onInteraction,
                 ),
               ),
             ),
           )
         else
-          Column(
-            children: [
-              for (final item in items)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _ProductRow(data: item, onInteraction: onInteraction),
+          for (final item in items)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              minVerticalPadding: 16,
+              title: Text(
+                '${item['name']}',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text('${item['merchant_name'] ?? ''}'),
+              trailing: Text(
+                _price(item),
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              onTap: item['is_available'] == false
+                  ? null
+                  : () => _open(item, onInteraction),
+            ),
+        if (browse.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  backgroundColor: const Color(0xFFF4F5F5),
+                  foregroundColor: TovoTheme.ink,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 16,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                 ),
-            ],
+                onPressed: () =>
+                    onInteraction(TovoInteraction('browse_catalog', browse)),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Parcourir les ${browse['total'] ?? items.length} produits',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const Icon(Icons.arrow_forward_rounded, size: 18),
+                  ],
+                ),
+              ),
+            ),
           ),
       ],
     );
   }
 }
 
-String _prix(Map<String, dynamic> data) =>
-    Money.format((data['price'] as num?)?.toInt() ?? 0);
+String _price(Map<String, dynamic> item) =>
+    Money.format((item['price'] as num?)?.toInt() ?? 0);
 
-void _ouvrir(Map<String, dynamic> data, InteractionCallback onInteraction) {
-  final id = data['id'] as String?;
-  if (id == null) return;
-  onInteraction(TovoInteraction('select_product', {'product_id': id}));
+void _open(Map<String, dynamic> item, InteractionCallback onInteraction) {
+  if (item['id'] is String) {
+    onInteraction(
+      TovoInteraction('select_product', {
+        'product_id': item['id'],
+        'product': item,
+      }),
+    );
+  }
 }
 
 class _ProductTile extends StatelessWidget {
   const _ProductTile({required this.data, required this.onInteraction});
-
   final Map<String, dynamic> data;
   final InteractionCallback onInteraction;
-
   @override
   Widget build(BuildContext context) {
-    final disponible = data['is_available'] as bool? ?? true;
-
-    return Opacity(
-      opacity: disponible ? 1 : 0.5,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-        onTap: disponible ? () => _ouvrir(data, onInteraction) : null,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-            boxShadow: TovoTheme.ombre,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _Vignette(url: data['image_url'] as String?, height: 122),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 11, 12, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      (data['name'] as String?) ?? '',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: TovoTheme.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            (data['merchant_name'] as String?) ?? '',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w600,
-                              color: TovoTheme.muted,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Text(
-                          _prix(data),
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            color: TovoTheme.tealDeep,
-                          ),
-                        ),
-                        const Spacer(),
-                        Container(
-                          width: 30,
-                          height: 30,
-                          decoration: const BoxDecoration(
-                            color: TovoTheme.teal,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.arrow_forward_rounded,
-                            size: 16,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+    final available = data['is_available'] != false;
+    final photo = data['image_url'] as String?;
+    final placeholder = ColoredBox(
+      color: const Color(0xFFF4F5F5),
+      child: Center(
+        child: Text(
+          'Photo indisponible',
+          style: const TextStyle(fontSize: 12, color: TovoTheme.inkDoux),
         ),
       ),
     );
-  }
-}
-
-class _ProductRow extends StatelessWidget {
-  const _ProductRow({required this.data, required this.onInteraction});
-
-  final Map<String, dynamic> data;
-  final InteractionCallback onInteraction;
-
-  @override
-  Widget build(BuildContext context) {
-    final distance = (data['distance_m'] as num?)?.toInt();
-    final disponible = data['is_available'] as bool? ?? true;
-
-    return Opacity(
-      opacity: disponible ? 1 : 0.5,
+    return Semantics(
+      button: true,
+      enabled: available,
       child: InkWell(
-        borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-        onTap: disponible ? () => _ouvrir(data, onInteraction) : null,
-        child: Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-            border: Border.all(color: TovoTheme.line),
-            boxShadow: TovoTheme.ombre,
-          ),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: _Vignette(
-                  url: data['image_url'] as String?,
-                  height: 56,
-                  width: 56,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      (data['name'] as String?) ?? '',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: TovoTheme.ink,
+        borderRadius: BorderRadius.circular(16),
+        onTap: available ? () => _open(data, onInteraction) : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: SizedBox(
+                height: 132,
+                width: double.infinity,
+                child: photo == null || photo.isEmpty
+                    ? placeholder
+                    : CatalogImage(
+                        photo,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => placeholder,
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      [
-                        (data['merchant_name'] as String?) ?? '',
-                        if (distance != null) Money.distance(distance),
-                      ].where((s) => s.isNotEmpty).join(' · '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: TovoTheme.muted,
-                      ),
-                    ),
-                  ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '${data['name'] ?? ''}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 15,
+                height: 1.25,
+                fontWeight: FontWeight.w600,
+                color: TovoTheme.ink,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${data['merchant_name'] ?? ''}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: TovoTheme.inkDoux),
+            ),
+            if (data['requires_options'] == true)
+              const Padding(
+                padding: EdgeInsets.only(top: 5),
+                child: Text(
+                  'En option · à personnaliser',
+                  maxLines: 2,
+                  style: TextStyle(fontSize: 11, color: TovoTheme.teal),
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                _prix(data),
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  color: TovoTheme.teal,
+            const Spacer(),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _price(data),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: TovoTheme.ink,
+                    ),
+                  ),
                 ),
-              ),
-            ],
-          ),
+                SizedBox(
+                  width: 44,
+                  height: 40,
+                  child: Icon(
+                    Icons.arrow_forward_rounded,
+                    size: 20,
+                    color: available ? TovoTheme.ink : TovoTheme.muted,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
-    );
-  }
-}
-
-/// Placeholder tramé quand l'image manque ou ne charge pas — fréquent sur un
-/// réseau instable, et un carré gris vaut mieux qu'une icône d'erreur.
-class _Vignette extends StatelessWidget {
-  const _Vignette({required this.url, required this.height, this.width});
-
-  final String? url;
-  final double height;
-  final double? width;
-
-  @override
-  Widget build(BuildContext context) {
-    final placeholder = Container(
-      height: height,
-      width: width ?? double.infinity,
-      color: const Color(0xFFEBEBEB),
-      alignment: Alignment.center,
-      child: const Icon(
-        Icons.image_outlined,
-        color: Color(0xFFBDBDBD),
-        size: 20,
-      ),
-    );
-
-    if (url == null || url!.isEmpty) return placeholder;
-
-    return Image.network(
-      url!,
-      height: height,
-      width: width ?? double.infinity,
-      fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => placeholder,
     );
   }
 }

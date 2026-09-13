@@ -62,6 +62,30 @@ Requête de `POST /chat` :
 `text` **ou** `interaction`, jamais les deux. `client_message_id` rend l'appel
 idempotent : un rejeu après coupure réseau renvoie la réponse déjà calculée.
 
+### Réponse progressive et dictée
+
+Le client peut annoncer `Accept: application/x-ndjson` sur `/chat`. Le serveur
+envoie alors un objet JSON par ligne : `conversation` (identifiant du fil),
+`results` (remplacement des composants du tour), `text_start` (nouvelle phase
+de rédaction), `text` (fragment à ajouter), puis `done` (enveloppe définitive).
+`error` termine un flux en échec. Le champ `status` de l'événement terminal
+fait autorité : les en-têtes HTTP ont pu être envoyés avant l'erreur.
+Les identifiants des composants passent par les mêmes vérifications que la
+réponse classique. Les pensées internes du modèle ne sont pas affichées.
+Sans cet en-tête, le serveur conserve la réponse JSON classique.
+
+Une coupure du flux ne déclenche pas de renvoi automatique. Un changement
+de discussion rend inopérants les résultats retardataires de l'ancien fil.
+Les composants provisoires ne déclenchent pas d'action pendant la réponse.
+
+Le nouveau parcours vocal est : enregistrer → arrêter → relire/modifier →
+envoyer. `POST /transcriptions`, authentifié, reçoit `{audio: {mime, data}}`
+et renvoie `{transcript}`. Aucun message ni aucune commande n'est créé par
+cette route. Seul le texte validé par le client part ensuite dans `/chat`
+et reste lisible dans l'historique. Ce n'est pas une transcription en direct
+pendant l'enregistrement. Les anciens messages « 🎤 Message vocal », dont
+l'audio n'a pas été conservé, ne peuvent pas être retranscrits rétroactivement.
+
 ---
 
 ## 3. Interactions — le retour vers le backend
@@ -91,9 +115,10 @@ Actions normalisées :
 
 | Action | Payload | Émise par |
 |---|---|---|
-| `select_category` | `{ category_id }` | `category_grid` |
+| `select_category` | `{ category_id, merchant_id? }` | `category_grid` |
 | `select_product` | `{ product_id }` | `product_carousel`, `product_list`, `product_card` |
-| `select_merchant` | `{ merchant_id }` | `merchant_card` |
+| `select_merchant` | `{ merchant_id, query? }` | `merchant_card` |
+| `browse_catalog` | `{ query?, total?, merchant_id?, merchant_ids?, category_id? }` | `product_carousel` |
 | `select_options` | `{ product_id, quantity, selections[] }` | `option_selector` |
 | `add_to_cart` | `{ product_id, quantity, selections[] }` | `option_selector`, `product_card` |
 | `update_qty` | `{ item_id, quantity }` | `cart_summary` |
@@ -105,6 +130,18 @@ Actions normalisées :
 | `compare_price` | `{ query }` | `price_comparison`, `product_card` |
 | `submit_courier` | `{ pickup, dropoff, parcel, scheduled_for }` | `courier_form` |
 | `call_driver` | `{ phone }` | `order_tracking` |
+
+Sur le nouveau client, `select_category`, `select_merchant` et `browse_catalog`
+ouvrent un catalogue séparé sans ajouter un tour au chat. La pagination et
+les champs optionnels associés sont décrits dans [Catalogue et navigation](catalogue_navigation.md).
+
+`select_product` ouvre également un écran séparé. Le carrousel peut joindre
+une copie locale de l'article dans `payload.product` pour conserver sa photo
+pendant la personnalisation ; cette copie ne part pas vers le modèle et ne
+fait pas autorité sur le prix. Le détail est rechargé par `/products/:id`.
+Le panier se consulte et se modifie hors du fil. Le serveur calcule les frais
+pour l'adresse choisie, puis le client demande une confirmation explicite du
+montant complet avant d'envoyer `/orders`.
 
 **L'image ne transite jamais en base64 dans `/chat`.** Flutter compresse
 (max 1024 px, JPEG q75), envoie vers Supabase Storage bucket `search-images`,

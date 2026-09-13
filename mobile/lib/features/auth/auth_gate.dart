@@ -6,6 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/api.dart';
 import '../../core/deconnexion.dart';
 import '../../core/push.dart';
+import '../../core/read_cache.dart';
+import '../../components/widgets/read_placeholder.dart';
 import '../../core/theme.dart';
 import 'auth_screen.dart';
 import 'name_screen.dart';
@@ -52,6 +54,7 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   StreamSubscription<AuthState>? _abonnement;
   Session? _session;
+  Widget? _child;
   String? _role;
   bool _verificationEnCours = true;
 
@@ -71,11 +74,21 @@ class _AuthGateState extends State<AuthGate> {
     super.initState();
     _session = Supabase.instance.client.auth.currentSession;
 
-    _abonnement = Supabase.instance.client.auth.onAuthStateChange.listen((etat) {
+    _abonnement = Supabase.instance.client.auth.onAuthStateChange.listen((
+      etat,
+    ) {
       if (!mounted) return;
+      if (etat.session?.user.id == _session?.user.id && etat.session != null) {
+        _session = etat.session;
+        return;
+      }
+      if (_session != null) unawaited(TovoReadCache.clearPrivateCaches());
       setState(() {
+        _child = null;
         _session = etat.session;
         _role = null;
+        _nomManquant = false;
+        _echecRole = false;
         _verificationEnCours = etat.session != null;
       });
       if (etat.session != null) _chargerRole();
@@ -95,6 +108,8 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   Future<void> _chargerRole() async {
+    final userId = _session?.user.id;
+    if (userId == null) return;
     // Le rôle vit dans `profiles`, jamais dans le jeton : un utilisateur ne
     // doit pas pouvoir se promouvoir en modifiant ses métadonnées.
     try {
@@ -103,17 +118,19 @@ class _AuthGateState extends State<AuthGate> {
       // échouait, faisant retomber le boutiquier sur « ce compte n'est pas un
       // compte boutiquier » alors que rien ne clochait chez lui.
       await TovoApi.jetonFrais();
+      if (!mounted || _session?.user.id != userId) return;
 
       // Le nom voyage avec le rôle : une seule requête au démarrage.
       final data = await Supabase.instance.client
           .from('profiles')
           .select('role, full_name')
-          .eq('id', Supabase.instance.client.auth.currentUser!.id)
+          .eq('id', userId)
           .maybeSingle();
 
-      if (!mounted) return;
+      if (!mounted || _session?.user.id != userId) return;
       setState(() {
         _role = data?['role'] as String? ?? 'client';
+        _echecRole = false;
         _nomManquant = ((data?['full_name'] as String?) ?? '').trim().isEmpty;
         _verificationEnCours = false;
       });
@@ -122,7 +139,7 @@ class _AuthGateState extends State<AuthGate> {
       // personne à qui être rattaché.
       unawaited(TovoPush.enregistrer(widget.appPush));
     } on Exception {
-      if (!mounted) return;
+      if (!mounted || _session?.user.id != userId) return;
       setState(() {
         // Un rôle qu'on n'a PAS pu lire n'est pas un rôle « client ».
         //
@@ -150,9 +167,7 @@ class _AuthGateState extends State<AuthGate> {
     }
 
     if (_verificationEnCours) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator(color: TovoTheme.teal)),
-      );
+      return const Scaffold(body: SafeArea(child: ReadPlaceholder()));
     }
 
     if (_echecRole) {
@@ -180,7 +195,7 @@ class _AuthGateState extends State<AuthGate> {
       );
     }
 
-    return widget.child();
+    return _child ??= widget.child();
   }
 }
 
@@ -214,10 +229,17 @@ class _RoleIllisible extends StatelessWidget {
                 'Votre compte est bien connecté, mais le réseau n’a pas '
                 'répondu. Réessayez dans un instant.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: TovoTheme.muted, height: 1.5),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: TovoTheme.muted,
+                  height: 1.5,
+                ),
               ),
               const SizedBox(height: 24),
-              FilledButton(onPressed: onReessayer, child: const Text('Réessayer')),
+              FilledButton(
+                onPressed: onReessayer,
+                child: const Text('Réessayer'),
+              ),
               const SizedBox(height: 8),
               TextButton(
                 onPressed: () => confirmerDeconnexion(context),
@@ -256,7 +278,10 @@ class _MauvaisRole extends StatelessWidget {
               Text(
                 'Ce compte n’est pas un compte ${_libelles[requis] ?? requis}',
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 8),
               const Text(

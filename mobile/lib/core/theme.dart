@@ -71,6 +71,58 @@ class TovoTheme {
   static const double radiusSmall = 12;
   static const double gap = 14;
 
+  static ThemeData client() {
+    final base = build();
+    return base.copyWith(
+      scaffoldBackgroundColor: Colors.white,
+      appBarTheme: base.appBarTheme.copyWith(
+        backgroundColor: Colors.white,
+        toolbarHeight: 56,
+        titleTextStyle: const TextStyle(
+          fontFamily: fontFamily,
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          color: ink,
+        ),
+      ),
+      inputDecorationTheme: base.inputDecorationTheme.copyWith(
+        fillColor: const Color(0xFFF4F5F5),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: ink,
+          foregroundColor: Colors.white,
+          minimumSize: const Size(44, 52),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          textStyle: const TextStyle(
+            fontFamily: fontFamily,
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      bottomSheetTheme: base.bottomSheetTheme.copyWith(
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+      ),
+    );
+  }
+
   // -------------------------------------------------------------------
   // Mouvement
   // -------------------------------------------------------------------

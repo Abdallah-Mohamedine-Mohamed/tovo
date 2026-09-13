@@ -1,0 +1,559 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:tovo/components/register_all.dart';
+import 'package:tovo/core/api.dart';
+import 'package:tovo/core/catalog_image.dart';
+import 'package:tovo/components/registry.dart';
+import 'package:tovo/core/theme.dart';
+import 'package:tovo/features/catalog/catalog_screen.dart';
+import 'package:tovo/features/catalog/cart_screen.dart';
+import 'package:tovo/features/catalog/product_screen.dart';
+import 'package:tovo/features/chat/chat_screen.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => CatalogImage.providerOverride = (url) => NetworkImage(url));
+  tearDown(() => CatalogImage.providerOverride = null);
+  final fixture =
+      jsonDecode(File('test/fixtures/design/catalogue.json').readAsStringSync())
+          as Map<String, dynamic>;
+  final products = (fixture['products'] as List).cast<Map<String, dynamic>>();
+  final merchant = fixture['merchant'] as Map<String, dynamic>;
+  final bytes = <String, Uint8List>{
+    for (final product in products)
+      product['image_url'] as String: File(
+        'test/fixtures/design/${product['fixture']}',
+      ).readAsBytesSync(),
+    merchant['logo_url'] as String: File(
+      'test/fixtures/design/logo.webp',
+    ).readAsBytesSync(),
+  };
+  final categories = [
+    ('Restaurants', 'restaurants-m3'),
+    ('Marché', 'kasuwa-m10'),
+    ('Supermarché', 'grocery-m4'),
+    ('Beauté & soins', 'beaute-soins'),
+    ('Électronique', 'electronique'),
+    ('Vêtements', 'vetements'),
+    ('Gaz', 'gaz-m12'),
+    ('Parapharmacie', 'parapharmacies-m5'),
+  ];
+  late TovoApi api;
+  var conversation = false;
+  var orderPosts = 0;
+  var quoteFails = false;
+  var orderBody = <String, dynamic>{};
+  final preview = GlobalKey();
+
+  setUpAll(() async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/shared_preferences'),
+          (call) async => call.method == 'getAll' ? <String, Object>{} : true,
+        );
+    final loader = FontLoader(TovoTheme.fontFamily);
+    for (final weight in [
+      'Regular',
+      'Medium',
+      'SemiBold',
+      'Bold',
+      'ExtraBold',
+    ]) {
+      loader.addFont(rootBundle.load('assets/fonts/DMSans-$weight.ttf'));
+    }
+    await loader.load();
+    final icons = FontLoader('MaterialIcons');
+    icons.addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
+    await icons.load();
+    await Supabase.initialize(
+      url: 'https://example.supabase.co',
+      publishableKey: 'test-only',
+      debug: false,
+      authOptions: const FlutterAuthClientOptions(
+        autoRefreshToken: false,
+        detectSessionInUri: false,
+        localStorage: EmptyLocalStorage(),
+      ),
+    );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('com.llfbandit.record/messages'),
+          (_) async => null,
+        );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/image_picker'),
+          (_) async => null,
+        );
+  });
+  tearDownAll(() async => Supabase.instance.dispose());
+
+  setUp(() {
+    conversation = false;
+    orderPosts = 0;
+    quoteFails = false;
+    orderBody = {};
+    debugNetworkImageHttpClientProvider = () => _Images(bytes);
+    registerTovoComponents();
+    api = TovoApi(
+      tokenProvider: () => null,
+      client: MockClient((request) async {
+        Object body = {};
+        if (request.url.path.startsWith('/products/')) {
+          final selected = products.firstWhere(
+            (product) => request.url.path.endsWith(product['id'] as String),
+          );
+          return http.Response(
+            jsonEncode({
+              'components': [
+                {
+                  'type': 'product_card',
+                  'data': {
+                    ...selected,
+                    'actions': ['add_to_cart'],
+                  },
+                },
+              ],
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        switch (request.url.path) {
+          case '/orders':
+            if (request.method == 'POST') {
+              orderPosts++;
+              orderBody = jsonDecode(request.body) as Map<String, dynamic>;
+            }
+            body = {'orders': []};
+          case '/addresses':
+            body = {
+              'addresses': [
+                {
+                  'id': 'maison',
+                  'label': 'Maison',
+                  'text_hint': 'Bobiel, porte bleue',
+                  'lat': 13.54,
+                  'lng': 2.1,
+                  'is_default': true,
+                },
+              ],
+            };
+          case '/conversations/last':
+            body = conversation
+                ? {
+                    'conversation_id': 'demo',
+                    'messages': [
+                      {'role': 'user', 'content': 'Je voudrais du garba'},
+                      {
+                        'role': 'assistant',
+                        'content':
+                            'Chez **GARBA D’OR**, vous avez le choix. Poulet ou poisson ? Voici un aperçu de la carte.',
+                        'components': [
+                          {
+                            'type': 'product_carousel',
+                            'data': {
+                              'title': 'Garba d’Or',
+                              'items': products.take(3).toList(),
+                              'browse': {'merchant_id': 'garba', 'total': 6},
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  }
+                : {'messages': []};
+          case '/conversations':
+            body = {'conversations': []};
+          case '/categories':
+            body = {
+              'components': [
+                {
+                  'type': 'category_grid',
+                  'data': {
+                    'items': [
+                      for (final category in categories)
+                        {
+                          'id': category.$2,
+                          'name': category.$1,
+                          'slug': category.$2,
+                        },
+                    ],
+                  },
+                },
+              ],
+            };
+          case '/cart':
+            if (quoteFails && request.url.queryParameters.containsKey('lat')) {
+              return http.Response(
+                jsonEncode({'error': 'Impossible de calculer la livraison'}),
+                503,
+                headers: {'content-type': 'application/json; charset=utf-8'},
+              );
+            }
+            body = {
+              'components': [
+                {
+                  'type': 'cart_summary',
+                  'data': {
+                    'merchant_name': merchant['name'],
+                    'merchant_id': 'garba',
+                    'can_checkout': true,
+                    'items': [
+                      for (final product in products.take(2))
+                        {
+                          ...product,
+                          'item_id': product['id'],
+                          'product_name': product['name'],
+                          'quantity': 1,
+                          'line_total': product['price'],
+                        },
+                    ],
+                    'items_total': 7000,
+                    'delivery_fee':
+                        request.url.queryParameters.containsKey('lat')
+                        ? 500
+                        : 0,
+                    'total': request.url.queryParameters.containsKey('lat')
+                        ? 7500
+                        : 7000,
+                  },
+                },
+              ],
+            };
+          case '/catalog/products':
+            body = {
+              'items': products,
+              'total': 6,
+              'next_offset': null,
+              'match_type': 'exact',
+              'merchant': merchant,
+              'categories': [
+                {'id': 'plats', 'name': 'Plats', 'produits': 6},
+              ],
+            };
+        }
+        return http.Response(
+          jsonEncode(body),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      }),
+    );
+  });
+  tearDown(() {
+    debugNetworkImageHttpClientProvider = null;
+    PaintingBinding.instance.imageCache.clear();
+    PaintingBinding.instance.imageCache.clearLiveImages();
+  });
+
+  Future<void> open(
+    WidgetTester tester,
+    Widget screen, {
+    double scale = 1,
+    Size size = const Size(390, 844),
+  }) async {
+    tester.view.physicalSize = size;
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: TovoTheme.client(),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            disableAnimations: true,
+            textScaler: TextScaler.linear(scale),
+          ),
+          child: RepaintBoundary(key: preview, child: child!),
+        ),
+        home: screen,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () async => Future<void>.delayed(const Duration(milliseconds: 300)),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  }
+
+  Future<void> capture(WidgetTester tester, String name) async {
+    if (!const bool.fromEnvironment('TOVO_RENDER_PREVIEW')) return;
+    await tester.runAsync(() async {
+      final boundary =
+          preview.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      final image = await boundary.toImage(pixelRatio: 2);
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      await Directory('build/design-review').create(recursive: true);
+      await File(
+        'build/design-review/$name.png',
+      ).writeAsBytes(data!.buffer.asUint8List());
+      image.dispose();
+    });
+  }
+
+  void visualTest(String name, Future<void> Function(WidgetTester) body) {
+    testWidgets(name, (tester) async {
+      try {
+        await body(tester);
+      } finally {
+        debugNetworkImageHttpClientProvider = null;
+      }
+    });
+  }
+
+  visualTest(
+    'accueil : toutes les catégories visibles sans défilement automatique',
+    (tester) async {
+      await open(tester, ChatScreen(api: api));
+      for (final category in categories) {
+        expect(find.text(category.$1).hitTestable(), findsOneWidget);
+      }
+      expect(find.text('Votre envie,\nlivrée.').hitTestable(), findsOneWidget);
+      expect(
+        tester.getBottomLeft(find.text('Parapharmacie')).dy,
+        lessThan(tester.getTopLeft(find.byType(TextField)).dy),
+      );
+      await capture(tester, '01-accueil');
+    },
+  );
+
+  visualTest('conversation : réponse sans avatar et aperçu lisible', (
+    tester,
+  ) async {
+    conversation = true;
+    await open(tester, ChatScreen(api: api));
+    expect(find.text('Parcourir les 6 produits'), findsOneWidget);
+    await capture(tester, '02-conversation');
+  });
+
+  visualTest('boutique : vrais produits, catégories et panier', (tester) async {
+    await open(tester, CatalogScreen(api: api, merchantId: 'garba'));
+    expect(find.text('GARBA D\'OR'), findsOneWidget);
+    expect(find.text('Voir mon panier'), findsOneWidget);
+    await capture(tester, '03-boutique');
+    await tester.tap(find.byTooltip('Toutes les catégories'));
+    await tester.pumpAndSettle();
+    expect(find.text('Les catégories'), findsOneWidget);
+    await tester.tap(find.text('Plats'));
+    await tester.pumpAndSettle();
+    expect(find.text('Les catégories'), findsNothing);
+  });
+
+  visualTest('produit : photographie réelle et achat sans quitter la carte', (
+    tester,
+  ) async {
+    await open(tester, CatalogScreen(api: api, merchantId: 'garba'));
+    await tester.tap(find.text('Attieke Demi Poulet'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () async => Future<void>.delayed(const Duration(milliseconds: 300)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(ProductScreen), findsOneWidget);
+    expect(find.text('Ajouter au panier').hitTestable(), findsOneWidget);
+    await capture(tester, '05-produit');
+    await tester.tap(find.bySemanticsLabel('Agrandir la photo'));
+    await tester.pumpAndSettle();
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+    await tester.tap(find.byTooltip('Fermer la photo'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Retour à la carte'));
+    await tester.pumpAndSettle();
+    expect(find.text('6 produits'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  Future<void> checkout(WidgetTester tester) async {
+    await tester.tap(find.byIcon(Icons.shopping_bag_outlined).first);
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () async => Future<void>.delayed(const Duration(milliseconds: 300)),
+    );
+    await tester.pumpAndSettle();
+    await capture(tester, '06-panier');
+    await tester.tap(find.text('Choisir la livraison'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Maison'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Espèces'));
+    await tester.pumpAndSettle();
+  }
+
+  visualTest('panier : les frais sont confirmés avant toute commande', (
+    tester,
+  ) async {
+    conversation = true;
+    await open(tester, ChatScreen(api: api));
+    await checkout(tester);
+    expect(find.text(Money.format(7500)), findsOneWidget);
+    expect(find.text('Bobiel, porte bleue'), findsOneWidget);
+    expect(orderPosts, 0);
+    await capture(tester, '07-confirmation');
+    await tester.tap(find.text('Confirmer la commande'));
+    await tester.pumpAndSettle();
+    expect(orderPosts, 1);
+    expect(orderBody['payment_method'], 'cash');
+    expect(orderBody['dropoff'], {'lat': 13.54, 'lng': 2.1});
+  });
+
+  visualTest('devis indisponible : aucune commande ne part', (tester) async {
+    quoteFails = true;
+    await open(tester, ChatScreen(api: api));
+    await checkout(tester);
+    expect(find.text('Confirmer la commande'), findsNothing);
+    expect(orderPosts, 0);
+    expect(find.text('Impossible de calculer la livraison'), findsOneWidget);
+  });
+
+  visualTest('confirmation annulée : aucune commande ne part', (tester) async {
+    await open(tester, ChatScreen(api: api));
+    await checkout(tester);
+    await tester.tap(find.byTooltip('Annuler la confirmation'));
+    await tester.pumpAndSettle();
+    expect(orderPosts, 0);
+    expect(find.text('Confirmer la commande'), findsNothing);
+  });
+
+  visualTest('planche du parcours enseigne, produit et panier', (tester) async {
+    if (!const bool.fromEnvironment('TOVO_RENDER_PREVIEW')) return;
+    Widget frame(String title, Widget screen) => SizedBox(
+      width: 390,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 12),
+            child: Text(
+              title,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: TovoTheme.inkDoux,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 390,
+            height: 844,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: MaterialApp(
+                debugShowCheckedModeBanner: false,
+                theme: TovoTheme.client(),
+                builder: (context, child) => MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    size: const Size(390, 844),
+                    textScaler: TextScaler.noScaling,
+                    disableAnimations: true,
+                  ),
+                  child: child!,
+                ),
+                home: screen,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    await open(
+      tester,
+      Scaffold(
+        backgroundColor: const Color(0xFFF0F2F2),
+        body: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              frame(
+                '01 / LA CARTE DE L’ENSEIGNE',
+                CatalogScreen(api: api, merchantId: 'garba'),
+              ),
+              const SizedBox(width: 24),
+              frame(
+                '02 / LE PRODUIT',
+                ProductScreen(
+                  api: api,
+                  productId: products[1]['id'] as String,
+                  initialProduct: products[1],
+                ),
+              ),
+              const SizedBox(width: 24),
+              frame('03 / LE PANIER', CartScreen(api: api)),
+            ],
+          ),
+        ),
+      ),
+      size: const Size(1266, 928),
+    );
+    await capture(tester, '08-parcours');
+  });
+
+  visualTest('petit écran et texte agrandi restent utilisables', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      CatalogScreen(api: api, merchantId: 'garba'),
+      scale: 1.4,
+      size: const Size(360, 780),
+    );
+    await capture(tester, '04-texte-agrandi');
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField).hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+}
+
+class _Images extends Fake implements HttpClient {
+  _Images(this.images);
+  final Map<String, Uint8List> images;
+  @override
+  Future<HttpClientRequest> getUrl(Uri url) async =>
+      _ImageRequest(images[url.toString()]!);
+}
+
+class _ImageRequest extends Fake implements HttpClientRequest {
+  _ImageRequest(this.bytes);
+  final Uint8List bytes;
+  @override
+  Future<HttpClientResponse> close() async => _ImageResponse(bytes);
+}
+
+class _ImageResponse extends Fake implements HttpClientResponse {
+  _ImageResponse(this.bytes);
+  final Uint8List bytes;
+  @override
+  int get statusCode => 200;
+  @override
+  int get contentLength => bytes.length;
+  @override
+  HttpClientResponseCompressionState get compressionState =>
+      HttpClientResponseCompressionState.notCompressed;
+  @override
+  StreamSubscription<List<int>> listen(
+    void Function(List<int>)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) => Stream<List<int>>.value(bytes).listen(
+    onData,
+    onError: onError,
+    onDone: onDone,
+    cancelOnError: cancelOnError,
+  );
+}

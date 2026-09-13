@@ -18,23 +18,26 @@ class CategoryGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (component.flag('collapse_in_chat')) return const SizedBox.shrink();
     final items = component.list('items');
     if (items.isEmpty) return const SizedBox.shrink();
 
     final title = component.str('title');
+    final estUnRayon = items.any((item) => item['merchant_id'] != null);
+    final titreAffiche = estUnRayon ? title : 'Toutes vos envies';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (title.isNotEmpty)
+        if (titreAffiche.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: TovoTheme.gap),
             child: Text(
-              title,
+              titreAffiche,
               style: const TextStyle(
-                fontSize: 18,
+                fontSize: 16,
                 letterSpacing: -0.3,
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w600,
                 color: TovoTheme.ink,
               ),
             ),
@@ -42,11 +45,12 @@ class CategoryGrid extends StatelessWidget {
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 4,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: MediaQuery.sizeOf(context).width < 440 ? 3 : 4,
             crossAxisSpacing: 8,
-            mainAxisSpacing: 12,
-            childAspectRatio: 0.78,
+            mainAxisSpacing: 8,
+            mainAxisExtent:
+                102 + (MediaQuery.textScalerOf(context).scale(12) - 12) * 3,
           ),
           itemCount: items.length,
           itemBuilder: (context, index) {
@@ -170,40 +174,44 @@ class _TuileState extends State<_Tuile> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: widget.onTap,
-      onTapDown: (_) => _majPression(true),
-      onTapUp: (_) => _majPression(false),
-      onTapCancel: () => _majPression(false),
-      child: AnimatedScale(
-        scale: _presse ? 0.96 : 1,
-        duration: TovoTheme.vif,
-        curve: TovoTheme.courbe,
-        child: AnimatedContainer(
+    return Semantics(
+      button: true,
+      label: widget.nom,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        onTapDown: (_) => _majPression(true),
+        onTapUp: (_) => _majPression(false),
+        onTapCancel: () => _majPression(false),
+        child: AnimatedScale(
+          scale: _presse ? 0.96 : 1,
           duration: TovoTheme.vif,
-          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
-          decoration: BoxDecoration(
-            color: _presse ? TovoTheme.tealSoft : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.start,
-            children: [
-              SizedBox(width: 52, height: 52, child: _dessin()),
-              const SizedBox(height: 7),
-              Text(
-                widget.nom,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                  color: TovoTheme.ink,
-                  height: 1.15,
+          curve: TovoTheme.courbe,
+          child: AnimatedContainer(
+            duration: TovoTheme.vif,
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+            decoration: BoxDecoration(
+              color: _presse ? TovoTheme.tealSoft : Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                SizedBox(width: 52, height: 52, child: _dessin()),
+                const SizedBox(height: 7),
+                Text(
+                  widget.nom,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: TovoTheme.ink,
+                    height: 1.15,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
