@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -55,6 +56,24 @@ void main() {
 
     expect(file.pending.value, 0);
     expect(ctx.appels, ['POST /orders/cmd-1/accept']);
+  });
+
+  test('une acceptation en attente reste visible jusqu’à la réponse', () async {
+    final reponse = Completer<http.Response>();
+    final client = MockClient((_) => reponse.future);
+    final file = SyncQueue(
+      api: TovoApi(client: client, tokenProvider: () => 'jeton'),
+    );
+    await file.load();
+
+    await file.submit(SyncAction.accept('cmd-1'));
+    expect(file.hasPendingAccept('cmd-1'), isTrue);
+    expect(file.hasPendingOrderChange, isTrue);
+
+    reponse.complete(ok());
+    await file.flush();
+    expect(file.hasPendingAccept('cmd-1'), isFalse);
+    expect(file.hasPendingOrderChange, isFalse);
   });
 
   test("hors ligne, l'action reste en file et rien n'est perdu", () async {

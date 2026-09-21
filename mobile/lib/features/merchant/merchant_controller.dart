@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/api.dart';
+import '../../core/push.dart';
 
 /// État de l'app boutiquier.
 ///
@@ -24,6 +27,10 @@ class MerchantController extends ChangeNotifier {
   final SupabaseClient _db;
 
   RealtimeChannel? _canal;
+  StreamSubscription<Map<String, String>>? _notifications;
+  Timer? _secours;
+  final Set<String> _actionsEnCours = {};
+  int _lectureCommandes = 0;
 
   Map<String, dynamic>? boutique;
   List<Map<String, dynamic>> commandes = const [];
@@ -37,16 +44,26 @@ class MerchantController extends ChangeNotifier {
 
   /// Commandes qui réclament une action immédiate du boutiquier.
   List<Map<String, dynamic>> get aTraiter =>
-      commandes.where((c) => c['status'] == 'pending').toList(growable: false);
+      commandes.where((c) => etapeSuivante(c['status'] as String? ?? '') != null).toList(growable: false);
+
+  bool actionEnCours(String id) => _actionsEnCours.contains(id);
 
   Future<void> start() async {
     await refresh();
     _ecouter();
+    _notifications = TovoPush.messagesEnAvantPlan().listen((message) {
+      if (message['kind'] == 'new_order') unawaited(actualiserCommandes());
+    });
+    _secours = Timer.periodic(const Duration(seconds: 30), (_) {
+      unawaited(actualiserCommandes());
+    });
   }
 
   @override
   void dispose() {
     if (_canal != null) _db.removeChannel(_canal!);
+    _notifications?.cancel();
+    _secours?.cancel();
     super.dispose();
   }
 
@@ -72,7 +89,7 @@ class MerchantController extends ChangeNotifier {
             column: 'merchant_id',
             value: id,
           ),
-          callback: (_) => refresh(silencieux: true),
+          callback: (_) => unawaited(actualiserCommandes()),
         )
         .subscribe();
   }
@@ -106,8 +123,8 @@ class MerchantController extends ChangeNotifier {
       boutique = boutiques.isNotEmpty ? boutiques.first : null;
 
       if (boutiqueId != null) {
-        final reponse = await _api.get('/merchant/orders');
-        if (reponse.ok) commandes = reponse.list('orders');
+        _ecouter();
+        await actualiserCommandes();
 
         produits = await _db
             .from('products')
@@ -121,6 +138,22 @@ class MerchantController extends ChangeNotifier {
 
     chargement = false;
     _ecouter();
+    notifyListeners();
+  }
+
+  Future<void> actualiserCommandes() async {
+    if (boutiqueId == null) return;
+    final lecture = ++_lectureCommandes;
+    final reponse = await _api.get('/merchant/orders');
+    if (!reponse.ok || lecture != _lectureCommandes) return;
+    final statutsLocaux = {
+      for (final commande in commandes)
+        if (_actionsEnCours.contains(commande['id'])) commande['id']: commande['status'],
+    };
+    commandes = reponse.list('orders').map((commande) {
+      final statut = statutsLocaux[commande['id']];
+      return statut == null ? commande : {...commande, 'status': statut};
+    }).toList(growable: false);
     notifyListeners();
   }
 
@@ -175,25 +208,34 @@ class MerchantController extends ChangeNotifier {
   /// Passe par le backend et non par Supabase : c'est le passage à `ready`
   /// qui met la commande en file de dispatch.
   Future<void> avancer(String orderId, String statut) async {
+    if (_actionsEnCours.contains(orderId)) return;
+    final precedente = commandes.where((commande) => commande['id'] == orderId).firstOrNull;
+    if (precedente == null) return;
+    _actionsEnCours.add(orderId);
+    commandes = commandes.map((commande) => commande['id'] == orderId
+        ? {...commande, 'status': statut} : commande).toList(growable: false);
+    notifyListeners();
     final reponse = await _api.post('/orders/$orderId/status', {'status': statut});
     if (!reponse.ok) {
+      commandes = commandes.map((commande) => commande['id'] == orderId
+          ? {...commande, 'status': precedente['status']} : commande).toList(growable: false);
       erreur = reponse.content;
-      notifyListeners();
-      return;
     }
-    await refresh(silencieux: true);
+    _actionsEnCours.remove(orderId);
+    notifyListeners();
+    unawaited(actualiserCommandes());
   }
 
   static String? etapeSuivante(String statut) => switch (statut) {
         'pending' => 'confirmed',
-        'confirmed' => 'preparing',
+        'confirmed' => 'ready',
         'preparing' => 'ready',
         _ => null,
       };
 
   static String libelleEtape(String statut) => switch (statut) {
         'pending' => 'Accepter',
-        'confirmed' => 'En préparation',
+        'confirmed' => 'Commande prête',
         'preparing' => 'Prête pour le livreur',
         _ => '',
       };

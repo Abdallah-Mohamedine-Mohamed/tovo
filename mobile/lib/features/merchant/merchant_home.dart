@@ -25,13 +25,14 @@ class MerchantHome extends StatefulWidget {
   State<MerchantHome> createState() => _MerchantHomeState();
 }
 
-class _MerchantHomeState extends State<MerchantHome> {
+class _MerchantHomeState extends State<MerchantHome> with WidgetsBindingObserver {
   late final MerchantController _c = MerchantController(api: widget.api);
   int _onglet = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _c.addListener(_maj);
     _c.start();
   }
@@ -40,7 +41,13 @@ class _MerchantHomeState extends State<MerchantHome> {
   void dispose() {
     _c.removeListener(_maj);
     _c.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_c.actualiserCommandes());
   }
 
   void _maj() {
@@ -253,11 +260,24 @@ class _CarteCommande extends StatelessWidget {
             'Vous recevrez ${Money.format((commande['merchant_payout'] as num?)?.toInt() ?? 0)}',
             style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
           ),
+          if (commande['order_items'] is List) ...[
+            const SizedBox(height: 12),
+            for (final article in (commande['order_items'] as List).whereType<Map>())
+              Padding(
+                padding: const EdgeInsets.only(bottom: 5),
+                child: Text(
+                  '${article['quantity']} × ${article['product_name']}'
+                  '${(article['selections_label'] as String?)?.isNotEmpty == true ? ' · ${article['selections_label']}' : ''}',
+                  style: const TextStyle(fontSize: 13, color: TovoTheme.ink),
+                ),
+              ),
+          ],
           if (etape != null) ...[
             const SizedBox(height: 12),
             FilledButton(
-              onPressed: () =>
-                  controller.avancer(commande['id'] as String, etape),
+              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+              onPressed: controller.actionEnCours(commande['id'] as String)
+                  ? null : () => controller.avancer(commande['id'] as String, etape),
               child: Text(MerchantController.libelleEtape(statut)),
             ),
           ],

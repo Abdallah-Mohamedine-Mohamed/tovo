@@ -9,6 +9,7 @@ export interface CataloguePage {
   offset: number;
   next_offset: number | null;
   match_type: 'exact' | 'similar';
+  category_id?: string | undefined;
 }
 
 export interface CatalogueFilter {
@@ -68,6 +69,16 @@ export async function cataloguePage(db: SupabaseClient, filter: CatalogueFilter,
   if (response.error) throw response.error;
   let page = response.data as CataloguePage;
   if (page.total === 0 && parameters.p_query && semantic && embeddingsEnabled) {
+    const normalizedQuery = normaliserIntention(parameters.p_query);
+    if (!parameters.p_category && normalizedQuery && !normalizedQuery.includes(' ')) {
+      const { data: categories, error } = await db.from('categories')
+        .select('id, name').eq('is_active', true).ilike('name', parameters.p_query).limit(2);
+      if (error) throw error;
+      const category = categories?.length === 1 ? categories[0] : undefined;
+      if (category && normaliserIntention(category.name as string) === normalizedQuery) {
+        parameters.p_category = category.id as string;
+      }
+    }
     const vector = await embed(parameters.p_query, 'query').catch(() => null);
     if (vector) {
       response = await db.rpc('catalog_products_page', { ...parameters, p_embedding: JSON.stringify(vector) });
@@ -75,6 +86,7 @@ export async function cataloguePage(db: SupabaseClient, filter: CatalogueFilter,
       page = response.data as CataloguePage;
     }
   }
+  if (parameters.p_category && !filter.category_id) page.category_id = parameters.p_category;
   return page;
 }
 
@@ -177,7 +189,7 @@ export function searchAnswer(page: CataloguePage, filter: CatalogueFilter): Cata
       produits: preview.map((product) => ({ id: product.id, nom: product.name, prix: product.price, boutique: product.merchant_name, a_personnaliser: product.requires_options ?? false })),
       consigne: 'Le carrousel est un aperçu. Le total concerne tous les résultats accessibles dans le catalogue.' },
     components: preview.length ? [productCarousel(preview, query, {
-      query, total: page.total, merchant_ids: filter.merchant_ids, category_id: filter.category_id,
+      query, total: page.total, merchant_ids: filter.merchant_ids, category_id: page.category_id ?? filter.category_id,
     })] : [],
   };
 }

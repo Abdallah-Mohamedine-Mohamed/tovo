@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { toHttpFailure } from '../lib/errors.js';
 import { envelope, orderTracking } from '../components/builders.js';
 import { notifierBoutique } from '../services/orderNotifications.js';
+import { queueDispatch } from '../services/dispatch.js';
 import { ouvrirPaiement } from '../services/payments.js';
 import { paiementMobileActif } from '../config/env.js';
 
@@ -100,12 +101,13 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(failure.status).send(failure.body);
     }
 
-    // La notification la plus critique du système : tant que le boutiquier
-    // ne l'a pas vue, rien n'avance et le client attend. Elle part quel que
-    // soit le mode de paiement — le règlement ne doit rien retenir.
     if (body.data.type === 'delivery') {
       notifierBoutique(orderId as string).catch((cause) => {
         request.log.error({ cause, orderId }, 'notification boutique impossible');
+      });
+    } else if (!body.data.scheduled_for || new Date(body.data.scheduled_for) <= new Date()) {
+      queueDispatch(orderId as string).catch((cause) => {
+        request.log.error({ cause, orderId }, 'dispatch du colis impossible');
       });
     }
 

@@ -26,12 +26,13 @@ class DriverHome extends StatefulWidget {
   State<DriverHome> createState() => _DriverHomeState();
 }
 
-class _DriverHomeState extends State<DriverHome> {
+class _DriverHomeState extends State<DriverHome> with WidgetsBindingObserver {
   late final DriverController _c = DriverController(api: widget.api);
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _c.addListener(_maj);
     _c.start();
   }
@@ -40,7 +41,13 @@ class _DriverHomeState extends State<DriverHome> {
   void dispose() {
     _c.removeListener(_maj);
     _c.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_c.refresh(silencieux: true));
   }
 
   void _maj() {
@@ -72,7 +79,7 @@ class _DriverHomeState extends State<DriverHome> {
               Switch(
                 value: _c.online,
                 activeThumbColor: TovoTheme.success,
-                onChanged: (v) => _c.setOnline(v),
+                onChanged: _c.presenceEnCours ? null : (v) => _c.setOnline(v),
               ),
             ],
           ),
@@ -94,6 +101,17 @@ class _DriverHomeState extends State<DriverHome> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (_c.erreur != null)
+              _Bandeau(
+                couleur: TovoTheme.coralSoft,
+                texte: _c.erreur!,
+                icone: Icons.error_outline,
+                teinte: TovoTheme.danger,
+                action: TextButton(
+                  onPressed: _c.effacerErreur,
+                  child: const Text('OK'),
+                ),
+              ),
             _BandeauSync(controller: _c),
             _ResumeJournee(resume: _c.resume),
             const SizedBox(height: 16),
@@ -328,6 +346,14 @@ class _CarteCourse extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
+          if ((ordre['merchant_name'] as String?)?.isNotEmpty == true)
+            Text(
+              'À récupérer chez ${ordre['merchant_name']}',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
+                  color: TovoTheme.ink),
+            ),
+          if ((ordre['merchant_name'] as String?)?.isNotEmpty == true)
+            const SizedBox(height: 5),
           Text(
             (ordre['dropoff_hint'] as String?) ?? '',
             style: const TextStyle(fontSize: 13, color: TovoTheme.ink),
@@ -337,10 +363,18 @@ class _CarteCourse extends StatelessWidget {
             'À encaisser : ${Money.format(total)}',
             style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
           ),
+          if ((ordre['attente_min'] as num?) != null)
+            Text(
+              'En attente depuis ${ordre['attente_min']} min',
+              style: const TextStyle(fontSize: 11, color: TovoTheme.inkDoux),
+            ),
           const SizedBox(height: 12),
           FilledButton(
-            onPressed: () => controller.accepter(ordre),
-            child: const Text('Accepter'),
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            onPressed: controller.acceptationEnCours(ordre['id'] as String)
+                ? null : () => controller.accepter(ordre),
+            child: Text(controller.acceptationEnCours(ordre['id'] as String)
+                ? 'Acceptation en cours' : 'Accepter'),
           ),
         ],
       ),
@@ -374,7 +408,7 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
   }
 
   static const Map<String, String> _libelles = {
-    'assigned': 'Allez chercher la commande',
+    'assigned': 'Récupérez la commande',
     'picked_up': 'Commande récupérée',
     'delivering': 'En route vers le client',
   };
@@ -550,7 +584,8 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
               backgroundColor:
                   etape == 'delivered' ? TovoTheme.success : TovoTheme.teal,
             ),
-            onPressed: () => controller.avancer(etape, preuveLocale: _preuve?.path),
+            onPressed: controller.queue.hasPendingOrderChange
+                ? null : () => controller.avancer(etape, preuveLocale: _preuve?.path),
             child: Text(
               controller.libelleProchaineEtape,
               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),

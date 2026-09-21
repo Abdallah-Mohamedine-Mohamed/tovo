@@ -8,21 +8,22 @@ import '../registry.dart';
 
 const List<String> _etapesCommandeVisibles = [
   'Acceptée',
-  'En préparation',
-  'Livreur en route',
+  'Prête',
+  'En livraison',
   'Livrée',
 ];
 
 int _etapeCommandeVisible(String statut) {
   switch (statut) {
     case 'pending':
+      return -1;
     case 'confirmed':
       return 0;
     case 'preparing':
     case 'ready':
-      return 1;
     case 'assigned':
     case 'picked_up':
+      return 1;
     case 'delivering':
       return 2;
     case 'delivered':
@@ -156,6 +157,9 @@ class _OrderTrackingState extends State<OrderTracking>
             final nouveau = payload.newRecord['status'] as String?;
             if (nouveau == null || !mounted) return;
             setState(() => _statut = nouveau);
+            if (payload.newRecord['driver_id'] != null && _livreur == null) {
+              unawaited(_relire());
+            }
             // Commande terminée : plus rien à écouter. Laisser les canaux
             // ouverts consommerait de la batterie et du forfait pour rien.
             if (_termine.contains(nouveau)) _desabonner();
@@ -214,67 +218,76 @@ class _OrderTrackingState extends State<OrderTracking>
         borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
         boxShadow: TovoTheme.ombreFlottante,
       ),
-      clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            color: annulee ? TovoTheme.coralSoft : TovoTheme.tealDeep,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 0),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: annulee ? TovoTheme.danger : const Color(0xFF66D4B2),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    _libelles[_statut] ?? _statut,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: annulee ? TovoTheme.danger : Colors.white,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('VOTRE COMMANDE', style: TextStyle(
+                        fontSize: 10, fontWeight: FontWeight.w800,
+                        letterSpacing: 1.2, color: TovoTheme.inkDoux,
+                      )),
+                      const SizedBox(height: 6),
+                      Text(_libelles[_statut] ?? _statut, style: TextStyle(
+                        fontSize: 17, fontWeight: FontWeight.w800,
+                        color: annulee ? TovoTheme.danger : TovoTheme.ink,
+                      )),
+                    ],
                   ),
                 ),
-                Text(
-                  Money.format(widget.component.money('total')),
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: annulee ? TovoTheme.ink : Colors.white,
-                  ),
-                ),
+                Text(Money.format(widget.component.money('total')),
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800,
+                    color: TovoTheme.teal)),
               ],
             ),
           ),
-          if (!annulee && etapes.isNotEmpty)
+          if (!annulee)
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 4),
+              padding: const EdgeInsets.fromLTRB(18, 22, 18, 4),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (var i = 0; i < etapes.length; i++) ...[
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: i <= courante ? TovoTheme.teal : TovoTheme.line,
-                        shape: BoxShape.circle,
+                  for (var i = 0; i < etapes.length; i++)
+                    Expanded(
+                      child: Column(
+                        children: [
+                          Row(children: [
+                            if (i > 0) Expanded(child: AnimatedContainer(
+                              duration: TovoTheme.normal, height: 2,
+                              color: i <= courante ? TovoTheme.teal : TovoTheme.line,
+                            )),
+                            AnimatedContainer(
+                              duration: TovoTheme.normal,
+                              width: i == courante ? 22 : 18,
+                              height: i == courante ? 22 : 18,
+                              decoration: BoxDecoration(
+                                color: i <= courante ? TovoTheme.teal : TovoTheme.line,
+                                shape: BoxShape.circle,
+                              ),
+                              child: i <= courante
+                                  ? const Icon(Icons.check, size: 12, color: Colors.white)
+                                  : null,
+                            ),
+                            if (i < etapes.length - 1) Expanded(child: AnimatedContainer(
+                              duration: TovoTheme.normal, height: 2,
+                              color: i < courante ? TovoTheme.teal : TovoTheme.line,
+                            )),
+                          ]),
+                          const SizedBox(height: 8),
+                          Text(etapes[i], textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 10,
+                              fontWeight: i == courante ? FontWeight.w800 : FontWeight.w600,
+                              color: i <= courante ? TovoTheme.teal : TovoTheme.inkDoux)),
+                        ],
                       ),
                     ),
-                    if (i < etapes.length - 1)
-                      Expanded(
-                        child: Container(
-                          height: 2,
-                          color: i < courante ? TovoTheme.teal : TovoTheme.line,
-                        ),
-                      ),
-                  ],
                 ],
               ),
             ),

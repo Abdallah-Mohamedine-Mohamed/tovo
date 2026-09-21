@@ -63,7 +63,6 @@ class _CourierFormState extends State<CourierForm> {
   );
 
   late String _colis = widget.component.str('parcel', 'small');
-  bool _immediat = true;
   bool _localisationEnCours = false;
 
   _PointColis _lire(String cle) {
@@ -130,7 +129,6 @@ class _CourierFormState extends State<CourierForm> {
         'dropoff': _arrivee.toJson(),
         'dropoff_contact': _contactArrivee.text.trim(),
         'parcel': _colis,
-        'scheduled_for': _immediat ? null : 'later',
       }),
     );
   }
@@ -252,24 +250,12 @@ class _CourierFormState extends State<CourierForm> {
           ),
 
           const SizedBox(height: 16),
-          const Text(
-            'Quand ?',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 8),
-          Row(
+          const Row(
             children: [
-              _Chip(
-                libelle: '⚡ Maintenant',
-                selectionne: _immediat,
-                onTap: () => setState(() => _immediat = true),
-              ),
-              const SizedBox(width: 8),
-              _Chip(
-                libelle: '📅 Programmer',
-                selectionne: !_immediat,
-                onTap: () => setState(() => _immediat = false),
-              ),
+              Icon(Icons.bolt_rounded, size: 18, color: TovoTheme.teal),
+              SizedBox(width: 6),
+              Expanded(child: Text('Un livreur sera recherché dès la confirmation.',
+                style: TextStyle(fontSize: 12, color: TovoTheme.inkDoux))),
             ],
           ),
 

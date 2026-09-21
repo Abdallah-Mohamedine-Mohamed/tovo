@@ -86,7 +86,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     const filter = { q: intent.query, limit: 8,
       merchant_ids: intent.merchants.length ? intent.merchants.map((merchant) => merchant.id) : undefined };
     const page = await cataloguePage(input.db, filter);
-    if (page.total > 0) direct = searchAnswer(page, filter);
+    direct = searchAnswer(page, filter);
   }
   if (direct) {
     input.onEvent?.({ type: 'results', components: direct.components });

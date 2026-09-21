@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/api.dart';
 import '../../core/location.dart';
+import '../../core/push.dart';
 import 'sync_queue.dart';
 
 /// État de l'app livreur.
@@ -17,21 +19,37 @@ import 'sync_queue.dart';
 /// immédiatement, sans attendre le réseau — et si le réseau manque, elle
 /// avance quand même : c'est la promesse de l'offline-first.
 class DriverController extends ChangeNotifier {
-  DriverController({required TovoApi api, SyncQueue? queue})
+  DriverController({required TovoApi api, SyncQueue? queue, SupabaseClient? db})
       : _api = api,
+        _db = db ?? Supabase.instance.client,
         queue = queue ?? SyncQueue(api: api);
 
   final TovoApi _api;
+  final SupabaseClient _db;
   final SyncQueue queue;
 
   Timer? _ping;
   Timer? _rafraichissement;
+  RealtimeChannel? _canal;
+  StreamSubscription<Map<String, String>>? _notifications;
+  Future<void>? _refreshEnCours;
+  bool _refreshApres = false;
+  bool _presenceEnCours = false;
+  String? _acceptationEnCours;
 
   bool _online = false;
   bool get online => _online;
+  bool get presenceEnCours => _presenceEnCours;
+  bool acceptationEnCours(String id) =>
+      _acceptationEnCours == id || queue.hasPendingAccept(id);
 
   bool chargement = false;
   String? erreur;
+
+  void effacerErreur() {
+    erreur = null;
+    notifyListeners();
+  }
 
   /// Courses disponibles, quand aucune n'est en cours.
   List<Map<String, dynamic>> pool = const [];
@@ -52,7 +70,23 @@ class DriverController extends ChangeNotifier {
 
   Future<void> start() async {
     await queue.load();
+    final userId = _db.auth.currentUser?.id;
+    if (userId != null) {
+      try {
+        final profile = await _db.from('driver_profiles')
+            .select('is_online').eq('id', userId).maybeSingle();
+        _online = profile?['is_online'] == true;
+      } on Exception {
+        _online = false;
+      }
+    }
+    _ecouter();
     await refresh();
+    _notifications = TovoPush.messagesEnAvantPlan().listen((message) {
+      if (message['kind'] == 'dispatch' || message['kind'] == 'assigned') {
+        unawaited(refresh(silencieux: true));
+      }
+    });
     _programmerRafraichissement();
   }
 
@@ -60,8 +94,20 @@ class DriverController extends ChangeNotifier {
   void dispose() {
     _ping?.cancel();
     _rafraichissement?.cancel();
+    _notifications?.cancel();
+    if (_canal != null) _db.removeChannel(_canal!);
     queue.dispose();
     super.dispose();
+  }
+
+  void _ecouter() {
+    if (_canal != null) return;
+    _canal = _db.channel('tovo:driver:orders').onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'orders',
+      callback: (_) => unawaited(refresh(silencieux: true)),
+    ).subscribe();
   }
 
   // ------------------------------------------------------------------
@@ -69,10 +115,28 @@ class DriverController extends ChangeNotifier {
   // ------------------------------------------------------------------
 
   Future<void> setOnline(bool valeur) async {
+    if (_presenceEnCours || _online == valeur) return;
+    final id = _db.auth.currentUser?.id;
+    if (id == null) return;
+    _presenceEnCours = true;
     _online = valeur;
     notifyListeners();
-    _programmerPing();
-    if (valeur) await refresh();
+    try {
+      await _db.from('driver_profiles').update({'is_online': valeur}).eq('id', id);
+      _programmerPing();
+      if (valeur) unawaited(refresh(silencieux: true));
+      if (!valeur && course == null) {
+        pool = const [];
+        notifyListeners();
+      }
+    } on Exception {
+      _online = !valeur;
+      erreur = 'Disponibilité non enregistrée. Réessayez.';
+      _programmerPing();
+    } finally {
+      _presenceEnCours = false;
+      notifyListeners();
+    }
   }
 
   /// Cadence du ping de position.
@@ -88,14 +152,14 @@ class DriverController extends ChangeNotifier {
 
   void _programmerPing() {
     _ping?.cancel();
-    if (!_online) return;
+    if (!_online && course == null) return;
 
     _ping = Timer.periodic(_cadencePing, (_) => _envoyerPosition());
     unawaited(_envoyerPosition());
   }
 
   Future<void> _envoyerPosition() async {
-    if (!_online) return;
+    if (!_online && course == null) return;
 
     final position = await TovoLocation.current();
     if (position == null) return;
@@ -124,18 +188,43 @@ class DriverController extends ChangeNotifier {
   // Chargement
   // ------------------------------------------------------------------
 
-  Future<void> refresh({bool silencieux = false}) async {
+  Future<void> refresh({bool silencieux = false}) {
+    final enCours = _refreshEnCours;
+    if (enCours != null) {
+      _refreshApres = true;
+      return enCours;
+    }
+    final future = _charger(silencieux: silencieux);
+    _refreshEnCours = future;
+    return future.whenComplete(() {
+      _refreshEnCours = null;
+      if (_refreshApres) {
+        _refreshApres = false;
+        unawaited(refresh(silencieux: true));
+      }
+    });
+  }
+
+  Future<void> _charger({required bool silencieux}) async {
     if (!silencieux) {
       chargement = true;
       erreur = null;
       notifyListeners();
     }
 
-    // On rejoue d'abord ce qui attend : inutile d'afficher un pool obsolète
-    // alors qu'une acceptation est encore en file.
     await queue.flush();
+    if (queue.hasPendingOrderChange && course != null) {
+      chargement = false;
+      notifyListeners();
+      return;
+    }
 
-    final courses = await _api.get('/orders', query: {'limit': 5});
+    final reponses = await Future.wait([
+      _api.get('/orders', query: {'limit': 5}),
+      _api.get('/driver/summary'),
+    ]);
+    final courses = reponses[0];
+    final resumeReponse = reponses[1];
     final enCours = _trouverCourseActive(courses);
 
     if (enCours != null) {
@@ -144,21 +233,21 @@ class DriverController extends ChangeNotifier {
         course = suivi.components.first.data;
       }
       pool = const [];
-    } else {
+    } else if (courses.ok && !queue.hasPendingOrderChange) {
       course = null;
       if (_online) {
         final reponse = await _api.get('/driver/pool');
-        pool = reponse.ok ? _extraireOrdres(reponse) : const [];
+        if (reponse.ok) pool = _extraireOrdres(reponse);
       } else {
         pool = const [];
       }
     }
 
-    final resumeReponse = await _api.get('/driver/summary');
     if (resumeReponse.ok && resumeReponse.raw.isNotEmpty) {
       resume = resumeReponse.raw;
     }
 
+    if (!queue.hasPendingOrderChange) _acceptationEnCours = null;
     chargement = false;
     _programmerPing();
     notifyListeners();
@@ -189,10 +278,25 @@ class DriverController extends ChangeNotifier {
   /// bouton qui ne réagit pas pendant dix secondes sur un réseau lent.
   Future<void> accepter(Map<String, dynamic> ordre) async {
     final id = ordre['id'] as String?;
-    if (id == null) return;
+    if (id == null || course != null || acceptationEnCours(id)) return;
 
+    _acceptationEnCours = id;
+    notifyListeners();
+    final rejetsAvant = queue.rejets.length;
     await queue.submit(SyncAction.accept(id));
-    await refresh();
+    unawaited(_finaliserAcceptation(id, rejetsAvant));
+  }
+
+  Future<void> _finaliserAcceptation(String id, int rejetsAvant) async {
+    await queue.flush();
+    if (queue.hasPendingAccept(id)) return;
+    _acceptationEnCours = null;
+    final refus = queue.rejets.skip(rejetsAvant).where(
+      (rejet) => rejet.action.path == '/orders/$id/accept',
+    ).firstOrNull;
+    if (refus != null) erreur = refus.message;
+    notifyListeners();
+    await refresh(silencieux: true);
   }
 
   /// Fait avancer la course.
@@ -203,13 +307,32 @@ class DriverController extends ChangeNotifier {
   /// la livraison reste confirmée.
   Future<void> avancer(String nouveauStatut, {String? preuveLocale}) async {
     final id = courseId;
-    if (id == null) return;
+    if (id == null || queue.hasPendingOrderChange || prochaineEtape != nouveauStatut) return;
 
+    final ancienStatut = statut;
+    final rejetsAvant = queue.rejets.length;
+    course = {...course!, 'status': nouveauStatut};
+    notifyListeners();
     await queue.submit(SyncAction.status(id, nouveauStatut));
     if (preuveLocale != null) {
       await queue.submit(SyncAction.proof(id, preuveLocale));
     }
-    await refresh();
+    unawaited(_finaliserStatut(id, ancienStatut, nouveauStatut, rejetsAvant));
+  }
+
+  Future<void> _finaliserStatut(
+    String id, String ancienStatut, String nouveauStatut, int rejetsAvant,
+  ) async {
+    await queue.flush();
+    final refus = queue.rejets.skip(rejetsAvant).where((rejet) =>
+        rejet.action.path == '/orders/$id/status' &&
+        rejet.action.body['status'] == nouveauStatut).firstOrNull;
+    if (refus != null && courseId == id) {
+      course = {...course!, 'status': ancienStatut};
+      erreur = refus.message;
+      notifyListeners();
+    }
+    if (!queue.hasPendingOrderChange) await refresh(silencieux: true);
   }
 
   /// Le client a-t-il choisi Nita sans que le paiement soit constaté ?
@@ -234,15 +357,17 @@ class DriverController extends ChangeNotifier {
   }
 
   /// Étape suivante du parcours, ou `null` si la course est terminée.
-  String? get prochaineEtape => switch (statut) {
-        'assigned' => 'picked_up',
+  String? get prochaineEtape => etapeSuivante(statut);
+
+  static String? etapeSuivante(String statut) => switch (statut) {
+        'assigned' => 'delivering',
         'picked_up' => 'delivering',
         'delivering' => 'delivered',
         _ => null,
       };
 
   String get libelleProchaineEtape => switch (statut) {
-        'assigned' => 'J’ai récupéré la commande',
+        'assigned' => 'Je pars livrer',
         'picked_up' => 'Je pars livrer',
         'delivering' => 'Commande livrée',
         _ => '',

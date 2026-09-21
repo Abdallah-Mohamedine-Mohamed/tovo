@@ -10,7 +10,7 @@ import { catalogRoutes } from '../../src/routes/catalog.js';
 import { EXECUTORS } from '../../src/ai/tools.js';
 import { orchestrate } from '../../src/ai/orchestrator.js';
 
-vi.mock('../../src/services/embeddings.js', () => ({ embeddingsEnabled: false, embed: vi.fn(), embedImage: vi.fn() }));
+vi.mock('../../src/services/embeddings.js', () => ({ embeddingsEnabled: true, embed: vi.fn(async () => Array(1536).fill(0)), embedImage: vi.fn() }));
 vi.mock('../../src/services/supabase.js', () => ({ anonClient: () => adapter, serviceClient: () => adapter }));
 vi.mock('../../src/ai/llmClient.js', () => ({
   llmClient: () => { throw new Error('Cette demande de catalogue ne nécessite pas le modèle'); },
@@ -26,6 +26,7 @@ const hidden = randomUUID();
 const root = randomUUID();
 const category = randomUUID();
 const boissons = randomUUID();
+const watches = randomUUID();
 const merchants = [
   { id: centre, name: "O'TAKOSS ( Centre Aéré )", is_approved: true, is_open: true },
   { id: marche, name: "O'TAKOSS ( Nouveau Marché )", is_approved: true, is_open: false },
@@ -58,12 +59,15 @@ const adapter = {
     }
     const getRows = async () => {
       const result = await database.query<Record<string, unknown>>(`select * from ${table === 'merchants' ? 'merchants' : 'categories'}`);
-      return result.rows.filter((row) => conditions.every(([key, value]) => row[key] === value));
+      return result.rows.filter((row) => conditions.every(([key, value]) => key.startsWith('ilike:')
+        ? String(row[key.slice(6)]).toLowerCase() === value : row[key] === value));
     };
     const builder = {
       select() { return builder; }, eq(key: string, value: unknown) { conditions.push([key, value]); return builder; },
+      ilike(key: string, value: string) { conditions.push([`ilike:${key}`, value.toLowerCase()]); return builder; },
       order() { return builder; },
       async range(start: number, end: number) { return { data: (await getRows()).slice(start, end + 1), error: null }; },
+      async limit(count: number) { return { data: (await getRows()).slice(0, count), error: null }; },
       async maybeSingle() { return { data: (await getRows())[0] ?? null, error: null }; },
     };
     return builder;
@@ -92,7 +96,8 @@ beforeAll(async () => {
   await database.exec(migration);
   await database.exec(migration);
   for (const merchant of merchants) await database.query('insert into merchants values ($1,$2,$3,$4)', [merchant.id, merchant.name, merchant.is_approved, merchant.is_open]);
-  await database.query('insert into categories values ($1,$2,null,$3),($4,$5,$1,null),($6,$7,$1,null)', [root, 'Restaurants', 'restaurants-m3', category, 'Plats', boissons, 'Boissons']);
+  await database.query('insert into categories(id,name,parent_id,slug) values ($1,$2,null,$3),($4,$5,$1,null),($6,$7,$1,null),($8,$9,null,null)',
+    [root, 'Restaurants', 'restaurants-m3', category, 'Plats', boissons, 'Boissons', watches, 'Montre']);
   for (let index = 0; index < 75; index++) await database.query(
     'insert into products(id,merchant_id,category_id,name,price) values ($1,$2,$3,$4,2500)',
     [randomUUID(), index % 2 === 0 ? centre : marche, category, `Poulet ${String(index).padStart(2, '0')}`]);
@@ -101,7 +106,7 @@ beforeAll(async () => {
   for (const [name, merchant, section, available, options] of [
     ['Soda', centre, boissons, true, null], ['Tacos XL', centre, category, true, 'Boulette Poulet'],
     ['Pizza', marche, category, true, 'Boulette Poulet'], ['Poulet caché', hidden, category, true, null],
-    ['Poulet épuisé', centre, category, false, null], ['Suggestion', garba, category, true, null],
+    ['Poulet épuisé', centre, category, false, null], ['Pastèque', garba, boissons, true, null],
   ]) await database.query('insert into products(id,merchant_id,category_id,name,price,is_available,options_text) values ($1,$2,$3,$4,2000,$5,$6)',
     [randomUUID(), merchant, section, name, available, options]);
   await app.register(catalogRoutes);
@@ -110,6 +115,21 @@ beforeAll(async () => {
 afterAll(async () => { await app.close(); await database.close(); });
 
 describe('catalogue complet', () => {
+  it('ne propose pas de pastèque pour une recherche de montres sans produit disponible', async () => {
+    const raw = await adapter.rpc('catalog_products_page', {
+      p_query: 'Montre', p_embedding: JSON.stringify(Array(1536).fill(0)),
+      p_merchants: null, p_category: null, p_offset: 0, p_limit: 8,
+    });
+    expect((raw.data as CataloguePage).items[0]?.name).toBe('Pastèque');
+    const page = await cataloguePage(adapter, { q: 'Montre', limit: 8 });
+    expect(page).toMatchObject({ total: 0, items: [], category_id: watches });
+    const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),
+      clientMessageId: randomUUID(), message: 'Montre' });
+    expect(answer.content).toContain('Aucun résultat');
+    expect(answer.components).toEqual([]);
+    expect(answer.usage.cycles).toBe(0);
+  });
+
   it('parcourt toutes les pages de poulet sans doublon ni plafond de 8 ou 60', async () => {
     const ids: string[] = [];
     let offset = 0;

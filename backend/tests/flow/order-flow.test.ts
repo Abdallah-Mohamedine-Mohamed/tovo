@@ -268,11 +268,12 @@ describe('Flux de commande — panier et passage de commande', () => {
 
     const { data: order } = await client.db
       .from('orders')
-      .select('type, merchant_id, total, items_total')
+      .select('type, merchant_id, total, items_total, status')
       .eq('id', orderId)
       .single();
 
     expect(order?.type).toBe('courier');
+    expect(order?.status).toBe('ready');
     expect(order?.merchant_id).toBeNull();
     expect(order?.items_total).toBe(0);
     expect(order?.total).toBeGreaterThan(1000);

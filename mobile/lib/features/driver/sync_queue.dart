@@ -55,6 +55,15 @@ class SyncQueue {
   /// Nombre d'actions en attente — alimente l'indicateur « n en attente ».
   final ValueNotifier<int> pending = ValueNotifier<int>(0);
 
+  bool get hasPendingOrderChange => _actions.any(
+        (action) => action.kind == SyncKind.accept || action.kind == SyncKind.status,
+      );
+
+  bool hasPendingAccept(String orderId) => _actions.any(
+        (action) => action.kind == SyncKind.accept &&
+            action.path == '/orders/$orderId/accept',
+      );
+
   Future<void> load() async {
     _prefs ??= await SharedPreferences.getInstance();
     final brut = _prefs!.getStringList(_cle) ?? const [];

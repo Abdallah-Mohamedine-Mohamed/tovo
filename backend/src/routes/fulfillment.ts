@@ -246,7 +246,7 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
 
     let builder = request.supabase!
       .from('orders')
-      .select('id, status, total, items_total, merchant_payout, placed_at, dropoff_hint')
+      .select('id, status, total, items_total, merchant_payout, placed_at, dropoff_hint, order_items(product_name, quantity, selections_label)')
       .order('placed_at', { ascending: false })
       .limit(50);
 
