@@ -141,7 +141,26 @@ workflows:
             --create
 
           keychain add-certificates
-          xcode-project use-profiles
+
+          # `--project` EXPLICITE. Par défaut, `use-profiles` cherche
+          # `**/*.xcodeproj` depuis le dossier courant ; le désigner retire
+          # une inconnue, d'autant que Flutter vient de réécrire ce projet.
+          xcode-project use-profiles --project ios/Runner.xcodeproj
+
+          # DIAGNOSTIC. Le build précédent a archivé en signature manuelle
+          # et s'est arrêté sur « Runner requires a provisioning profile »,
+          # alors que cette étape avait mis dix-sept secondes et produit son
+          # export_options.plist. Les deux faits ne peuvent pas être vrais en
+          # même temps : ces trois relevés diront lequel ment.
+          echo "===== profils installés ====="
+          ls -1 ~/Library/MobileDevice/Provisioning Profiles/ 2>/dev/null || echo "(aucun)"
+
+          echo "===== identités de signature ====="
+          security find-identity -v -p codesigning || true
+
+          echo "===== ce que le projet Xcode porte ====="
+          grep -n "PROVISIONING_PROFILE_SPECIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY" \
+            ios/Runner.xcodeproj/project.pbxproj | head -20 || echo "(aucun réglage de signature)"
 
           # Un contrôle, parce que cette étape est déjà passée au vert en une
           # seconde sans rien produire. Un échec silencieux ici se découvre
