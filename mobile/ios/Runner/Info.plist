@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- L’appareil photo et la photothèque : la recherche par photo les
+	     utilise tous les deux, le client choisit lequel. Sans ces deux
+	     clés, iOS termine l’application à l’instant où elle demande
+	     l’accès, et Apple refuse le téléversement du binaire. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Pour photographier un produit et le retrouver dans le catalogue Tovo.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Pour chercher un produit à partir d’une photo déjà enregistrée sur votre téléphone.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Pour dicter votre commande à l’assistant Tovo plutôt que de la taper.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
