@@ -65,6 +65,27 @@ workflows:
         # APK Android, dont la numérotation n'a jamais suivi celle d'iOS.
         NOM_VERSION: 4.1.0
 
+      # SIGNATURE AUTOMATIQUE, une fois le certificat déposé dans Codemagic.
+      #
+      # Le build précédent a buté sur « Cannot save Signing Certificates
+      # without certificate private key ». La cause est simple : un
+      # certificat de distribution ne s'utilise qu'avec la clé privée qui a
+      # servi à le demander. Apple ne la redonne jamais — elle vit sur le Mac
+      # qui a créé le certificat, et aucune API ne la restitue.
+      #
+      # `fetch-signing-files --create` ne pouvait donc ni récupérer le
+      # certificat existant, ni en fabriquer un. Il a produit un
+      # export_options.plist vide, et l'archive a échoué trois étapes plus
+      # loin sur « Runner requires a provisioning profile ».
+      #
+      # La parade tient en un clic, côté Codemagic : Settings > Code signing
+      # identities > iOS certificates > « Generate certificate ». Codemagic
+      # crée le certificat chez Apple ET garde la clé privée. Ces deux lignes
+      # lui disent alors quoi signer ; il s'occupe du profil.
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.tovoapp.UserApp
+
     integrations:
       # Une clé API App Store Connect appartient à un COMPTE Apple, jamais à
       # une app : elle ouvre toutes celles de l'équipe. Les deux clés
@@ -125,33 +146,13 @@ workflows:
             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
             --dart-define=API_BASE_URL="$API_BASE_URL"
 
-      - name: Certificat et profil de signature
+      # AUCUNE ÉTAPE DE SIGNATURE ICI. Codemagic signe avant les scripts,
+      # à partir du bloc `ios_signing` et du certificat qu'il conserve.
+      # Le faire à la main demandait une clé privée que personne ne possède.
+      - name: Relever la signature en place
         script: |
-          # `keychain initialize` EN PREMIER : il crée le trousseau dans
-          # lequel le certificat va atterrir.
-          keychain initialize
-
-          # `--create` est le mot important. Le bloc `ios_signing` de
-          # Codemagic CHERCHE un profil sans en créer : le premier build a
-          # échoué sur « No matching profiles found for bundle identifier
-          # com.tovoapp.UserApp ». Celle-ci le crée, et récupère au passage
-          # le certificat de distribution.
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create
-
-          keychain add-certificates
-
-          # `--project` EXPLICITE. Par défaut, `use-profiles` cherche
-          # `**/*.xcodeproj` depuis le dossier courant ; le désigner retire
-          # une inconnue, d'autant que Flutter vient de réécrire ce projet.
-          xcode-project use-profiles --project ios/Runner.xcodeproj
-
-          # DIAGNOSTIC. Le build précédent a archivé en signature manuelle
-          # et s'est arrêté sur « Runner requires a provisioning profile »,
-          # alors que cette étape avait mis dix-sept secondes et produit son
-          # export_options.plist. Les deux faits ne peuvent pas être vrais en
-          # même temps : ces trois relevés diront lequel ment.
+          # Ces trois relevés ont été ajoutés après cinq builds passés à
+          # déduire. Ils coûtent deux secondes et disent la vérité.
           echo "===== profils installés ====="
           ls -1 ~/Library/MobileDevice/Provisioning Profiles/ 2>/dev/null || echo "(aucun)"
 
@@ -159,15 +160,18 @@ workflows:
           security find-identity -v -p codesigning || true
 
           echo "===== ce que le projet Xcode porte ====="
-          grep -n "PROVISIONING_PROFILE_SPECIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY" \
-            ios/Runner.xcodeproj/project.pbxproj | head -20 || echo "(aucun réglage de signature)"
+          grep -n "PROVISIONING_PROFILE_SPECIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE" \
+            ios/Runner.xcodeproj/project.pbxproj | head -12 || echo "(aucun réglage)"
 
-          # Un contrôle, parce que cette étape est déjà passée au vert en une
-          # seconde sans rien produire. Un échec silencieux ici se découvre
-          # deux minutes plus tard, dans un message qui conseille d'ouvrir un
-          # Mac — ce qui n'aide personne.
-          if [ ! -f /Users/builder/export_options.plist ]; then
-            echo "Aucun export_options.plist : la signature n'a rien produit." >&2
+          # LE CONTRÔLE QUI MANQUAIT. J'avais vérifié que
+          # export_options.plist EXISTE ; il existe toujours, même vide —
+          # « Provisioning Profiles: [] », « Team Id: » — et le build a
+          # continué trois étapes de plus avant d'échouer. On vérifie
+          # désormais qu'une identité de signature est réellement là.
+          if ! security find-identity -v -p codesigning | grep -q "Apple Distribution|iPhone Distribution"; then
+            echo "Aucun certificat de distribution dans le trousseau." >&2
+            echo "À faire une fois : Codemagic > Settings > Code signing" >&2
+            echo "identities > iOS certificates > Generate certificate." >&2
             exit 1
           fi
 
