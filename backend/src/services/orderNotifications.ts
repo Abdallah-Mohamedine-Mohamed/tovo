@@ -129,6 +129,57 @@ export async function notifierBoutique(orderId: string): Promise<void> {
 }
 
 /**
+ * Prévient les livreurs qu'une commande vient d'entrer en préparation.
+ *
+ * Ce n'est pas encore un dispatch : aucun livreur ne peut l'accepter avant
+ * le statut `ready`. L'objectif est de rendre la demande visible tout de
+ * suite, y compris lorsque l'app livreur dort en arrière-plan.
+ */
+export async function notifierLivreursCommandeRecue(orderId: string): Promise<void> {
+  const db = serviceClient();
+  const { data: commande } = await db
+    .from('orders')
+    .select('id, zone_id, total, merchant_id, merchants(name)')
+    .eq('id', orderId)
+    .maybeSingle();
+
+  if (!commande) return;
+
+  const { data: profils } = await db
+    .from('driver_profiles')
+    .select('id, zone_id')
+    .eq('is_online', true)
+    .eq('is_available', true);
+
+  const ids = (profils ?? [])
+    .filter((profil) =>
+      profil.zone_id == null || commande.zone_id == null || profil.zone_id === commande.zone_id)
+    .map((profil) => profil.id as string);
+
+  if (ids.length === 0) return;
+
+  const { data: lignes } = await db
+    .from('push_tokens')
+    .select('token')
+    .eq('app', 'driver')
+    .in('user_id', ids)
+    .gt('last_seen_at', new Date(Date.now() - 60 * 24 * 60 * 60_000).toISOString());
+
+  const tokens = [...new Set((lignes ?? []).map((ligne) => ligne.token as string))];
+  if (tokens.length === 0) return;
+
+  const marchand = (commande.merchants as { name?: string } | null)?.name ?? 'une boutique';
+  const resultat = await sendPush(tokens.map((token) => ({
+    token,
+    title: 'Commande à venir',
+    body: `${marchand} · ${commande.total} F · en attente de confirmation`,
+    data: { order_id: orderId, kind: 'incoming_order', status: 'pending' },
+  })));
+
+  await purger(resultat.invalidTokens);
+}
+
+/**
  * Prévient le livreur qu'il vient de recevoir une course assignée à la main
  * par l'admin. Distinct du dispatch : ici la course lui est attribuée, il
  * n'a pas à courir pour l'obtenir.

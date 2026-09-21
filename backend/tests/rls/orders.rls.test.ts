@@ -57,6 +57,17 @@ describe('RLS — commandes', () => {
     expect(data).toHaveLength(1);
   });
 
+  it('le livreur voit aussi une commande de sa zone avant confirmation', async () => {
+    const pending = await seedOrder({
+      userId: client.id,
+      merchantId,
+      zoneId,
+      status: 'pending',
+    });
+    const { data } = await livreur.db.from('orders').select('id').eq('id', pending);
+    expect(data).toHaveLength(1);
+  });
+
   it("le livreur ne voit plus le pool d'une autre zone", async () => {
     const { data: zones } = await admin
       .from('delivery_zones')

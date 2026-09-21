@@ -203,6 +203,31 @@ describe('Exécution — du panier à la livraison', () => {
         .not.toContain(orderId);
   }, 60_000);
 
+  it('une commande non confirmée est visible mais pas encore prenable', async () => {
+    const orderId = await commander();
+
+    const pool = await app.inject({
+      method: 'GET',
+      url: '/driver/pool',
+      headers: auth(livreur),
+    });
+    expect(pool.statusCode).toBe(200);
+    const commande = (pool.json().orders as Array<{
+      id: string;
+      status: string;
+      can_accept: boolean;
+    }>).find((ordre) => ordre.id === orderId);
+    expect(commande).toMatchObject({ status: 'pending', can_accept: false });
+
+    const accept = await app.inject({
+      method: 'POST',
+      url: `/orders/${orderId}/accept`,
+      headers: auth(livreur),
+    });
+    expect(accept.statusCode).toBe(409);
+    expect(accept.json().code).toBe('NOT_READY');
+  }, 40_000);
+
   it('deux livreurs sur la même course : le second reçoit un 409 explicite', async () => {
     const orderId = await commander();
     await statut(boutiquier, orderId, 'confirmed');

@@ -16,10 +16,11 @@ import {
 import { embed, embedImage } from '../services/embeddings.js';
 import { serviceClient } from '../services/supabase.js';
 import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, merchantMenu, type CatalogueIntent } from '../services/catalogue.js';
-import { decrireImage } from '../services/vision.js';
+import { decrireImageDepuisOctets } from '../services/vision.js';
 import {
   demandeDeProximite,
   demandeDeRepas,
+  normaliserIntention,
 } from './intents.js';
 
 /**
@@ -102,6 +103,49 @@ function resumeProduit(p: ProductRow) {
     boutique: p.merchant_name,
     distance_m: p.distance_m,
   };
+}
+
+type PhotoEvidence = {
+  id: string;
+  name?: string | null;
+  description?: string | null;
+  image_description?: string | null;
+  tags?: string[] | null;
+};
+
+const PHOTO_STOP_WORDS = new Set(['de', 'du', 'des', 'le', 'la', 'les', 'un', 'une', 'avec', 'sans', 'et']);
+
+function photoWords(text: string): string[] {
+  return normaliserIntention(text).split(' ')
+    .filter((word) => word.length >= 3 && !PHOTO_STOP_WORDS.has(word))
+    .map((word) => word.replace(/s$/, ''));
+}
+
+/**
+ * Une proximité visuelle n'est qu'un candidat. L'objet reconnu doit aussi
+ * apparaître dans les données du produit : une montre ne devient jamais un
+ * plat de mouton sous prétexte que leurs photos ont des couleurs proches.
+ */
+export function filtrerProduitsPhoto(
+  motsCles: string,
+  produits: ProductRow[],
+  preuves: PhotoEvidence[] = [],
+): ProductRow[] {
+  const demande = photoWords(motsCles);
+  const objet = demande[0];
+  if (!objet) return [];
+  const parId = new Map(preuves.map((preuve) => [preuve.id, preuve]));
+
+  return produits.filter((produit) => {
+    const preuve = parId.get(produit.id);
+    const texte = [
+      produit.name, produit.description, preuve?.name, preuve?.description,
+      preuve?.image_description, preuve?.tags?.join(' '),
+    ].filter(Boolean).join(' ');
+    const motsProduit = new Set(photoWords(texte));
+    if (motsProduit.has(objet)) return true;
+    return demande.slice(1).filter((word) => motsProduit.has(word)).length >= 2;
+  });
 }
 
 // =====================================================================
@@ -319,13 +363,29 @@ const rechercherParImage: Executor = async (args, ctx) => {
     .storage.from('search-images')
     .download(chemin);
 
-  if (!erreurFichier && fichier) {
-    try {
-      const octets = Buffer.from(await fichier.arrayBuffer());
-      const vecteur = await embedImage(octets, fichier.type || 'image/jpeg');
+  if (erreurFichier || !fichier) {
+    return { summary: { erreur: 'image introuvable' }, components: [] };
+  }
 
+  let motsCles = '';
+  let erreurVision: string | undefined;
+  const octets = Buffer.from(await fichier.arrayBuffer());
+  const mime = fichier.type || 'image/jpeg';
+  const [description, embedding] = await Promise.allSettled([
+    decrireImageDepuisOctets(octets, mime),
+    embedImage(octets, mime),
+  ]);
+
+  if (description.status === 'fulfilled') {
+    motsCles = description.value.trim();
+  } else {
+    erreurVision = description.reason instanceof Error ? description.reason.message : 'image illisible';
+  }
+
+  if (embedding.status === 'fulfilled' && motsCles) {
+    try {
       const { data, error } = await ctx.db.rpc('search_by_photo', {
-        query_embedding: JSON.stringify(vecteur),
+        query_embedding: JSON.stringify(embedding.value),
         origin_lat: pos?.lat ?? null,
         origin_lng: pos?.lng ?? null,
         radius_m: null,
@@ -333,7 +393,12 @@ const rechercherParImage: Executor = async (args, ctx) => {
       });
       if (error) throw error;
 
-      const produits = ((data ?? []) as Record<string, unknown>[]).map(versProductRow);
+      const candidats = ((data ?? []) as Record<string, unknown>[]).map(versProductRow);
+      const { data: preuves } = candidats.length === 0 ? { data: [] } : await ctx.db
+        .from('products')
+        .select('id, name, description, image_description, tags')
+        .in('id', candidats.map((produit) => produit.id));
+      const produits = filtrerProduitsPhoto(motsCles, candidats, (preuves ?? []) as PhotoEvidence[]);
 
       if (produits.length > 0) {
         const meilleur = Number((data as Record<string, unknown>[])[0]?.['score'] ?? 0);
@@ -345,6 +410,7 @@ const rechercherParImage: Executor = async (args, ctx) => {
             // correspondance et le dire, au lieu de présenter une
             // approximation comme une trouvaille.
             ressemblance: meilleur.toFixed(2),
+            lu_sur_la_photo: motsCles,
             resultats: produits.length,
             produits: produits.map(resumeProduit),
           },
@@ -358,12 +424,9 @@ const rechercherParImage: Executor = async (args, ctx) => {
     }
   }
 
-  let motsCles: string;
-  try {
-    motsCles = (await decrireImage(chemin)).trim();
-  } catch (cause) {
+  if (!motsCles) {
     return {
-      summary: { erreur: cause instanceof Error ? cause.message : 'image illisible' },
+      summary: { erreur: erreurVision ?? 'image illisible' },
       components: [],
     };
   }
@@ -372,7 +435,7 @@ const rechercherParImage: Executor = async (args, ctx) => {
     return { summary: { recherche: 'par image', resultats: 0 }, components: [] };
   }
 
-  const produits = await chercherEnRaccourcissant(ctx, motsCles, pos);
+  const produits = await chercherEnRaccourcissant(ctx, motsCles);
 
   return {
     summary: {
@@ -403,26 +466,13 @@ const rechercherParImage: Executor = async (args, ctx) => {
 async function chercherEnRaccourcissant(
   ctx: ToolContext,
   motsCles: string,
-  pos: { lat: number; lng: number } | undefined,
 ): Promise<ReturnType<typeof versProductRow>[]> {
   const mots = motsCles.split(/\s+/).filter(Boolean);
 
   for (let n = mots.length; n >= 1; n--) {
     const requete = mots.slice(0, n).join(' ');
-    const { data, error } = await ctx.db.rpc('search_products', {
-      query_text: requete,
-      query_embedding: null,
-      origin_lat: pos?.lat ?? null,
-      origin_lng: pos?.lng ?? null,
-      radius_m: null,
-      filter_category: null,
-      match_count: null,
-    });
-
-    if (error) throw error;
-
-    const produits = ((data ?? []) as Record<string, unknown>[]).map(versProductRow);
-    if (produits.length > 0) return produits;
+    const page = await cataloguePage(ctx.db, { q: requete, limit: 8 }, false);
+    if (page.items.length > 0) return page.items;
   }
 
   return [];
@@ -468,7 +518,8 @@ const boutiquesProches: Executor = async (args, ctx) => {
 
   if (error) throw error;
 
-  const boutiques = (data ?? []) as Array<Record<string, unknown>>;
+  const boutiques = ((data ?? []) as Array<Record<string, unknown>>)
+    .filter((boutique) => boutique.is_open === true);
   if (boutiques.length === 0) return vide;
 
   return {

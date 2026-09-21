@@ -22,10 +22,26 @@ export function demandeDeProximite(texte: string): boolean {
   );
 }
 
+export function demandeBoutiqueOuverte(texte: string): boolean {
+  const normalise = normaliserIntention(texte);
+  return /\b(boutique|boutiques|enseigne|enseignes|commerce|commerces|restaurant|restaurants|resto|restos)\b/.test(normalise)
+    && /\b(ouvert|ouverte|ouverts|ouvertes|presentement|maintenant|actuellement)\b/.test(normalise);
+}
+
 export function nomBoutiqueApresMarqueur(texte: string): string | null {
-  return normaliserIntention(texte).match(
+  const candidat = normaliserIntention(texte).match(
     /\b(?:chez|boutique|enseigne|restaurant|resto)\s+(.+)$/,
   )?.[1] ?? null;
+  if (!candidat) return null;
+
+  // « une boutique ouverte présentement » décrit un besoin, pas une
+  // enseigne appelée « ouverte présentement ». Si une enseigne suit « sur »,
+  // on ne conserve que son vrai nom : « boutique ouverte sur Otakoss ».
+  if (/^(?:ouvert|ouverte|ouverts|ouvertes)\b/.test(candidat)) {
+    return candidat.match(/\bsur\s+(.+)$/)?.[1] ?? null;
+  }
+
+  return candidat;
 }
 
 const MOTS_REPAS_GENERAUX = new Set([

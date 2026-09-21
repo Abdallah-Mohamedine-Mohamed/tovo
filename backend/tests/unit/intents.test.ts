@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   boutiquesCorrespondantes,
   boutiquesMentionnees,
+  demandeBoutiqueOuverte,
   demandeDeProximite,
   demandeDeRepas,
   demandeGeneraleDeRepas,
@@ -31,6 +32,13 @@ describe('intentions de catalogue', () => {
   it('ne déduit la proximité que si le client la demande', () => {
     expect(demandeDeProximite("Cherche Garba d'Or dans le coin")).toBe(true);
     expect(demandeDeProximite("Montre les plats de Garba d'Or")).toBe(false);
+  });
+
+  it('distingue une demande de boutique ouverte de son nom', () => {
+    expect(demandeBoutiqueOuverte('Qu’importe, une boutique ouverte présentement')).toBe(true);
+    expect(nomBoutiqueApresMarqueur('Boutique ouverte présentement')).toBeNull();
+    expect(nomBoutiqueApresMarqueur('Boutique ouverte en ce moment sur Otakoss')).toBe('otakoss');
+    expect(nomBoutiqueApresMarqueur('Boutique Otakoss')).toBe('otakoss');
   });
 
   it('retrouve une enseigne même entourée de mots', () => {

@@ -2,7 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { toHttpFailure } from '../lib/errors.js';
 import { envelope, orderTracking } from '../components/builders.js';
-import { notifierBoutique } from '../services/orderNotifications.js';
+import {
+  notifierBoutique,
+  notifierLivreursCommandeRecue,
+} from '../services/orderNotifications.js';
 import { queueDispatch } from '../services/dispatch.js';
 import { ouvrirPaiement } from '../services/payments.js';
 import { paiementMobileActif } from '../config/env.js';
@@ -104,6 +107,9 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     if (body.data.type === 'delivery') {
       notifierBoutique(orderId as string).catch((cause) => {
         request.log.error({ cause, orderId }, 'notification boutique impossible');
+      });
+      notifierLivreursCommandeRecue(orderId as string).catch((cause) => {
+        request.log.error({ cause, orderId }, 'notification livreurs impossible');
       });
     } else if (!body.data.scheduled_for || new Date(body.data.scheduled_for) <= new Date()) {
       queueDispatch(orderId as string).catch((cause) => {

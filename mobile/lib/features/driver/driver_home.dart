@@ -306,6 +306,14 @@ class _CarteCourse extends StatelessWidget {
     final gain = (ordre['driver_earning'] as num?)?.toInt() ?? 0;
     final total = (ordre['total'] as num?)?.toInt() ?? 0;
     final coursier = ordre['type'] == 'courier';
+    final peutAccepter = ordre['can_accept'] == true;
+    final statut = ordre['status'] as String? ?? '';
+    final preparation = switch (statut) {
+      'pending' => 'En attente de la boutique',
+      'confirmed' => 'Acceptée par la boutique',
+      'preparing' => 'En préparation',
+      _ => null,
+    };
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -368,13 +376,37 @@ class _CarteCourse extends StatelessWidget {
               'En attente depuis ${ordre['attente_min']} min',
               style: const TextStyle(fontSize: 11, color: TovoTheme.inkDoux),
             ),
+          if (preparation != null) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(
+                  Icons.schedule_rounded,
+                  size: 17,
+                  color: TovoTheme.teal,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  preparation,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: TovoTheme.teal,
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
           FilledButton(
             style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-            onPressed: controller.acceptationEnCours(ordre['id'] as String)
+            onPressed: !peutAccepter || controller.acceptationEnCours(ordre['id'] as String)
                 ? null : () => controller.accepter(ordre),
-            child: Text(controller.acceptationEnCours(ordre['id'] as String)
-                ? 'Acceptation en cours' : 'Accepter'),
+            child: Text(!peutAccepter
+                ? 'Disponible dès qu’elle est prête'
+                : controller.acceptationEnCours(ordre['id'] as String)
+                    ? 'Acceptation en cours'
+                    : 'Accepter'),
           ),
         ],
       ),

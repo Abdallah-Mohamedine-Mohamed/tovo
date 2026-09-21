@@ -83,7 +83,9 @@ class DriverController extends ChangeNotifier {
     _ecouter();
     await refresh();
     _notifications = TovoPush.messagesEnAvantPlan().listen((message) {
-      if (message['kind'] == 'dispatch' || message['kind'] == 'assigned') {
+      if (message['kind'] == 'dispatch' ||
+          message['kind'] == 'assigned' ||
+          message['kind'] == 'incoming_order') {
         unawaited(refresh(silencieux: true));
       }
     });

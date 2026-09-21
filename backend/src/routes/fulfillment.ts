@@ -16,7 +16,8 @@ import { verifierPaiement } from '../services/payments.js';
  * `if` de ce fichier.
  *
  * Le dispatch se déclenche au passage à `ready` — le seul moment où une
- * commande devient prenable par un livreur.
+ * commande devient prenable par un livreur. Elle est toutefois visible
+ * avant cela afin que les livreurs puissent anticiper.
  */
 
 const statusSchema = z.object({
@@ -89,8 +90,8 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
-   * Pool des courses disponibles. La RLS fait le filtrage : un livreur ne
-   * voit que les commandes `ready` sans livreur, dans sa zone.
+   * Pool des courses visibles. La RLS filtre la zone ; `can_accept` sépare
+   * les commandes à venir de celles que le livreur peut réellement prendre.
    */
   app.get('/driver/pool', { preHandler: app.requireAuth }, async (request, reply) => {
     // Par la RPC et non par une requête directe : le seuil de fraîcheur
@@ -119,6 +120,32 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
     if (!params.success) return reply.code(400).send({ error: 'identifiant invalide' });
 
     const db = request.supabase!;
+
+    const { data: commande, error: lectureError } = await db
+      .from('orders')
+      .select('status, driver_id')
+      .eq('id', params.data.orderId)
+      .maybeSingle();
+
+    if (lectureError) {
+      const failure = toHttpFailure(lectureError);
+      return reply.code(failure.status).send(failure.body);
+    }
+
+    if (!commande || commande.driver_id) {
+      return reply.code(409).send({
+        error: 'course déjà prise',
+        code: 'ALREADY_TAKEN',
+      });
+    }
+
+    if (commande.status !== 'ready') {
+      return reply.code(409).send({
+        error: 'la commande n’est pas encore prête',
+        code: 'NOT_READY',
+      });
+    }
+
     const { data, error } = await db.rpc('accept_order', { target_order: params.data.orderId });
 
     if (error) {

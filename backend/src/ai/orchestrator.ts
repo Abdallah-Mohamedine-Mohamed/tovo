@@ -5,6 +5,7 @@ import { EXECUTORS, TOOL_DEFINITIONS, type ToolContext } from './tools.js';
 import { collectIds, sanitizeToolResult, validateComponents } from './validate.js';
 import { envelope, type ChatEnvelope, type Component } from '../components/builders.js';
 import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type PendingMerchantChoice } from '../services/catalogue.js';
+import { demandeBoutiqueOuverte } from './intents.js';
 
 /**
  * Boucle d'orchestration.
@@ -81,12 +82,38 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   const keyword = input.message.trim().split(/\s+/).length <= 4
     && !/[?]/.test(input.message)
     && !/\b(je|veux|manger|merci|bonjour|salut|oui|non|annule|commande|livreur|colis|panier|deuxieme|premier)\b/i.test(input.message);
-  const selectedBranch = previous.pending && intent?.merchants.length === 1 && intent.query === previous.pending.query;
+  const selectedBranch = Boolean(previous.pending
+    && intent?.merchants.length === 1
+    && intent.query === previous.pending.query);
   if (!direct && intent && (keyword || selectedBranch) && !input.audio) {
     const filter = { q: intent.query, limit: 8,
       merchant_ids: intent.merchants.length ? intent.merchants.map((merchant) => merchant.id) : undefined };
-    const page = await cataloguePage(input.db, filter);
-    direct = searchAnswer(page, filter);
+    // Une phrase courte n'est pas forcément un produit. « Tu es bête »
+    // partait directement dans la recherche sémantique et remontait des
+    // carottes. Le chemin instantané n'est permis que pour une correspondance
+    // littérale, une catégorie connue, ou le choix explicite d'une agence.
+    const page = await cataloguePage(input.db, filter, selectedBranch ? true : false);
+    if (page.total > 0 || page.category_id || selectedBranch) {
+      direct = searchAnswer(page, filter);
+    }
+  }
+  if (!direct && intent && !input.audio && input.position
+      && intent.merchants.length === 0 && !intent.missing
+      && demandeBoutiqueOuverte(input.message)) {
+    const ouvertes = await EXECUTORS.boutiques_proches!({}, {
+      db: input.db,
+      userId: input.userId,
+      currentMessage: input.message,
+      catalogueIntent: intent,
+      position: input.position,
+    });
+    direct = {
+      content: ouvertes.components.length > 0
+        ? 'Voici les boutiques ouvertes en ce moment.'
+        : "Je ne trouve aucune boutique ouverte autour de vous pour le moment.",
+      summary: ouvertes.summary as Record<string, unknown>,
+      components: ouvertes.components,
+    };
   }
   if (direct) {
     input.onEvent?.({ type: 'results', components: direct.components });

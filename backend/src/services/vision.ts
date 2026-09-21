@@ -105,6 +105,21 @@ export async function decrireImage(
     throw new VisionUnavailableError('image trop lourde');
   }
 
+  return decrireImageDepuisOctets(octets, data.type || 'image/jpeg');
+}
+
+/** Décrit des octets déjà téléchargés, pour ne pas relire Storage. */
+export async function decrireImageDepuisOctets(
+  octets: Buffer,
+  mimeType = 'image/jpeg',
+): Promise<string> {
+  if (!env.GEMINI_API_KEY) {
+    throw new VisionUnavailableError('GEMINI_API_KEY absente');
+  }
+  if (octets.byteLength > 4 * 1024 * 1024) {
+    throw new VisionUnavailableError('image trop lourde');
+  }
+
   const controleur = new AbortController();
   const delai = setTimeout(() => controleur.abort(), 20_000);
 
@@ -125,7 +140,7 @@ export async function decrireImage(
                 { text: CONSIGNE },
                 {
                   inlineData: {
-                    mimeType: data.type || 'image/jpeg',
+                    mimeType,
                     data: octets.toString('base64'),
                   },
                 },

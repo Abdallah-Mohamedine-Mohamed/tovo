@@ -7,13 +7,19 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import Fastify from 'fastify';
 import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, requeteSansEnseigne, type CataloguePage } from '../../src/services/catalogue.js';
 import { catalogRoutes } from '../../src/routes/catalog.js';
-import { EXECUTORS } from '../../src/ai/tools.js';
+import { EXECUTORS, filtrerProduitsPhoto } from '../../src/ai/tools.js';
 import { orchestrate } from '../../src/ai/orchestrator.js';
+
+const llmGenerate = vi.hoisted(() => vi.fn(async () => ({
+  text: 'Je suis là pour vous aider. Que souhaitez-vous chercher ?',
+  toolCalls: [],
+  usage: { input: 1, output: 1, cached: 0 },
+})));
 
 vi.mock('../../src/services/embeddings.js', () => ({ embeddingsEnabled: true, embed: vi.fn(async () => Array(1536).fill(0)), embedImage: vi.fn() }));
 vi.mock('../../src/services/supabase.js', () => ({ anonClient: () => adapter, serviceClient: () => adapter }));
 vi.mock('../../src/ai/llmClient.js', () => ({
-  llmClient: () => { throw new Error('Cette demande de catalogue ne nécessite pas le modèle'); },
+  llmClient: () => ({ model: 'test', generate: llmGenerate }),
   LlmUnavailableError: class extends Error {},
 }));
 
@@ -83,6 +89,13 @@ const adapter = {
       const result = await database.query('select category.id, category.name, null as icon, null as image_url, count(*)::int as produits from products product join categories category on category.id = product.category_id where product.merchant_id = $1 and product.is_available group by category.id, category.name order by category.name', [args.p_merchant_id]);
       return { data: result.rows, error: null };
     }
+    if (name === 'nearby_merchants') return {
+      data: merchants.filter((merchant) => merchant.is_approved).map((merchant, index) => ({
+        ...merchant, description: null, logo_url: null, address_hint: 'Niamey',
+        rating: 5, prep_time_min: 15, distance_m: (index + 1) * 100,
+      })),
+      error: null,
+    };
     if (name === 'merchant_open_now') return { data: merchants.find((merchant) => merchant.id === args.p_merchant_id)?.is_open, error: null };
     throw new Error(`Unexpected RPC: ${name}`);
   },
@@ -139,6 +152,25 @@ describe('catalogue complet', () => {
     });
     expect(answer.components).toEqual([]);
     expect(answer.summary).toMatchObject({ total: 0 });
+  });
+
+  it('rejette les candidats visuels qui ne sont pas le même objet', () => {
+    const produits = [
+      { id: 'mouton', name: 'Soupe de mouton', description: 'Plat épicé', image_url: null,
+        price: 4000, is_available: true, merchant_id: garba, merchant_name: "GARBA D'OR" },
+      { id: 'dw', name: 'Daniel Wellington Classic', description: 'Montre carrée noire', image_url: null,
+        price: 25000, is_available: true, merchant_id: centre, merchant_name: "O'TAKOSS" },
+    ];
+    expect(filtrerProduitsPhoto('montre Daniel Wellington carrée noire', produits).map((p) => p.id)).toEqual(['dw']);
+  });
+
+  it('ne transforme pas une phrase de conversation en recherche de produits', async () => {
+    llmGenerate.mockClear();
+    const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),
+      clientMessageId: randomUUID(), message: 'Tu es bête' });
+    expect(llmGenerate.mock.calls.length, JSON.stringify(answer)).toBe(1);
+    expect(answer.components).toEqual([]);
+    expect(answer.content).toContain('vous aider');
   });
 
   it('parcourt toutes les pages de poulet sans doublon ni plafond de 8 ou 60', async () => {
@@ -198,6 +230,25 @@ describe('catalogue complet', () => {
     const intent = await resolveCatalogueIntent(adapter, message);
     const answer = await merchantIntentAnswer(adapter, intent);
     expect(answer?.components.map((component) => component.data.id).sort()).toEqual([centre, marche].sort());
+  });
+
+  it('comprend « boutique ouverte sur Otakoss » sans inventer une enseigne', async () => {
+    const intent = await resolveCatalogueIntent(adapter, 'Boutique ouverte en ce moment sur Otakoss');
+    expect(intent.openOnly).toBe(true);
+    expect(intent.menu).toBe(true);
+    expect(intent.merchants.map((merchant) => merchant.id)).toEqual([centre]);
+    expect((await merchantIntentAnswer(adapter, intent))?.components
+      .find((component) => component.type === 'merchant_card')?.data.id).toBe(centre);
+  });
+
+  it('répond immédiatement avec les boutiques réellement ouvertes', async () => {
+    const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),
+      clientMessageId: randomUUID(), message: "Qu'importe. Une boutique ouverte", position: { lat: 13.5, lng: 2.1 } });
+    expect(answer.usage.cycles).toBe(0);
+    expect(answer.content).toContain('boutiques ouvertes');
+    expect(answer.components.length).toBeGreaterThan(0);
+    expect(answer.components.every((component) => component.type === 'merchant_card' && component.data.is_open === true)).toBe(true);
+    expect(answer.components.map((component) => component.data.id)).not.toContain(marche);
   });
 
   it('ouvre les catégories de toute la carte, même si le modèle demande tacos', async () => {

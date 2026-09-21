@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { boutiquesCorrespondantes, normaliserIntention, nomBoutiqueApresMarqueur } from '../ai/intents.js';
+import { boutiquesCorrespondantes, boutiquesMentionnees, demandeBoutiqueOuverte, normaliserIntention, nomBoutiqueApresMarqueur } from '../ai/intents.js';
 import { categoryGrid, merchantCard, productCarousel, type Component, type MerchantRow, type ProductRow } from '../components/builders.js';
 import { embed, embeddingsEnabled } from './embeddings.js';
 
@@ -24,6 +24,8 @@ export interface CatalogueIntent {
   merchants: MerchantRow[];
   query: string;
   menu: boolean;
+  openOnly?: boolean;
+  noneOpen?: boolean;
   missing?: string;
 }
 
@@ -68,7 +70,7 @@ export async function cataloguePage(db: SupabaseClient, filter: CatalogueFilter,
   let response = await db.rpc('catalog_products_page', parameters);
   if (response.error) throw response.error;
   let page = response.data as CataloguePage;
-  if (page.total === 0 && parameters.p_query && semantic && embeddingsEnabled) {
+  if (page.total === 0 && parameters.p_query) {
     const normalizedQuery = normaliserIntention(parameters.p_query);
     const singleWord = normalizedQuery.length > 0 && !normalizedQuery.includes(' ');
     if (!parameters.p_category && singleWord) {
@@ -82,8 +84,15 @@ export async function cataloguePage(db: SupabaseClient, filter: CatalogueFilter,
       const category = exact.length === 1 ? exact[0] : matches.length === 1 ? matches[0] : undefined;
       if (category) parameters.p_category = category.id as string;
     }
-    const vector = singleWord && !parameters.p_category ? null
-      : await embed(parameters.p_query, 'query').catch(() => null);
+    if (parameters.p_category) {
+      response = await db.rpc('catalog_products_page', { ...parameters, p_query: '', p_embedding: null });
+      if (response.error) throw response.error;
+      page = response.data as CataloguePage;
+      page.category_id = parameters.p_category;
+      return page;
+    }
+    const vector = semantic && embeddingsEnabled && !singleWord
+      ? await embed(parameters.p_query, 'query').catch(() => null) : null;
     if (vector) {
       response = await db.rpc('catalog_products_page', { ...parameters, p_embedding: JSON.stringify(vector) });
       if (response.error) throw response.error;
@@ -105,8 +114,11 @@ export async function resolveCatalogueIntent(db: SupabaseClient, message: string
     if ((data?.length ?? 0) < 500) break;
   }
   const marker = nomBoutiqueApresMarqueur(message);
+  const openOnly = demandeBoutiqueOuverte(message);
   const productQuery = normaliserIntention(message).split(' ').filter((word) => !MENU_WORDS.has(word)).join(' ');
-  let candidates = boutiquesCorrespondantes(marker ?? message, catalogue);
+  let candidates = marker
+    ? boutiquesCorrespondantes(marker, catalogue)
+    : boutiquesMentionnees(message, catalogue);
   if (!marker && candidates.length === 0 && productQuery) {
     candidates = boutiquesCorrespondantes(productQuery, catalogue);
   }
@@ -125,6 +137,11 @@ export async function resolveCatalogueIntent(db: SupabaseClient, message: string
   if (!marker) {
     const exactProducts = productQuery ? await cataloguePage(db, { q: productQuery, limit: 1 }, false) : null;
     if (exactProducts && exactProducts.total > 0) return { merchants: [], query: message, menu: false };
+  }
+  if (openOnly) {
+    const opened = candidates.filter((merchant) => merchant.is_open);
+    return { merchants: opened.length > 0 ? opened : candidates, query: '', menu: true,
+      openOnly: true, ...(opened.length === 0 ? { noneOpen: true } : {}) };
   }
   const query = requeteSansEnseigne(message, candidates);
   return { merchants: candidates, query, menu: query.length === 0 };
@@ -169,13 +186,25 @@ export async function merchantIntentAnswer(db: SupabaseClient, intent: Catalogue
     content: `Je ne trouve pas l’enseigne **${intent.missing}**. Pouvez-vous préciser son nom ?`,
     summary: { boutique_introuvable: intent.missing }, components: [],
   };
+  if (intent.noneOpen) return {
+    content: "Aucune adresse de cette enseigne n'est ouverte en ce moment.",
+    summary: { boutiques_ouvertes: 0 },
+    components: intent.merchants.map(merchantCard),
+  };
   if (intent.merchants.length > 1) return {
-    content: 'Quelle adresse choisissez-vous ? Voici les établissements de cette enseigne.',
+    content: intent.openOnly
+      ? 'Voici les adresses ouvertes de cette enseigne. Laquelle choisissez-vous ?'
+      : 'Quelle adresse choisissez-vous ? Voici les établissements de cette enseigne.',
     summary: { choix_enseigne_requis: true, boutiques: intent.merchants.map(({ id, name }) => ({ id, nom: name })) },
     components: intent.merchants.map((merchant) => {
       const card = merchantCard(merchant);
       return { ...card, data: { ...card.data, pending_query: intent.query, choose_branch: true } };
     }),
+  };
+  if (intent.openOnly && intent.merchants[0]) return {
+    content: `**${intent.merchants[0].name}** est ouverte en ce moment.`,
+    summary: { boutiques_ouvertes: 1, boutique: intent.merchants[0].name },
+    components: [merchantCard(intent.merchants[0])],
   };
   if (intent.menu && intent.merchants[0]) return merchantMenu(db, intent.merchants[0].id);
   return null;
