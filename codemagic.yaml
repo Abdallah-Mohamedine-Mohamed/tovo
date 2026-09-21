@@ -146,43 +146,38 @@ workflows:
             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
             --dart-define=API_BASE_URL="$API_BASE_URL"
 
-      # AUCUNE ÉTAPE DE SIGNATURE ICI. Codemagic signe avant les scripts,
-      # à partir du bloc `ios_signing` et du certificat qu'il conserve.
-      # Le faire à la main demandait une clé privée que personne ne possède.
-      - name: Relever la signature en place
+      # LA SIGNATURE SE RÉAPPLIQUE ICI, APRÈS LES MIGRATIONS.
+      #
+      # Codemagic signe avant les scripts, à partir du bloc `ios_signing` :
+      # il télécharge le certificat et le profil, et configure le projet.
+      # Puis `flutter build ios --config-only` réécrit project.pbxproj pour
+      # ses migrations, et remet CODE_SIGN_STYLE à Automatic — le relevé du
+      # build précédent le montrait noir sur blanc, trois fois.
+      #
+      # `use-profiles` repose les réglages sur le projet stabilisé, et
+      # produit au passage /Users/builder/export_options.plist, que
+      # `xcode-project build-ipa` attend par défaut et qui manquait.
+      - name: Appliquer la signature au projet
         script: |
-          # Ces trois relevés ont été ajoutés après cinq builds passés à
-          # déduire. Ils coûtent deux secondes et disent la vérité.
-          echo "===== profils installés ====="
-          ls -1 ~/Library/MobileDevice/Provisioning Profiles/ 2>/dev/null || echo "(aucun)"
+          xcode-project use-profiles --project ios/Runner.xcodeproj
+
+          echo "===== profils trouvés ====="
+          ls -1 ~/Library/MobileDevice/Provisioning Profiles/ 2>/dev/null
+          ls -1 ~/Library/Developer/Xcode/UserData/Provisioning Profiles/ 2>/dev/null
 
           echo "===== identités de signature ====="
           security find-identity -v -p codesigning || true
 
-          echo "===== ce que le projet Xcode porte ====="
+          echo "===== ce que le projet porte désormais ====="
           grep -nE "PROVISIONING_PROFILE_SPECIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE" \
-            ios/Runner.xcodeproj/project.pbxproj | head -12 || echo "(aucun réglage)"
+            ios/Runner.xcodeproj/project.pbxproj | head -12
 
-          # LE CONTRÔLE QUI MANQUAIT. J'avais vérifié que
-          # export_options.plist EXISTE ; il existe toujours, même vide —
-          # « Provisioning Profiles: [] », « Team Id: » — et le build a
-          # continué trois étapes de plus avant d'échouer. On vérifie
-          # désormais qu'une identité de signature est réellement là.
-                    # `grep -E`, ET NON `grep` seul.
-          #
-          # macOS embarque le grep BSD. En expression BASIQUE, le « | » est
-          # un caractère ordinaire : le motif était cherché littéralement,
-          # barres verticales comprises. Mon test a donc conclu qu’aucune
-          # identité n’existait, alors que le relevé juste au-dessus affichait
-          # « Apple Distribution: Tayp LTD (BBZUWL4Q4P) — 1 valid identities
-          # found ».
-          #
-          # Un garde-fou qui se trompe coûte plus cher que pas de garde-fou :
-          # celui-ci a arrêté un build qui aurait abouti.
-          if ! security find-identity -v -p codesigning | grep -Eq "Apple Distribution|iPhone Distribution"; then
-            echo "Aucun certificat de distribution dans le trousseau." >&2
-            echo "À faire une fois : Codemagic > Settings > Code signing" >&2
-            echo "identities > iOS certificates > Generate certificate." >&2
+          # ON VÉRIFIE LE CONTENU, PAS L’EXISTENCE. Un premier contrôle se
+          # contentait de la présence du fichier ; il est toujours écrit,
+          # même vide — « Provisioning Profiles: [] », « Team Id: » — et le
+          # build continuait trois étapes de plus avant d’échouer.
+          if ! grep -q "provisioningProfiles" /Users/builder/export_options.plist 2>/dev/null; then
+            echo "export_options.plist sans profil : la signature n'a pas pris." >&2
             exit 1
           fi
 
