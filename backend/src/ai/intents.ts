@@ -17,7 +17,7 @@ const MOTS_RECHERCHE_VIDES = new Set([
   'qu', 'que', 'quel', 'quelle', 'quelles', 'quels', 'quoi', 'recherche',
   'rechercher', 'soit', 'souhaite', 'svp', 'toutes', 'tous', 'trouve',
   'trouver', 'tu', 'un', 'une', 'veut', 'veux', 'voir', 'voudrais', 'vous',
-  'y', 'acheter', 'article', 'articles',
+  'y', 'acheter', 'article', 'articles', 'mais', 'c', 'ca', 'cela',
 ]);
 
 /**

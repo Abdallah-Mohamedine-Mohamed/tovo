@@ -93,7 +93,7 @@ class _CourierFormState extends State<CourierForm> {
 
   Future<void> _utiliserMaPosition(_PointColis point) async {
     setState(() => _localisationEnCours = true);
-    final position = await TovoLocation.current();
+    final position = await TovoLocation.current(requestPermission: true);
     if (!mounted) return;
 
     setState(() {

@@ -13,22 +13,23 @@ class TovoLocation {
   static const double niameyLat = 13.5137;
   static const double niameyLng = 2.1098;
 
+  static Future<bool> ensurePermission({bool requestPermission = false}) async {
+    if (!await Geolocator.isLocationServiceEnabled()) return false;
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied && requestPermission) {
+      permission = await Geolocator.requestPermission();
+    }
+    return permission == LocationPermission.whileInUse ||
+        permission == LocationPermission.always;
+  }
+
   /// Renvoie la position, ou `null` si elle n'est pas obtenable.
   ///
   /// On ne renvoie jamais une position par défaut en cas d'échec : livrer au
   /// centre-ville quelqu'un qui habite Talladjé est pire que de lui demander
   /// d'activer sa localisation.
-  static Future<Position?> current() async {
-    if (!await Geolocator.isLocationServiceEnabled()) return null;
-
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
-      return null;
-    }
+  static Future<Position?> current({bool requestPermission = false}) async {
+    if (!await ensurePermission(requestPermission: requestPermission)) return null;
 
     try {
       return await Geolocator.getCurrentPosition(
@@ -40,7 +41,7 @@ class TovoLocation {
         ),
       );
     } on Exception {
-      return await Geolocator.getLastKnownPosition();
+      return requestPermission ? null : await Geolocator.getLastKnownPosition();
     }
   }
 }

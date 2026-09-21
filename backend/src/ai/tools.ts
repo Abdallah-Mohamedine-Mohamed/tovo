@@ -151,8 +151,10 @@ export function filtrerProduitsPhoto(
       preuve?.image_description, preuve?.tags?.join(' '),
     ].filter(Boolean).join(' ');
     const motsProduit = new Set(photoWords(texte));
-    if (motsProduit.has(objet)) return true;
-    return demande.slice(1).filter((word) => motsProduit.has(word)).length >= 2;
+    if (!motsProduit.has(objet)) return false;
+    const qualificatifs = demande.slice(1).filter((word) =>
+      !['rouge', 'noir', 'blanc', 'bleu', 'vert', 'jaune', 'grand', 'petit'].includes(word));
+    return qualificatifs.length === 0 || qualificatifs.some((word) => motsProduit.has(word));
   });
 }
 
@@ -356,6 +358,7 @@ const rechercherProduits: Executor = async (args, ctx) => {
 
 const rechercherParImage: Executor = async (args, ctx) => {
   const chemin = texte(args, 'image_path');
+  const indication = texte(args, 'caption').slice(0, 180);
   if (!chemin) return vide;
 
   // LA PHOTO EST COMPARÉE AUX PHOTOS DU CATALOGUE, avec les mots-clés en
@@ -391,7 +394,7 @@ const rechercherParImage: Executor = async (args, ctx) => {
   const octets = Buffer.from(await fichier.arrayBuffer());
   const mime = fichier.type || 'image/jpeg';
   const [description, embedding] = await Promise.allSettled([
-    decrireImageDepuisOctets(octets, mime),
+    decrireImageDepuisOctets(octets, mime, indication),
     embedImage(octets, mime),
   ]);
 
@@ -496,7 +499,8 @@ async function chercherEnRaccourcissant(
   for (let n = mots.length; n >= 1; n--) {
     const requete = mots.slice(0, n).join(' ');
     const page = await cataloguePage(ctx.db, { q: requete, limit: 8 }, false);
-    if (page.items.length > 0) return page.items;
+    const compatibles = filtrerProduitsPhoto(motsCles, page.items);
+    if (compatibles.length > 0) return compatibles;
   }
 
   return [];

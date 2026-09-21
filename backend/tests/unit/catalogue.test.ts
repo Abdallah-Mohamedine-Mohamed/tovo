@@ -210,6 +210,31 @@ describe('catalogue complet', () => {
     expect(filtrerProduitsPhoto('montre Daniel Wellington carrée noire', produits).map((p) => p.id)).toEqual(['dw']);
   });
 
+  it('ne confond pas un casque de moto avec un casque audio', () => {
+    const produits = [
+      { id: 'audio', name: 'Casque Oraimo Bluetooth', description: 'Casque audio', image_url: null,
+        price: 9000, is_available: true, merchant_id: centre, merchant_name: 'Audio' },
+      { id: 'moto', name: 'Casque de moto rouge', description: 'Protection moto', image_url: null,
+        price: 15000, is_available: true, merchant_id: centre, merchant_name: 'Moto' },
+    ];
+    expect(filtrerProduitsPhoto('casque moto rouge', produits).map((p) => p.id)).toEqual(['moto']);
+  });
+
+  it('comprend une correction après une photo sans chercher les mots de liaison', async () => {
+    const conversationId = randomUUID();
+    messages.push(
+      { conversation_id: conversationId, role: 'user', content: '📷 Photo envoyée' },
+      { conversation_id: conversationId, role: 'assistant', content: 'Voici des casques', components: [] },
+    );
+    llmGenerate.mockClear();
+    const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId,
+      clientMessageId: randomUUID(), message: 'Mais c’est un casque de moto ça' });
+    expect(answer.content).toContain('mal interprété la photo');
+    expect(answer.content).toContain('casque moto');
+    expect(answer.components).toEqual([]);
+    expect(llmGenerate).not.toHaveBeenCalled();
+  });
+
   it('ne transforme pas une phrase de conversation en recherche de produits', async () => {
     llmGenerate.mockClear();
     const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),

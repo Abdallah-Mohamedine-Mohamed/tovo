@@ -89,7 +89,7 @@ function interactionEnMessage(action: string, payload: Record<string, unknown>):
     case 'open_cart':
       return 'Montre-moi mon panier.';
     case 'search_by_image':
-      return `J'ai envoyé une photo, cherche ce produit. image_path : ${payload.image_path}`;
+      return `J'ai envoyé une photo, cherche ce produit. image_path : ${payload.image_path}${legendePhoto(payload) ? ` ; indication : ${legendePhoto(payload)}` : ''}`;
     case 'compare_price':
       return `Compare les prix pour : ${payload.query}.`;
     case 'quick_reply': {
@@ -113,6 +113,10 @@ function interactionEnMessage(action: string, payload: Record<string, unknown>):
   }
 }
 
+function legendePhoto(payload: Record<string, unknown>): string {
+  return typeof payload.caption === 'string' ? payload.caption.trim().slice(0, 2000) : '';
+}
+
 /**
  * Ce que le client relira dans son historique.
  *
@@ -129,7 +133,7 @@ function interactionEnMessage(action: string, payload: Record<string, unknown>):
 function libelleLisible(action: string, payload: Record<string, unknown>): string | null {
   switch (action) {
     case 'search_by_image':
-      return '📷 Photo envoyée';
+      return legendePhoto(payload) ? `📷 ${legendePhoto(payload)}` : '📷 Photo envoyée';
     case 'select_category':
     case 'select_product':
     case 'select_merchant':

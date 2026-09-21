@@ -92,6 +92,7 @@ describe('intentions de catalogue', () => {
   it('conserve le produit demandé sans les mots de conversation', () => {
     expect(requeteProduitUtilisateur('De la pommade')).toBe('pommade');
     expect(requeteProduitUtilisateur('Un bracelet ?')).toBe('bracelet');
+    expect(requeteProduitUtilisateur('Mais c’est un casque de moto ça')).toBe('casque moto');
     expect(requeteProduitUtilisateur('Avez-vous une autre montre, quelle que soit la marque ?'))
       .toBe('montre');
     expect(requeteProduitUtilisateur('Montre-moi un bracelet')).toBe('bracelet');

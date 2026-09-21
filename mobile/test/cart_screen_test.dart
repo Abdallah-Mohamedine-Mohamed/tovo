@@ -69,6 +69,39 @@ void main() {
       client: MockClient((request) async {
         requests.add(request);
         if (failure) return http.Response('{"error":"Hors ligne"}', 503);
+        if (request.url.path == '/addresses') {
+          return http.Response(
+            jsonEncode({
+              'addresses': [
+                {
+                  'id': 'maison',
+                  'label': 'Maison',
+                  'text_hint': 'Yantala, maison bleue',
+                  'lat': 13.5,
+                  'lng': 2.1,
+                  'is_default': true,
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/orders' && request.method == 'POST') {
+          return http.Response(
+            jsonEncode({'content': 'Commande enregistrée.', 'components': []}),
+            201,
+          );
+        }
+        if (request.url.path == '/cart' &&
+            request.url.queryParameters.containsKey('lat')) {
+          final data = jsonDecode(cart().body) as Map<String, dynamic>;
+          final summary =
+              (data['components'] as List).first['data']
+                  as Map<String, dynamic>;
+          summary['delivery_fee'] = 600;
+          summary['total'] = quantity * 3100 + 600;
+          return http.Response(jsonEncode(data), 200);
+        }
         if (request.method == 'PATCH') {
           if (pending != null) return pending!.future;
           quantity = jsonDecode(request.body)['quantity'] as int;
@@ -99,6 +132,40 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets(
+    'livraison, récapitulatif et confirmation restent dans le panier',
+    (tester) async {
+      await open(tester);
+      await tester.tap(find.text('Choisir la livraison'));
+      await tester.pumpAndSettle();
+      expect(find.text('Où livrer ?'), findsOneWidget);
+      expect(find.text('Maison'), findsOneWidget);
+      expect(
+        requests.where((request) => request.url.path == '/orders'),
+        isEmpty,
+      );
+
+      await tester.tap(find.text('Voir le récapitulatif'));
+      await tester.pumpAndSettle();
+      expect(find.text('Tout est prêt.'), findsOneWidget);
+      expect(find.text(Money.format(600)), findsOneWidget);
+      expect(find.text('Yantala, maison bleue'), findsOneWidget);
+      expect(
+        requests.where((request) => request.url.path == '/orders'),
+        isEmpty,
+      );
+
+      await tester.tap(find.text('Confirmer la commande'));
+      await tester.pumpAndSettle();
+      final orders = requests
+          .where((request) => request.url.path == '/orders')
+          .toList();
+      expect(orders, hasLength(1));
+      final body = jsonDecode(orders.single.body) as Map<String, dynamic>;
+      expect(body['dropoff_hint'], 'Yantala, maison bleue');
+      expect(body['payment_method'], 'cash');
+    },
+  );
   testWidgets(
     'quantité et prix serveur, livraison jamais présentée comme gratuite',
     (tester) async {

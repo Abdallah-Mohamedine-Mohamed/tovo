@@ -134,6 +134,10 @@ void main() {
             if (request.method == 'POST') {
               orderPosts++;
               orderBody = jsonDecode(request.body) as Map<String, dynamic>;
+              return http.Response(jsonEncode({
+                'content': 'Commande enregistrée.',
+                'components': [],
+              }), 201);
             }
             body = {'orders': []};
           case '/addresses':
@@ -388,7 +392,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Maison'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Espèces'));
+    await tester.tap(find.text('Voir le récapitulatif'));
     await tester.pumpAndSettle();
   }
 
@@ -421,7 +425,7 @@ void main() {
   visualTest('confirmation annulée : aucune commande ne part', (tester) async {
     await open(tester, ChatScreen(api: api));
     await checkout(tester);
-    await tester.tap(find.byTooltip('Annuler la confirmation'));
+    await tester.tap(find.byTooltip('Retour à la livraison'));
     await tester.pumpAndSettle();
     expect(orderPosts, 0);
     expect(find.text('Confirmer la commande'), findsNothing);

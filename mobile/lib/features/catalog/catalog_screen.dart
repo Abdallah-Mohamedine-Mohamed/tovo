@@ -213,14 +213,14 @@ class _CatalogScreenState extends State<CatalogScreen> {
   }
 
   Future<void> _openMerchant(String id) async {
-    final checkout = await Navigator.of(context).push<bool>(
+    final order = await Navigator.of(context).push<TovoResponse>(
       MaterialPageRoute(
         builder: (_) => CatalogScreen(api: widget.api, merchantId: id),
       ),
     );
     if (!mounted) return;
-    if (checkout == true) {
-      Navigator.of(context).pop(true);
+    if (order != null) {
+      Navigator.of(context).pop(order);
     } else {
       await _loadCart();
     }
@@ -241,12 +241,12 @@ class _CatalogScreenState extends State<CatalogScreen> {
   }
 
   Future<void> _openCart() async {
-    final checkout = await Navigator.of(context).push<bool>(
+    final order = await Navigator.of(context).push<TovoResponse>(
       MaterialPageRoute(builder: (_) => CartScreen(api: widget.api)),
     );
     if (!mounted) return;
-    if (checkout == true) {
-      Navigator.of(context).pop(true);
+    if (order != null) {
+      Navigator.of(context).pop(order);
     } else {
       await _loadCart();
     }

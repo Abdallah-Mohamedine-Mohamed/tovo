@@ -121,6 +121,12 @@ class DriverController extends ChangeNotifier {
     final id = _db.auth.currentUser?.id;
     if (id == null) return;
     _presenceEnCours = true;
+    if (valeur && !await TovoLocation.ensurePermission(requestPermission: true)) {
+      erreur = 'Activez la localisation pour recevoir des courses.';
+      _presenceEnCours = false;
+      notifyListeners();
+      return;
+    }
     _online = valeur;
     notifyListeners();
     try {

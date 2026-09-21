@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io' show File;
+import 'dart:isolate';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:image/image.dart' as image_lib;
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -16,6 +18,7 @@ import '../../core/location.dart';
 import '../../core/theme.dart';
 import '../../core/voix.dart';
 import 'conversations_drawer.dart';
+import 'photo_capture_sheet.dart';
 import '../catalog/catalog_screen.dart';
 import '../catalog/product_screen.dart';
 import '../catalog/cart_screen.dart';
@@ -41,22 +44,6 @@ class ChatScreen extends StatefulWidget {
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
-}
-
-/// Où livrer, une fois le choix fait.
-///
-/// Le repère écrit compte autant que les coordonnées : c'est lui que le
-/// livreur lit quand le GPS le pose au milieu du quartier.
-class _Destination {
-  const _Destination({
-    required this.repere,
-    required this.lat,
-    required this.lng,
-  });
-
-  final String repere;
-  final double lat;
-  final double lng;
 }
 
 class _Tour {
@@ -105,6 +92,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _voiceDraft = false;
   String? _voiceError;
   Map<String, dynamic>? _pendingAudio;
+  XFile? _photoDraft;
 
   /// Conservé entre deux tentatives : un rejeu après coupure doit présenter
   /// le MÊME identifiant, sinon l'idempotence ne sert à rien.
@@ -124,11 +112,6 @@ class _ChatScreenState extends State<ChatScreen> {
     unawaited(_demarrer());
   }
 
-  /// Le fil d'abord, la photo rescapée ensuite.
-  ///
-  /// L'ordre compte : la récupération ajoute un tour à la conversation, et
-  /// la reprise du fil, elle, la remplit depuis le serveur. Dans l'autre
-  /// sens, la photo récupérée serait écrasée avant même d'être vue.
   Future<void> _demarrer() async {
     final navigation = _navigation;
     await _accueil();
@@ -372,7 +355,10 @@ class _ChatScreenState extends State<ChatScreen> {
     Map<String, dynamic>? interaction,
   }) async {
     final navigation = _navigation;
-    setState(() => _charge = true);
+    setState(() {
+      _charge = true;
+      _reponseCommencee = false;
+    });
     final index = _tours.length;
     var partialText = '';
     List<TovoComponent> partialComponents = [];
@@ -621,8 +607,16 @@ class _ChatScreenState extends State<ChatScreen> {
   /// proximité. On ne la redemande pas à chaque message : le GPS coûte de la
   /// batterie et l'utilisateur ne se téléporte pas entre deux phrases.
   (double, double)? _position;
+  DateTime? _dernierRelevePosition;
 
   Future<void> _rafraichirPosition() async {
+    final maintenant = DateTime.now();
+    if (_dernierRelevePosition != null &&
+        maintenant.difference(_dernierRelevePosition!) <
+            const Duration(minutes: 5)) {
+      return;
+    }
+    _dernierRelevePosition = maintenant;
     final p = await TovoLocation.current();
     if (p != null && mounted) {
       setState(() => _position = (p.latitude, p.longitude));
@@ -720,7 +714,7 @@ class _ChatScreenState extends State<ChatScreen> {
         );
 
       case 'place_order':
-        _commander();
+        _ouvrirPanier();
 
       case 'submit_courier':
         _envoyerColis(p);
@@ -759,7 +753,7 @@ class _ChatScreenState extends State<ChatScreen> {
           // L'assistant a proposé « je livre chez vous, à … ? » et le client
           // a répondu. Redemander la destination juste après serait lui
           // reposer la question à laquelle il vient de répondre.
-          _commander(adresseChoisie: valeur.substring('adresse:'.length));
+          _ouvrirPanier(initialAddressId: valeur.substring('adresse:'.length));
         } else {
           _parler(interaction: {'action': 'quick_reply', 'payload': p});
         }
@@ -787,98 +781,75 @@ class _ChatScreenState extends State<ChatScreen> {
   // Recherche par photo
   // ------------------------------------------------------------------
 
-  /// Rattrape une photo prise juste avant qu'Android ne tue l'application.
-  ///
-  /// L'appareil photo est une activité séparée, et quand la mémoire manque —
-  /// le cas courant sur un téléphone d'entrée de gamme — le système détruit
-  /// Tovo pendant qu'elle est au premier plan. Au retour, l'application
-  /// redémarre : elle rouvre une conversation et la photo qu'on venait de
-  /// confirmer n'arrive nulle part. C'est très exactement ce qu'on observait
-  /// — « ça recharge sur une autre conversation et ne fait rien d'autre ».
-  ///
-  /// Android garde le fichier de côté ; encore faut-il le réclamer.
   Future<void> _recupererPhotoPerdue() async {
     try {
       final perdue = await ImagePicker().retrieveLostData();
       final fichier = perdue.file;
       if (fichier == null || !mounted) return;
-      await _envoyerLaPhoto(fichier);
+      setState(() => _photoDraft = fichier);
     } on Exception catch (cause) {
       debugPrint('[chat] photo perdue non récupérée : $cause');
     }
   }
 
-  /// Laisse choisir entre l'appareil photo et la galerie.
-  ///
-  /// Le bouton menait droit à l'appareil photo. Or cadrer un produit d'une
-  /// main, dans une boutique, est souvent raté — alors que la photo existe
-  /// déjà dans la galerie, ou peut être prise tranquillement avec
-  /// l'application appareil photo habituelle, qui a la mise au point et la
-  /// stabilisation du constructeur.
   Future<void> _choisirLaSource() async {
     if (_charge || _transcribing || _enregistreLaVoix || _voiceAction) return;
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      showDragHandle: true,
-      builder: (contexte) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Text(
-                'Chercher par photo',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.photo_camera_outlined,
-                color: TovoTheme.teal,
-              ),
-              title: const Text('Prendre une photo'),
-              onTap: () => Navigator.of(contexte).pop(ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.photo_library_outlined,
-                color: TovoTheme.teal,
-              ),
-              title: const Text('Choisir dans la galerie'),
-              onTap: () => Navigator.of(contexte).pop(ImageSource.gallery),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-
-    if (source == null || !mounted) return;
-    await _chercherParPhoto(source);
+    FocusScope.of(context).unfocus();
+    await _chercherParPhoto(ImageSource.camera);
   }
 
   Future<void> _chercherParPhoto(ImageSource source) async {
-    final navigation = ++_navigation;
-    final fichier = await ImagePicker().pickImage(
-      source: source,
-      // Compression avant l'envoi : une photo brute de 4 Mo depuis Niamey
-      // prend une minute et consomme le forfait de l'utilisateur. 1024 px
-      // suffisent largement à reconnaître un produit.
-      maxWidth: 1024,
-      imageQuality: 75,
-    );
+    final navigation = _navigation;
+    XFile? fichier;
+    try {
+      fichier = source == ImageSource.camera
+          ? await showModalBottomSheet<XFile>(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (_) => const PhotoCaptureSheet(),
+            )
+          : await ImagePicker().pickImage(
+              source: ImageSource.gallery,
+              maxWidth: 1024,
+              imageQuality: 75,
+            );
+    } on Exception {
+      if (mounted && navigation == _navigation) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Impossible d’ouvrir vos photos. Vérifiez les autorisations de l’application.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
     if (fichier == null || !mounted || navigation != _navigation) return;
-    await _envoyerLaPhoto(fichier);
+    setState(() => _photoDraft = fichier);
   }
 
-  /// Téléverse la photo et la soumet à l'assistant.
-  ///
-  /// Séparé du choix de l'image pour que la récupération après redémarrage
-  /// emprunte exactement le même chemin : deux chemins d'envoi divergeraient
-  /// au premier correctif.
-  Future<void> _envoyerLaPhoto(XFile fichier) async {
+  Future<Uint8List> _octetsPhoto(XFile fichier) async {
+    final octets = await fichier.readAsBytes();
+    return Isolate.run(() {
+      final decoded = image_lib.decodeImage(octets);
+      if (decoded == null) return octets;
+      final oriented = image_lib.bakeOrientation(decoded);
+      final resized = oriented.width > 1024
+          ? image_lib.copyResize(oriented, width: 1024)
+          : oriented;
+      return Uint8List.fromList(image_lib.encodeJpg(resized, quality: 75));
+    });
+  }
+
+  Future<void> _envoyerLaPhoto(XFile fichier, String caption) async {
     final navigation = ++_navigation;
-    _ajouterTourUtilisateur('📷 Photo envoyée', photoLocale: fichier.path);
+    final index = _tours.length;
+    _ajouterTourUtilisateur(
+      caption.isEmpty ? '📷 Photo envoyée' : '📷 $caption',
+      photoLocale: fichier.path,
+    );
     setState(() => _charge = true);
 
     try {
@@ -893,12 +864,11 @@ class _ChatScreenState extends State<ChatScreen> {
           .from('search-images')
           .uploadBinary(
             chemin,
-            await fichier.readAsBytes(),
+            await _octetsPhoto(fichier),
             fileOptions: const FileOptions(contentType: 'image/jpeg'),
           );
 
       if (!mounted || navigation != _navigation) return;
-      setState(() => _charge = false);
 
       // Seul le CHEMIN part vers l'assistant. Les octets de l'image
       // n'entrent jamais dans le contexte du modèle : ils y resteraient à
@@ -906,13 +876,22 @@ class _ChatScreenState extends State<ChatScreen> {
       await _parler(
         interaction: {
           'action': 'search_by_image',
-          'payload': {'image_path': chemin},
+          'payload': {
+            'image_path': chemin,
+            if (caption.isNotEmpty) 'caption': caption,
+          },
         },
       );
     } on Exception catch (cause) {
       if (!mounted || navigation != _navigation) return;
       setState(() {
         _charge = false;
+        _photoDraft = fichier;
+        _saisie.text = caption;
+        if (_tours.length > index &&
+            _tours[index].photoLocale == fichier.path) {
+          _tours.removeAt(index);
+        }
         _tours.add(
           _Tour(
             deLAssistant: true,
@@ -928,354 +907,6 @@ class _ChatScreenState extends State<ChatScreen> {
   // ------------------------------------------------------------------
   // Commande
   // ------------------------------------------------------------------
-
-  /// Passe la commande du panier courant.
-  ///
-  /// [adresseChoisie] vient de la réponse rapide de l'assistant : le client
-  /// a déjà dit où livrer, on ne le lui redemande pas. La valeur
-  /// `nouvelle` signifie « ailleurs » et retombe sur la position actuelle.
-  Future<void> _commander({String? adresseChoisie}) async {
-    // Les adresses d'abord : à Niamey il n'y a pas d'adresse postale, et
-    // retaper « Yantala, derrière la pharmacie Al Nour » à chaque commande
-    // est la friction la plus évitable de l'application.
-    final destination = await _choisirDestination(
-      adresseChoisie: adresseChoisie,
-    );
-    if (!mounted || destination == null) return;
-
-    final paiement = await _choisirPaiement();
-    if (!mounted || paiement == null) return;
-    if (!await _confirmerCommande(destination, paiement) || !mounted) return;
-
-    // Le geste qui engage de l'argent mérite un retour franc.
-    unawaited(HapticFeedback.mediumImpact());
-    _idCommandeEnCours ??= _nouvelIdentifiant();
-
-    await _appeler(
-      () => widget.api.post('/orders', {
-        'type': 'delivery',
-        'client_order_id': _idCommandeEnCours,
-        'dropoff_hint': destination.repere,
-        'dropoff': {'lat': destination.lat, 'lng': destination.lng},
-        'payment_method': paiement,
-      }),
-    );
-
-    _idCommandeEnCours = null;
-  }
-
-  /// Où livrer : une adresse déjà connue, ou la position actuelle.
-  ///
-  /// Renvoie `null` si le client renonce — annuler à cette étape ne doit
-  /// jamais passer commande.
-  Future<_Destination?> _choisirDestination({String? adresseChoisie}) async {
-    List<Map<String, dynamic>> connues = const [];
-    try {
-      final reponse = await widget.api.get('/addresses');
-      connues = ((reponse.raw['addresses'] as List?) ?? const [])
-          .map((a) => (a as Map).cast<String, dynamic>())
-          .toList();
-    } catch (_) {
-      // Hors ligne ou route indisponible : on retombe sur la saisie
-      // manuelle plutôt que d'empêcher de commander.
-    }
-
-    if (!mounted) return null;
-
-    // Choix déjà exprimé auprès de l'assistant : on l'honore tel quel.
-    // Une adresse entre-temps supprimée retombe sur la feuille de choix
-    // plutôt que de faire échouer la commande.
-    if (adresseChoisie != null && adresseChoisie != 'nouvelle') {
-      final connue = connues
-          .where((a) => a['id'] == adresseChoisie)
-          .firstOrNull;
-      if (connue != null) {
-        return _Destination(
-          repere: connue['text_hint'] as String,
-          lat: (connue['lat'] as num).toDouble(),
-          lng: (connue['lng'] as num).toDouble(),
-        );
-      }
-    }
-
-    if (connues.isNotEmpty && adresseChoisie != 'nouvelle') {
-      final choix = await _feuilleAdresses(connues);
-      if (!mounted || choix == null) return null;
-      if (choix != _nouvelleAdresse) {
-        final a = connues.firstWhere((x) => x['id'] == choix);
-        return _Destination(
-          repere: a['text_hint'] as String,
-          lat: (a['lat'] as num).toDouble(),
-          lng: (a['lng'] as num).toDouble(),
-        );
-      }
-    }
-
-    final position = await TovoLocation.current();
-    if (!mounted) return null;
-    if (position == null) {
-      _erreurLocalisation();
-      return null;
-    }
-
-    final repere = await _demanderLeRepere('Où livrer ?');
-    if (!mounted || repere == null) return null;
-
-    // Enregistrer se fait en tâche de fond : un échec ne doit pas empêcher
-    // la commande, qui est ce que le client est venu faire.
-    unawaited(
-      widget.api.post('/addresses', {
-        'label': _libelleDepuisRepere(repere),
-        'text_hint': repere,
-        'lat': position.latitude,
-        'lng': position.longitude,
-      }),
-    );
-
-    return _Destination(
-      repere: repere,
-      lat: position.latitude,
-      lng: position.longitude,
-    );
-  }
-
-  /// Un nom d'adresse tiré de ce que le client a écrit.
-  ///
-  /// Toute nouvelle adresse était enregistrée sous le libellé littéral
-  /// « Adresse ». Trois adresses donnaient donc trois boutons « Livrer à
-  /// Adresse » rigoureusement identiques, et le choix se faisait au hasard —
-  /// avec une commande livrée au mauvais endroit à la clé.
-  ///
-  /// Le premier segment du repère suffit à distinguer : « Yantala, derrière
-  /// la pharmacie Al Nour » devient « Yantala ».
-  static String _libelleDepuisRepere(String repere) {
-    final premier = repere.split(RegExp(r'[,;·]')).first.trim();
-    final court = premier.isEmpty ? repere.trim() : premier;
-    if (court.isEmpty) return 'Adresse';
-    return court.length > 24 ? '${court.substring(0, 23).trimRight()}…' : court;
-  }
-
-  static const String _nouvelleAdresse = '__nouvelle__';
-
-  Future<String?> _feuilleAdresses(List<Map<String, dynamic>> adresses) {
-    return showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Text(
-                'Où livrer ?',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-              ),
-            ),
-            for (final a in adresses)
-              ListTile(
-                leading: Icon(
-                  a['is_default'] == true
-                      ? Icons.home_rounded
-                      : Icons.place_outlined,
-                  color: TovoTheme.teal,
-                ),
-                title: Text(a['label'] as String? ?? 'Adresse'),
-                subtitle: Text(
-                  a['text_hint'] as String? ?? '',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                onTap: () => Navigator.pop(context, a['id'] as String),
-              ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.add_location_alt_outlined),
-              title: const Text('Livrer ailleurs'),
-              subtitle: const Text('Utiliser ma position actuelle'),
-              onTap: () => Navigator.pop(context, _nouvelleAdresse),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Espèces ou Nita.
-  ///
-  /// Choisir Nita ne retient rien : la commande part chez le boutiquier et
-  /// le client règle quand il veut, avant ou à la livraison. On le dit ici,
-  /// sinon il croit devoir payer d'abord.
-  Future<bool> _confirmerCommande(
-    _Destination destination,
-    String paiement,
-  ) async {
-    final response = await widget.api.get(
-      '/cart',
-      query: {'lat': destination.lat, 'lng': destination.lng},
-    );
-    if (!mounted) return false;
-    final cart = response.components
-        .where((component) => component.type == 'cart_summary')
-        .firstOrNull;
-    if (!response.ok || cart == null || !cart.flag('can_checkout')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            !response.ok
-                ? response.content
-                : cart?.str(
-                        'blocked_reason',
-                        'Votre panier ne peut pas être commandé.',
-                      ) ??
-                      'Votre panier est vide.',
-          ),
-        ),
-      );
-      return false;
-    }
-    final confirmed = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.sizeOf(context).height * 0.68,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: ListView(
-                    children: [
-                      Row(
-                        children: [
-                          const Expanded(
-                            child: Text(
-                              'Tout est prêt.',
-                              style: TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.8,
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: 'Annuler la confirmation',
-                            onPressed: () => Navigator.pop(sheetContext, false),
-                            icon: const Icon(Icons.close_rounded),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        cart.str('merchant_name'),
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      const Text(
-                        'Livrer à',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: TovoTheme.inkDoux,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        destination.repere,
-                        style: const TextStyle(fontSize: 15),
-                      ),
-                      const SizedBox(height: 20),
-                      const Text(
-                        'Paiement',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: TovoTheme.inkDoux,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        paiement == 'cash' ? 'Espèces à la livraison' : 'Nita',
-                        style: const TextStyle(fontSize: 15),
-                      ),
-                      const SizedBox(height: 24),
-                      for (final amount in [
-                        ('Articles', cart.money('items_total')),
-                        ('Livraison', cart.money('delivery_fee')),
-                        if (cart.money('discount') > 0)
-                          ('Réduction', -cart.money('discount')),
-                      ])
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 7),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  amount.$1,
-                                  style: const TextStyle(
-                                    fontSize: 14,
-                                    color: TovoTheme.inkDoux,
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                Money.format(amount.$2),
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 18),
-                  child: Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'Total',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        Money.format(cart.money('total')),
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(sheetContext, true),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 14),
-                    child: Text('Confirmer la commande'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    return confirmed == true;
-  }
 
   Future<String?> _choisirPaiement() {
     return showModalBottomSheet<String>(
@@ -1385,50 +1016,6 @@ class _ChatScreenState extends State<ChatScreen> {
     _versLeBas();
   }
 
-  Future<String?> _demanderLeRepere(String titre) {
-    final controleur = TextEditingController();
-
-    return showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(titre, style: const TextStyle(fontSize: 16)),
-        content: TextField(
-          controller: controleur,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 'Ex. : Yantala, derrière la pharmacie Al Nour',
-            // Dire lequel des deux fait foi.
-            //
-            // Le point GPS enregistré est celui où se trouve le téléphone
-            // MAINTENANT — c'est lui qui guide le livreur, le texte n'étant
-            // qu'un appoint. Quelqu'un qui commande depuis son bureau pour
-            // une livraison chez lui envoyait donc le livreur au bureau, sans
-            // que rien ne le prévienne. Tant qu'il n'y a pas de carte pour
-            // désigner un autre point, il faut au moins le dire.
-            helperText:
-                'Repère pour le livreur. Le point GPS enregistré est '
-                'celui où vous êtes en ce moment.',
-            helperMaxLines: 3,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final texte = controleur.text.trim();
-              if (texte.isEmpty) return;
-              Navigator.pop(context, texte);
-            },
-            child: const Text('Confirmer'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _ouvrirLien(String url) async {
     if (url.isEmpty) return;
     final uri = Uri.tryParse(url);
@@ -1459,12 +1046,18 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     unawaited(HapticFeedback.selectionClick());
     final texte = _saisie.text.trim();
-    if (texte.isEmpty) return;
+    final photo = _photoDraft;
+    if (texte.isEmpty && photo == null) return;
     _navigation++;
     _voiceDraft = false;
     _voiceError = null;
     _pendingAudio = null;
     _saisie.clear();
+    if (photo != null) {
+      setState(() => _photoDraft = null);
+      unawaited(_envoyerLaPhoto(photo, texte));
+      return;
+    }
     _ajouterTourUtilisateur(texte);
     _rafraichirPosition();
     unawaited(_chercherPuisDemander(texte));
@@ -1487,13 +1080,16 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Future<void> _ouvrirPanier() async {
+  Future<void> _ouvrirPanier({String? initialAddressId}) async {
     if (_charge || _transcribing || _enregistreLaVoix || _voiceAction) return;
     _navigation++;
-    final checkout = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => CartScreen(api: widget.api)),
+    final order = await Navigator.of(context).push<TovoResponse>(
+      MaterialPageRoute(
+        builder: (_) =>
+            CartScreen(api: widget.api, initialAddressId: initialAddressId),
+      ),
     );
-    if (mounted && checkout == true) await _commander();
+    if (mounted && order != null) await _appeler(() async => order);
   }
 
   Future<void> _ouvrirCatalogue({
@@ -1503,7 +1099,7 @@ class _ChatScreenState extends State<ChatScreen> {
     String query = '',
     bool directory = false,
   }) async {
-    final checkout = await Navigator.of(context).push<bool>(
+    final order = await Navigator.of(context).push<TovoResponse>(
       MaterialPageRoute(
         builder: (_) => CatalogScreen(
           api: widget.api,
@@ -1515,9 +1111,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
     );
-    if (mounted && checkout == true) {
-      await _commander();
-    }
+    if (mounted && order != null) await _appeler(() async => order);
   }
 
   Future<void> _chercherPuisDemander(String texte) => _parler(texte: texte);
@@ -1556,6 +1150,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _voiceDraft = false;
       _voiceError = null;
       _pendingAudio = null;
+      _photoDraft = null;
     });
     final request = widget.api.get('/conversations/$id');
     final cached = await widget.api.cachedGet('/conversations/$id');
@@ -1593,6 +1188,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _voiceDraft = false;
       _voiceError = null;
       _pendingAudio = null;
+      _photoDraft = null;
     });
     unawaited(_annulerLaParole());
     final cached = await widget.api.cachedGet('/categories');
@@ -1686,6 +1282,10 @@ class _ChatScreenState extends State<ChatScreen> {
                           tour: _tours[tourIndex],
                           onInteraction: _interaction,
                           anime: !_charge && tourIndex == _tours.length - 1,
+                          scanne:
+                              _charge &&
+                              tourIndex == _tours.length - 1 &&
+                              _tours[tourIndex].photoLocale != null,
                         ),
                       ),
                     );
@@ -1700,7 +1300,10 @@ class _ChatScreenState extends State<ChatScreen> {
           AnimatedSize(
             duration: TovoTheme.normal,
             curve: TovoTheme.courbe,
-            child: _charge && !_reponseCommencee
+            child:
+                _charge &&
+                    !_reponseCommencee &&
+                    (_tours.isEmpty || _tours.last.photoLocale == null)
                 ? const _EnReflexion()
                 : const SizedBox.shrink(),
           ),
@@ -1748,6 +1351,8 @@ class _ChatScreenState extends State<ChatScreen> {
             controller: _saisie,
             onSend: _envoyer,
             onCamera: () => unawaited(_choisirLaSource()),
+            photoPath: _photoDraft?.path,
+            onRemovePhoto: () => setState(() => _photoDraft = null),
             enregistre: _enregistreLaVoix,
             onParoleTouche: _toucherLeMicro,
             onParoleAnnulee: _annulerLaParole,
@@ -1825,6 +1430,7 @@ class _TourVue extends StatefulWidget {
     required this.tour,
     required this.onInteraction,
     this.anime = false,
+    this.scanne = false,
   });
 
   final _Tour tour;
@@ -1833,6 +1439,7 @@ class _TourVue extends StatefulWidget {
   /// Le message vient d'arriver : il glisse et se révèle. Les précédents
   /// s'affichent directement, sinon la liste frémirait à chaque défilement.
   final bool anime;
+  final bool scanne;
 
   @override
   State<_TourVue> createState() => _TourVueState();
@@ -1903,14 +1510,18 @@ class _TourVueState extends State<_TourVue> {
               if (photo != null)
                 ClipRRect(
                   borderRadius: BorderRadius.circular(17),
-                  child: Image.file(
-                    File(photo),
-                    width: 168,
-                    fit: BoxFit.cover,
-                    // Le fichier peut avoir disparu — Android nettoie ses
-                    // caches. On retombe alors sur le texte seul plutôt que
-                    // sur une icône d'image cassée.
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  child: Stack(
+                    children: [
+                      Image.file(
+                        File(photo),
+                        width: 168,
+                        height: 168,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                      if (widget.scanne)
+                        const Positioned.fill(child: PhotoScanOverlay()),
+                    ],
                   ),
                 ),
               Padding(
@@ -1927,6 +1538,14 @@ class _TourVueState extends State<_TourVue> {
                   ),
                 ),
               ),
+              if (widget.scanne)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(8, 0, 8, 3),
+                  child: Text(
+                    'Recherche visuelle…',
+                    style: TextStyle(fontSize: 11, color: TovoTheme.inkDoux),
+                  ),
+                ),
             ],
           ),
         ),
@@ -2235,6 +1854,8 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
     required this.controller,
     required this.onSend,
     required this.onCamera,
+    required this.photoPath,
+    required this.onRemovePhoto,
     required this.enregistre,
     required this.onParoleTouche,
     required this.onParoleAnnulee,
@@ -2243,6 +1864,8 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
   final TextEditingController controller;
   final VoidCallback onSend;
   final VoidCallback onCamera;
+  final String? photoPath;
+  final VoidCallback onRemovePhoto;
   final bool enregistre;
   final VoidCallback onParoleTouche;
   final VoidCallback onParoleAnnulee;
@@ -2326,9 +1949,46 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
           borderRadius: BorderRadius.circular(24),
           border: Border.all(color: TovoTheme.line),
         ),
-        child: enregistre
-            ? _enEcoute()
-            : Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (photoPath != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 2, 4, 7),
+                child: Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.file(
+                        File(photoPath!),
+                        width: 48,
+                        height: 48,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Photo prête à envoyer',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Retirer la photo',
+                      onPressed: onRemovePhoto,
+                      icon: const Icon(Icons.close_rounded, size: 19),
+                    ),
+                  ],
+                ),
+              ),
+            if (enregistre)
+              _enEcoute()
+            else
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   _action(
@@ -2345,7 +2005,10 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
                       textCapitalization: TextCapitalization.sentences,
                       textInputAction: TextInputAction.newline,
                       onSubmitted: (_) {
-                        if (controller.text.trim().isNotEmpty) onSend();
+                        if (controller.text.trim().isNotEmpty ||
+                            photoPath != null) {
+                          onSend();
+                        }
                       },
                       decoration: const InputDecoration(
                         hintText: 'Demandez à Tovo…',
@@ -2365,7 +2028,8 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
                   ValueListenableBuilder<TextEditingValue>(
                     valueListenable: controller,
                     builder: (context, valeur, _) {
-                      final aDuTexte = valeur.text.trim().isNotEmpty;
+                      final aDuTexte =
+                          valeur.text.trim().isNotEmpty || photoPath != null;
                       return _action(
                         icon: aDuTexte
                             ? Icons.arrow_upward_rounded
@@ -2378,6 +2042,8 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
                   ),
                 ],
               ),
+          ],
+        ),
       ),
     );
   }

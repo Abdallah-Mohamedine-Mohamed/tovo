@@ -102,6 +102,29 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     : Promise.resolve(null);
   const [previous, pageInitiale] = await Promise.all([historique, rechercheInitiale]);
 
+  const photoRecente = previous.history.slice(-4).some((turn) =>
+    turn.role === 'user' && /photo envoyee/i.test(normaliserIntention(turn.content)));
+  const correctionPhoto = photoRecente
+    && /^(?:mais )?(?:c est|ce sont) (?:un |une |des )?/i.test(normaliserIntention(input.message));
+  if (correctionPhoto && requeteInitiale) {
+    const page = pageInitiale ?? await cataloguePage(input.db, { q: requeteInitiale, limit: 8 }, false);
+    const mots = requeteInitiale.split(' ');
+    const items = page.items.filter((item) => {
+      const fiche = normaliserIntention(`${item.name} ${item.description ?? ''}`);
+      return mots.every((mot) => fiche.split(' ').includes(mot));
+    });
+    const answer = searchAnswer({ ...page, items, total: items.length, next_offset: null },
+      { q: requeteInitiale, limit: 8 });
+    const content = items.length > 0
+      ? `Vous avez raison, j’ai mal interprété la photo. Voici des ${requeteInitiale} correspondant au catalogue.`
+      : `Vous avez raison, j’ai mal interprété la photo. Je ne trouve pas de ${requeteInitiale} correspondant dans le catalogue actuellement.`;
+    input.onEvent?.({ type: 'results', components: answer.components });
+    input.onEvent?.({ type: 'text', text: content });
+    const messageId = await persister(input, content, answer.components);
+    return { ...envelope(content, answer.components), messageId, rejected: [],
+      usage: { input: 0, output: 0, cached: 0, cycles: 0 } };
+  }
+
   // Le produit est déjà trouvé : inutile de charger toutes les enseignes,
   // puis de refaire exactement la même recherche. C'est le chemin courant.
   if (pageInitiale && (pageInitiale.total > 0 || pageInitiale.category_id)) {
