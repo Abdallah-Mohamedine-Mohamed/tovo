@@ -90,29 +90,37 @@ workflows:
       - name: Paquets Flutter
         script: flutter pub get
 
-      # LE PROJET XCODE EST PRÉPARÉ AVANT LA SIGNATURE, et l’ordre compte.
+      # LE NUMÉRO DE BUILD EN PREMIER, parce que la préparation du projet
+      # l'inscrit dans la configuration Xcode. Calculé après, il arriverait
+      # trop tard.
+      - name: Numéro de build
+        script: |
+          # Apple REFUSE un build dont le numéro n'est pas strictement
+          # supérieur au précédent. On lit le dernier connu plutôt que de
+          # tenir le compte à la main.
+          DERNIER=$(app-store-connect get-latest-testflight-build-number \
+                      "$APP_APPLE_ID" --platform IOS 2>/dev/null || echo "")
+          if [ -z "$DERNIER" ]; then
+            # Repli si l'API ne répond pas. 12 est le plus haut build déjà
+            # chargé — la 4.0.12 du 22 août 2025, visible dans TestFlight.
+            DERNIER=12
+          fi
+          echo "NUMERO_BUILD=$((DERNIER + 1))" >> "$CM_ENV"
+
+      # FLUTTER PRÉPARE, IL NE COMPILE PAS.
       #
-      # Le build précédent a échoué sur « No valid code signing certificates
-      # were found », alors que l’étape de signature était passée en une
-      # seconde. Le journal explique pourquoi :
-      #
-      #     Updating minimum iOS deployment target to 15.0.
-      #     Upgrading project.pbxproj
-      #     Adding Swift Package Manager integration...
-      #     Finished migration to UIScene lifecycle.
-      #
-      # `flutter build ipa` RÉÉCRIT project.pbxproj pendant qu’il travaille.
-      # Les réglages de signature posés juste avant par `use-profiles`
-      # étaient donc écrasés, et Xcode retombait sur la signature
-      # automatique — sans équipe, sans certificat.
-      #
-      # `--config-only` fait passer Flutter par toutes ses migrations sans
-      # compiler. Le projet est alors stable, et ce qu’on y écrit ensuite y
-      # reste.
+      # `--config-only` écrit Generated.xcconfig — les dart-define, le nom de
+      # version, le numéro de build — et fait passer toutes les migrations du
+      # projet Xcode : cible portée à 15.0, intégration Swift Package Manager,
+      # migration UIScene. Un build précédent a montré que ces migrations
+      # RÉÉCRIVENT project.pbxproj ; les faire avant la signature évite
+      # qu'elles n'effacent ce qu'on vient d'y inscrire.
       - name: Préparer le projet iOS
         script: |
           flutter build ios --config-only --release --no-codesign \
             -t lib/main_client.dart \
+            --build-name="$NOM_VERSION" \
+            --build-number="$NUMERO_BUILD" \
             --dart-define=SUPABASE_URL="$SUPABASE_URL" \
             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
             --dart-define=API_BASE_URL="$API_BASE_URL"
@@ -120,15 +128,14 @@ workflows:
       - name: Certificat et profil de signature
         script: |
           # `keychain initialize` EN PREMIER : il crée le trousseau dans
-          # lequel le certificat va atterrir. Je l’avais placé après, et le
-          # certificat n’avait alors nulle part où aller.
+          # lequel le certificat va atterrir.
           keychain initialize
 
           # `--create` est le mot important. Le bloc `ios_signing` de
-          # Codemagic CHERCHE un profil sans en créer : le tout premier
-          # build a échoué sur « No matching profiles found for bundle
-          # identifier com.tovoapp.UserApp ». Celle-ci le crée, et récupère
-          # au passage le certificat de distribution.
+          # Codemagic CHERCHE un profil sans en créer : le premier build a
+          # échoué sur « No matching profiles found for bundle identifier
+          # com.tovoapp.UserApp ». Celle-ci le crée, et récupère au passage
+          # le certificat de distribution.
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --create
@@ -136,54 +143,33 @@ workflows:
           keychain add-certificates
           xcode-project use-profiles
 
-          # UN CONTRÔLE, parce que cette étape est déjà passée au vert en une
+          # Un contrôle, parce que cette étape est déjà passée au vert en une
           # seconde sans rien produire. Un échec silencieux ici se découvre
-          # deux minutes plus tard, dans un message qui parle de Xcode et
-          # conseille d’ouvrir un Mac — ce qui n’aide personne.
+          # deux minutes plus tard, dans un message qui conseille d'ouvrir un
+          # Mac — ce qui n'aide personne.
           if [ ! -f /Users/builder/export_options.plist ]; then
             echo "Aucun export_options.plist : la signature n'a rien produit." >&2
             exit 1
           fi
 
-      - name: Numéro de build
-        script: |
-          # Apple REFUSE un build dont le numéro n'est pas strictement
-          # supérieur au précédent. On lit le dernier connu plutôt que de
-          # tenir le compte à la main : le numéro figé de pubspec.yaml
-          # provoquerait un rejet au deuxième envoi.
-          DERNIER=$(app-store-connect get-latest-testflight-build-number \
-                      "$APP_APPLE_ID" --platform IOS 2>/dev/null || echo "")
-          if [ -z "$DERNIER" ]; then
-            # Repli si l'API ne répond pas. 12 est le plus haut build déjà
-            # chargé — la 4.0.12 du 22 août 2025, visible dans TestFlight.
-            # Un numéro inférieur serait refusé par Apple.
-            DERNIER=12
-          fi
-          echo "NUMERO_BUILD=$((DERNIER + 1))" >> "$CM_ENV"
-
-      # PAS D'ÉTAPE `pod install` AVANT CELLE-CI.
+      # `xcode-project build-ipa`, ET NON `flutter build ipa`.
       #
-      # J'en avais mis une ; elle a fait échouer le deuxième build sur
-      # « No `Podfile` found in the project directory ». Et pour cause : ce
-      # projet n'a jamais été compilé pour iOS — il se développe sous
-      # Windows — donc le Podfile n'existe pas encore. C'est Flutter qui le
-      # génère, au moment du build, à partir des greffons de pubspec.yaml.
+      # Les deux archivent le même projet, mais pas de la même façon. Flutter
+      # cherche lui-même une identité dans le trousseau et exige un certificat
+      # de DÉVELOPPEMENT : il refusait le build avec « No development
+      # certificates available », alors que le certificat de DISTRIBUTION
+      # était en place et que l'étape précédente avait mis douze secondes à le
+      # récupérer.
       #
-      # `flutter build ipa` appelle CocoaPods lui-même. Le faire avant, c'est
-      # demander à installer des dépendances dont la liste n'est pas écrite.
+      # L'outil de Codemagic archive avec les profils qu'il vient lui-même
+      # d'installer, sans rien redécouvrir. Tout ce que Flutter devait
+      # apporter — dart-define, version, numéro de build — est déjà écrit
+      # dans Generated.xcconfig par l'étape de préparation.
       - name: Construire l'IPA
         script: |
-          # -t est OBLIGATOIRE : il n'existe pas de lib/main.dart dans ce
-          # projet, seulement main_client, main_driver et main_merchant.
-          # Sans lui, la compilation échoue sans expliquer pourquoi.
-          flutter build ipa --release \
-            -t lib/main_client.dart \
-            --build-name="$NOM_VERSION" \
-            --build-number="$NUMERO_BUILD" \
-            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
-            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
-            --dart-define=API_BASE_URL="$API_BASE_URL" \
-            --export-options-plist=/Users/builder/export_options.plist
+          xcode-project build-ipa \
+            --workspace ios/Runner.xcworkspace \
+            --scheme Runner
 
     artifacts:
       - build/ios/ipa/*.ipa
