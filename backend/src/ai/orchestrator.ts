@@ -5,7 +5,12 @@ import { EXECUTORS, TOOL_DEFINITIONS, type ToolContext } from './tools.js';
 import { collectIds, sanitizeToolResult, validateComponents } from './validate.js';
 import { envelope, type ChatEnvelope, type Component } from '../components/builders.js';
 import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type PendingMerchantChoice } from '../services/catalogue.js';
-import { demandeBoutiqueOuverte } from './intents.js';
+import {
+  demandeBoutiqueOuverte,
+  messageConversationnel,
+  normaliserIntention,
+  requeteProduitUtilisateur,
+} from './intents.js';
 
 /**
  * Boucle d'orchestration.
@@ -75,25 +80,57 @@ export class ChatUnavailableError extends Error {
   }
 }
 
+function rechercheProduitRapide(message: string, query: string): boolean {
+  const mots = query.split(/\s+/).filter(Boolean);
+  const questionCourte = /^(avez vous|as tu|il y a|y a t il|un|une|du|de la|des)\b/
+    .test(normaliserIntention(message));
+  return query.length > 0
+    && !messageConversationnel(message)
+    && !demandeBoutiqueOuverte(message)
+    && (mots.length <= 6 || questionCourte)
+    && !/\b(merci|bonjour|salut|oui|non|annule|commande|livreur|colis|panier|option|options|deuxieme|premier)\b/i.test(message);
+}
+
 export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateOutput> {
-  const previous = await chargerHistorique(input.db, input.conversationId);
+  const historique = chargerHistorique(input.db, input.conversationId);
+  const requeteInitiale = input.audio ? '' : requeteProduitUtilisateur(input.message);
+  const rechercheInitiale = !input.audio && rechercheProduitRapide(input.message, requeteInitiale)
+    // Premier passage lexical uniquement : il doit rester plus rapide qu'un
+    // appel modèle. Les fautes et rapprochements sémantiques restent pris en
+    // charge par le chemin complet juste après.
+    ? cataloguePage(input.db, { q: requeteInitiale, limit: 8 }, false)
+    : Promise.resolve(null);
+  const [previous, pageInitiale] = await Promise.all([historique, rechercheInitiale]);
+
+  // Le produit est déjà trouvé : inutile de charger toutes les enseignes,
+  // puis de refaire exactement la même recherche. C'est le chemin courant.
+  if (pageInitiale && (pageInitiale.total > 0 || pageInitiale.category_id)) {
+    const direct = searchAnswer(pageInitiale, { q: requeteInitiale, limit: 8 });
+    input.onEvent?.({ type: 'results', components: direct.components });
+    input.onEvent?.({ type: 'text', text: direct.content });
+    const messageId = await persister(input, direct.content, direct.components);
+    return { ...envelope(direct.content, direct.components), messageId, rejected: [],
+      usage: { input: 0, output: 0, cached: 0, cycles: 0 } };
+  }
+
   const intent = input.audio ? undefined : await resolveCatalogueIntent(input.db, input.message, previous.pending);
   let direct = intent ? await merchantIntentAnswer(input.db, intent) : null;
-  const keyword = input.message.trim().split(/\s+/).length <= 4
-    && !/[?]/.test(input.message)
-    && !/\b(je|veux|manger|merci|bonjour|salut|oui|non|annule|commande|livreur|colis|panier|deuxieme|premier)\b/i.test(input.message);
+  const requeteClient = requeteProduitUtilisateur(intent?.query ?? input.message);
+  const keyword = rechercheProduitRapide(input.message, requeteClient);
   const selectedBranch = Boolean(previous.pending
     && intent?.merchants.length === 1
     && intent.query === previous.pending.query);
   if (!direct && intent && (keyword || selectedBranch) && !input.audio) {
-    const filter = { q: intent.query, limit: 8,
+    const filter = { q: requeteClient || intent.query, limit: 8,
       merchant_ids: intent.merchants.length ? intent.merchants.map((merchant) => merchant.id) : undefined };
     // Une phrase courte n'est pas forcément un produit. « Tu es bête »
     // partait directement dans la recherche sémantique et remontait des
     // carottes. Le chemin instantané n'est permis que pour une correspondance
     // littérale, une catégorie connue, ou le choix explicite d'une agence.
-    const page = await cataloguePage(input.db, filter, selectedBranch ? true : false);
-    if (page.total > 0 || page.category_id || selectedBranch) {
+    const page = pageInitiale && intent.merchants.length === 0 && requeteClient === requeteInitiale
+      ? pageInitiale
+      : await cataloguePage(input.db, filter, selectedBranch ? true : false);
+    if (page.total > 0 || page.category_id || selectedBranch || keyword) {
       direct = searchAnswer(page, filter);
     }
   }
@@ -164,8 +201,9 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   let misEnCache = 0;
   let cycles = 0;
 
-  for (; cycles < MAX_CYCLES; cycles++) {
+  cyclesOrchestration: for (; cycles < MAX_CYCLES; cycles++) {
     const dernierCycle = cycles === MAX_CYCLES - 1;
+    let reponseOutil: string | undefined;
     input.onEvent?.({ type: 'text_start' });
 
     const reponse = await client.generate({
@@ -208,6 +246,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
 
       try {
         const resultat = await executeur(appel.args, ctx);
+        if (resultat.content?.trim()) reponseOutil = resultat.content.trim();
 
         // Les identifiants viennent d'ici, et de nulle part ailleurs.
         collectIds(resultat.summary, idsAutorises);
@@ -245,6 +284,15 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     }
     const verified = validateComponents(composantsDuTour, idsAutorises);
     input.onEvent?.({ type: 'results', components: verified.components });
+
+    // Les outils de catalogue produisent déjà un texte court, fondé sur les
+    // données réellement trouvées. Un deuxième appel Gemini servant seulement
+    // à dire « voici les résultats » doublait presque le temps de réponse.
+    if (reponseOutil && reponse.toolCalls.length === 1) {
+      texteFinal = reponseOutil;
+      input.onEvent?.({ type: 'text', text: texteFinal });
+      break cyclesOrchestration;
+    }
   }
 
   const { components, rejected } = validateComponents(composantsDuTour, idsAutorises);

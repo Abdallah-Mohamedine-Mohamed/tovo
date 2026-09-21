@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { boutiquesCorrespondantes, boutiquesMentionnees, demandeBoutiqueOuverte, normaliserIntention, nomBoutiqueApresMarqueur } from '../ai/intents.js';
+import { boutiquesCorrespondantes, boutiquesMentionnees, demandeBoutiqueOuverte, normaliserIntention, nomBoutiqueApresMarqueur, requeteProduitUtilisateur } from '../ai/intents.js';
 import { categoryGrid, merchantCard, productCarousel, type Component, type MerchantRow, type ProductRow } from '../components/builders.js';
 import { embed, embeddingsEnabled } from './embeddings.js';
 
@@ -34,6 +34,39 @@ export interface PendingMerchantChoice {
   query: string;
 }
 
+const MOTS_SIMILAIRES_VIDES = new Set([
+  'avec', 'chez', 'dans', 'pour', 'sans', 'sur', 'tout', 'toute', 'tous', 'toutes',
+]);
+
+function motsRecherche(texte: string): string[] {
+  return requeteProduitUtilisateur(texte)
+    .split(' ')
+    .map((mot) => mot.replace(/s$/, ''))
+    .filter((mot) => mot.length >= 3 && !MOTS_SIMILAIRES_VIDES.has(mot));
+}
+
+/**
+ * Un vecteur ne suffit jamais à prouver qu'un produit répond à la demande.
+ * Il sert à classer des candidats, puis les mots du catalogue doivent encore
+ * confirmer l'objet. C'est ce qui interdit « thé au lait » pour « pommade ».
+ */
+export function filtrerSuggestionsTextuelles(query: string, items: ProductRow[]): ProductRow[] {
+  const demandes = [...new Set(motsRecherche(query))];
+  if (demandes.length === 0) return [];
+
+  return items.filter((item) => {
+    const disponibles = new Set(motsRecherche(`${item.name} ${item.description ?? ''}`));
+    const correspondances = demandes.filter((mot) => disponibles.has(mot));
+    if (demandes.length === 1) return correspondances.length === 1;
+
+    const pivots = demandes.slice(0, Math.min(2, demandes.length));
+    const pivotsRequis = demandes.length >= 4 ? pivots.length : 1;
+    const pivotsTrouves = pivots.filter((mot) => disponibles.has(mot)).length;
+    return correspondances.length >= Math.min(2, demandes.length)
+      && pivotsTrouves >= pivotsRequis;
+  });
+}
+
 const MENU_WORDS = new Set('je j veux voudrais souhaite aimerais peux pourrais voir consulter regarder manger commander prendre acheter montre montrez donne donnez moi la le les de du des d chez a au en carte menu menus produit produits article articles plat plats propose proposes proposer proposez boutique restaurant resto enseigne tous toutes tout toute un une svp merci ce que'.split(' '));
 
 export function requeteSansEnseigne(message: string, merchants: Array<{ id: string; name: string }>): string {
@@ -62,8 +95,9 @@ export function requeteSansEnseigne(message: string, merchants: Array<{ id: stri
 }
 
 export async function cataloguePage(db: SupabaseClient, filter: CatalogueFilter, semantic = true): Promise<CataloguePage> {
+  const query = requeteProduitUtilisateur(filter.q ?? '');
   const parameters = {
-    p_query: filter.q ?? '', p_embedding: null as string | null,
+    p_query: query, p_embedding: null as string | null,
     p_merchants: filter.merchant_ids ?? null, p_category: filter.category_id ?? null,
     p_offset: filter.offset ?? 0, p_limit: filter.limit ?? 24,
   };
@@ -97,6 +131,10 @@ export async function cataloguePage(db: SupabaseClient, filter: CatalogueFilter,
       response = await db.rpc('catalog_products_page', { ...parameters, p_embedding: JSON.stringify(vector) });
       if (response.error) throw response.error;
       page = response.data as CataloguePage;
+      if (page.match_type === 'similar') {
+        const items = filtrerSuggestionsTextuelles(parameters.p_query, page.items);
+        page = { ...page, items, total: items.length, next_offset: null };
+      }
     }
   }
   if (parameters.p_category && !filter.category_id) page.category_id = parameters.p_category;
@@ -215,7 +253,10 @@ export function searchAnswer(page: CataloguePage, filter: CatalogueFilter): Cata
   const similar = page.match_type === 'similar';
   const preview = page.items.slice(0, 8);
   return {
-    content: page.total === 0 ? `Aucun résultat pour **${query}**.`
+    content: page.total === 0
+      ? query
+        ? `Je ne trouve pas de **${query}** disponible sur Tovo pour le moment.`
+        : 'Aucun produit disponible pour le moment.'
       : similar ? 'Voici des suggestions proches de votre demande. Vous pouvez parcourir les résultats.'
       : `**${page.total} produits** correspondent à votre recherche. Vous pouvez parcourir les résultats et choisir votre enseigne.`,
     summary: { total: page.total, affiches: preview.length, suggestions: similar,

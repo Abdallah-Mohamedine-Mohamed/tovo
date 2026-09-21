@@ -38,7 +38,11 @@ void main() {
         done = true;
         return value;
       });
-      controller.add(utf8.encode('{"type":"results","components":[]}\n'));
+      controller.add(
+        utf8.encode(
+          '{"type":"heartbeat"}\n{"type":"results","components":[]}\n',
+        ),
+      );
       await Future<void>.delayed(Duration.zero);
       expect(events.single['type'], 'results');
       expect(done, isFalse);

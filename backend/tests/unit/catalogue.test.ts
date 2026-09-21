@@ -5,7 +5,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { vector } from '@electric-sql/pglite-pgvector';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import Fastify from 'fastify';
-import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, requeteSansEnseigne, type CataloguePage } from '../../src/services/catalogue.js';
+import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, requeteSansEnseigne, filtrerSuggestionsTextuelles, type CataloguePage } from '../../src/services/catalogue.js';
 import { catalogRoutes } from '../../src/routes/catalog.js';
 import { EXECUTORS, filtrerProduitsPhoto } from '../../src/ai/tools.js';
 import { orchestrate } from '../../src/ai/orchestrator.js';
@@ -139,7 +139,7 @@ describe('catalogue complet', () => {
     expect(await cataloguePage(adapter, { q: 'montres', limit: 8 })).toMatchObject({ total: 0, items: [], category_id: watches });
     const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),
       clientMessageId: randomUUID(), message: 'Montre' });
-    expect(answer.content).toContain('Aucun résultat');
+    expect(answer.content).toContain('ne trouve pas');
     expect(answer.components).toEqual([]);
     expect(answer.usage.cycles).toBe(0);
   });
@@ -152,6 +152,52 @@ describe('catalogue complet', () => {
     });
     expect(answer.components).toEqual([]);
     expect(answer.summary).toMatchObject({ total: 0 });
+  });
+
+  it('ne laisse pas le modèle remplacer pommade par une requête inventée', async () => {
+    const answer = await EXECUTORS.rechercher_produits!({
+      requete: 'lait corps crème beurre karité',
+    }, {
+      db: adapter,
+      userId: randomUUID(),
+      currentMessage: 'De la pommade',
+    });
+    expect(answer.components).toEqual([]);
+    expect(answer.summary).toMatchObject({ total: 0 });
+  });
+
+  it('rejette les voisins sémantiques qui ne prouvent pas le même objet', () => {
+    const suggestions = filtrerSuggestionsTextuelles('lait corps crème beurre karité', [
+      { id: 'the', name: 'Thé au lait caramel', description: 'Boisson fraîche', image_url: null,
+        price: 2000, is_available: true, merchant_id: centre, merchant_name: 'BOBA' },
+      { id: 'shampoo', name: 'Shampooing crème hydratant au beurre de karité', description: 'Pour les cheveux', image_url: null,
+        price: 7000, is_available: true, merchant_id: centre, merchant_name: 'VELLA' },
+      { id: 'corps', name: 'Lait corps au beurre de karité', description: 'Crème hydratante', image_url: null,
+        price: 5000, is_available: true, merchant_id: centre, merchant_name: 'VELLA' },
+    ]);
+    expect(suggestions.map((product) => product.id)).toEqual(['corps']);
+  });
+
+  it.each(['Un bracelet ?', 'De la pommade'])('répond sans modèle ni faux produit à « %s »', async (message) => {
+    llmGenerate.mockClear();
+    const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),
+      clientMessageId: randomUUID(), message });
+    expect(answer.components).toEqual([]);
+    expect(answer.content).toContain('ne trouve pas');
+    expect(answer.usage.cycles).toBe(0);
+    expect(llmGenerate).not.toHaveBeenCalled();
+  });
+
+  it('extrait directement un produit d’une phrase naturelle', async () => {
+    llmGenerate.mockClear();
+    const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),
+      clientMessageId: randomUUID(), message: 'je veux manger du poulet' });
+    expect(answer.usage.cycles).toBe(0);
+    expect(answer.components[0]?.type).toBe('product_carousel');
+    expect(answer.components[0]?.data.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: expect.stringContaining('Poulet') }),
+    ]));
+    expect(llmGenerate).not.toHaveBeenCalled();
   });
 
   it('rejette les candidats visuels qui ne sont pas le même objet', () => {

@@ -20,10 +20,10 @@ import { serviceClient } from './supabase.js';
  * chaque tour, pour toujours.
  */
 
-// Le même modèle que l'orchestrateur, et depuis la même variable : un
-// modèle épinglé à deux endroits finit toujours par diverger, et l'un des
-// deux tombe en silence le jour où Google en retire un.
-const MODELE = env.GEMINI_MODEL;
+// Décrire une photo en trois mots ne nécessite pas le modèle conversationnel
+// principal. Le modèle rapide réduit la latence sans décider des résultats :
+// la base et les garde-fous textuels restent seuls juges du catalogue.
+const MODELE = env.GEMINI_FAST_MODEL;
 
 /**
  * Des MOTS-CLÉS, et surtout pas une description.

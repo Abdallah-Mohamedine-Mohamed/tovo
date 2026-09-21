@@ -8,6 +8,8 @@ import {
   demandeGeneraleDeRepas,
   nomBoutiqueApresMarqueur,
   normaliserIntention,
+  messageConversationnel,
+  requeteProduitUtilisateur,
 } from '../../src/ai/intents.js';
 
 const BOUTIQUES = [
@@ -85,5 +87,19 @@ describe('intentions de catalogue', () => {
   it('ne croit le filtre boutique du modele que si le client en designe une', () => {
     expect(nomBoutiqueApresMarqueur('Je veux manger du poulet')).toBeNull();
     expect(nomBoutiqueApresMarqueur('Montre-moi les plats chez Poulet')).toBe('poulet');
+  });
+
+  it('conserve le produit demandé sans les mots de conversation', () => {
+    expect(requeteProduitUtilisateur('De la pommade')).toBe('pommade');
+    expect(requeteProduitUtilisateur('Un bracelet ?')).toBe('bracelet');
+    expect(requeteProduitUtilisateur('Avez-vous une autre montre, quelle que soit la marque ?'))
+      .toBe('montre');
+    expect(requeteProduitUtilisateur('Montre-moi un bracelet')).toBe('bracelet');
+  });
+
+  it('reconnait une réaction qui ne doit pas lancer le catalogue', () => {
+    expect(messageConversationnel('Tu es bête')).toBe(true);
+    expect(messageConversationnel('Bonjour, ça va ?')).toBe(true);
+    expect(messageConversationnel('montre')).toBe(false);
   });
 });

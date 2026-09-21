@@ -21,6 +21,7 @@ import {
   demandeDeProximite,
   demandeDeRepas,
   normaliserIntention,
+  requeteProduitUtilisateur,
 } from './intents.js';
 
 /**
@@ -56,6 +57,13 @@ export interface ToolContext {
 export interface ToolOutcome {
   summary: unknown;
   components: Component[];
+  /**
+   * Réponse déjà vérifiée et prête à afficher.
+   *
+   * Quand elle existe, rappeler le modèle uniquement pour reformuler cette
+   * phrase ajoute plusieurs secondes sans ajouter d'information.
+   */
+  content?: string;
 }
 
 type Executor = (args: Record<string, unknown>, ctx: ToolContext) => Promise<ToolOutcome>;
@@ -172,6 +180,7 @@ const listerCategories: Executor = async (_args, ctx) => {
   if (items.length === 0) return vide;
 
   return {
+    content: 'Voici les catégories disponibles.',
     summary: { categories: items.map((c) => ({ id: c.id, nom: c.name })) },
     components: [categoryGrid(items)],
   };
@@ -225,6 +234,9 @@ const listerRestaurants: Executor = async (_args, ctx) => {
 
   const boutiques = (data ?? []) as Array<Record<string, unknown>>;
   return {
+    content: boutiques.length > 0
+      ? `Voici **${boutiques.length} restaurants** disponibles.`
+      : 'Aucun restaurant disponible pour le moment.',
     summary: {
       resultats: boutiques.length,
       boutiques: boutiques.map((boutique) => ({
@@ -309,19 +321,26 @@ async function optionsCorrespondantes(
 }
 
 const rechercherProduits: Executor = async (args, ctx) => {
-  const requete = texte(args, 'requete');
-  if (!requete) return vide;
+  const requeteModele = texte(args, 'requete');
+  if (!requeteModele) return vide;
   const boutique = texte(args, 'boutique');
-  const intent = await catalogueDuContexte(ctx, boutique ? `${requete} chez ${boutique}` : requete);
+  const intent = await catalogueDuContexte(ctx, boutique ? `${requeteModele} chez ${boutique}` : requeteModele);
   const menu = await merchantIntentAnswer(ctx.db, intent);
   if (menu) return menu;
+  // Le modèle choisit l'outil, pas les mots recherchés. Quand le client a
+  // écrit « pommade », une requête inventée comme « lait corps crème beurre
+  // karité » ne doit jamais remplacer sa demande et ouvrir 46 faux résultats.
+  const requete = requeteProduitUtilisateur(
+    ctx.currentMessage ? intent.query : requeteModele,
+  );
+  if (!requete) return vide;
   let categorieId = texte(args, 'categorie_id') || undefined;
   const domaineRepas = texte(args, 'domaine') === 'repas' || demandeDeRepas(ctx.currentMessage ?? '');
   if (!categorieId && !intent.merchants.length && domaineRepas) {
     categorieId = await categorieRestaurants(ctx) ?? undefined;
   }
   const filter = {
-    q: intent.merchants.length ? intent.query : requete,
+    q: requete,
     merchant_ids: intent.merchants.length ? intent.merchants.map((merchant) => merchant.id) : undefined,
     category_id: categorieId, limit: 8,
   };
@@ -403,6 +422,7 @@ const rechercherParImage: Executor = async (args, ctx) => {
       if (produits.length > 0) {
         const meilleur = Number((data as Record<string, unknown>[])[0]?.['score'] ?? 0);
         return {
+          content: 'Voici les articles qui correspondent à votre photo.',
           summary: {
             recherche: 'par ressemblance visuelle',
             // Le score est ici une vraie similarité, pas une fusion de
@@ -426,6 +446,7 @@ const rechercherParImage: Executor = async (args, ctx) => {
 
   if (!motsCles) {
     return {
+      content: "Je n'arrive pas à identifier clairement ce produit sur la photo.",
       summary: { erreur: erreurVision ?? 'image illisible' },
       components: [],
     };
@@ -438,6 +459,9 @@ const rechercherParImage: Executor = async (args, ctx) => {
   const produits = await chercherEnRaccourcissant(ctx, motsCles);
 
   return {
+    content: produits.length > 0
+      ? 'Voici les articles qui correspondent à votre photo.'
+      : `Je reconnais **${motsCles}**, mais aucun article correspondant n'est disponible sur Tovo.`,
     summary: {
       recherche: 'par mots-clés lus sur la photo',
       // Ce que la photo a donné comme mots-clés. Le modèle peut ainsi dire
@@ -523,6 +547,7 @@ const boutiquesProches: Executor = async (args, ctx) => {
   if (boutiques.length === 0) return vide;
 
   return {
+    content: `Voici **${boutiques.length} boutiques ouvertes** autour de vous.`,
     summary: {
       boutiques: boutiques.map((m) => ({
         id: m.id,
@@ -622,7 +647,11 @@ const comparerPrix: Executor = async (args, ctx) => {
   if (error) throw error;
 
   const lignes = (data ?? []) as Array<Record<string, unknown>>;
-  if (lignes.length === 0) return { summary: { resultats: 0, requete }, components: [] };
+  if (lignes.length === 0) return {
+    content: `Je ne trouve aucune offre pour **${requete}** pour le moment.`,
+    summary: { resultats: 0, requete },
+    components: [],
+  };
 
   const results = lignes.map((l) => ({
     source_kind: l.source_kind,
@@ -637,6 +666,7 @@ const comparerPrix: Executor = async (args, ctx) => {
   }));
 
   return {
+    content: `Voici les offres disponibles pour **${requete}**.`,
     summary: {
       requete,
       offres: results.map((r) => ({

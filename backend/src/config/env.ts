@@ -54,6 +54,9 @@ const schema = z.object({
   // alias change de modèle sans prévenir, et le comportement du function
   // calling se décale un matin sans que rien dans le dépôt ne l'explique.
   GEMINI_MODEL: z.string().default('gemini-3.8-flash'),
+  // Les tâches mécaniques (transcription et mots-clés d'une photo) ne
+  // doivent pas payer la latence du modèle conversationnel principal.
+  GEMINI_FAST_MODEL: z.string().default('gemini-3.5-flash-lite'),
 
   REDIS_URL: z.string().optional(),
   SENTRY_DSN: z.string().optional(),

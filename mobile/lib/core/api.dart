@@ -209,6 +209,9 @@ class TovoApi {
                 .transform(const LineSplitter())) {
           if (line.trim().isEmpty) continue;
           final event = jsonDecode(line) as Map<String, dynamic>;
+          // Battement technique du serveur : il empêche le réseau de couper
+          // pendant une réflexion longue, mais ne représente rien à afficher.
+          if (event['type'] == 'heartbeat') continue;
           if (event['type'] == 'done' || event['type'] == 'error') {
             result = _chatResponse(event, event['status'] as int? ?? 200);
           } else {

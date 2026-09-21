@@ -8,6 +8,44 @@ export function normaliserIntention(texte: string): string {
     .replace(/\s+/g, ' ');
 }
 
+const MOTS_RECHERCHE_VIDES = new Set([
+  'a', 'ai', 'as', 'au', 'aux', 'autre', 'autres', 'avez', 'avoir',
+  'catalogue', 'ce', 'cherche', 'chercher', 'commande', 'commander',
+  'de', 'des', 'disponible', 'disponibles', 'donne', 'donnez', 'du',
+  'en', 'est', 'il', 'importe', 'j', 'je', 'la', 'le', 'les', 'marque',
+  'manger', 'moi', 'nous', 'ou', 'pour', 'prendre', 'produit', 'produits',
+  'qu', 'que', 'quel', 'quelle', 'quelles', 'quels', 'quoi', 'recherche',
+  'rechercher', 'soit', 'souhaite', 'svp', 'toutes', 'tous', 'trouve',
+  'trouver', 'tu', 'un', 'une', 'veut', 'veux', 'voir', 'voudrais', 'vous',
+  'y', 'acheter', 'article', 'articles',
+]);
+
+/**
+ * Les mots réellement demandés par le client, sans laisser le modèle les
+ * remplacer par des synonymes ou des catégories supposées.
+ *
+ * « De la pommade » devient `pommade`, « avez-vous une autre montre ? »
+ * devient `montre`. En revanche, `montre` reste intact quand il désigne
+ * l'objet ; seul « montre-moi » est reconnu comme un verbe d'interface.
+ */
+export function requeteProduitUtilisateur(texte: string): string {
+  let normalise = normaliserIntention(texte);
+  normalise = normalise.replace(/^montre(?:z)? moi\b/, '').trim();
+  return normalise
+    .split(' ')
+    .filter(Boolean)
+    .filter((mot) => !MOTS_RECHERCHE_VIDES.has(mot))
+    .join(' ');
+}
+
+/** Une phrase sociale ou émotionnelle ne doit jamais devenir un produit. */
+export function messageConversationnel(texte: string): boolean {
+  const normalise = normaliserIntention(texte);
+  return /^(bonjour|bonsoir|salut|merci|ca va|comment vas tu|comment allez vous)\b/.test(normalise)
+    || /^(tu es|vous etes|t es)\b/.test(normalise)
+    || /\b(stupide|bete|idiot|nulle?|mauvais)\b/.test(normalise);
+}
+
 export function demandeDeRepas(texte: string): boolean {
   const normalise = normaliserIntention(texte);
   return /\b(manger|mange|faim|repas|restaurant|restaurants|resto|restos|plat|plats|dejeuner|diner|cuisine)\b/.test(

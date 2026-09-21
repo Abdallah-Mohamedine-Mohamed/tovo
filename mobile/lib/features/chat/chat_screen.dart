@@ -95,6 +95,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _scrollScheduled = false;
 
   bool _charge = false;
+  bool _reponseCommencee = false;
   String? _conversationId;
   int _navigation = 0;
   int _voiceGeneration = 0;
@@ -315,7 +316,10 @@ class _ChatScreenState extends State<ChatScreen> {
     bool remplaceLeDernier = false,
   }) async {
     final navigation = _navigation;
-    setState(() => _charge = true);
+    setState(() {
+      _charge = true;
+      _reponseCommencee = false;
+    });
     final reponse = await requete();
     if (!mounted || navigation != _navigation) return;
 
@@ -400,6 +404,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 .toList();
           }
           if (partialText.isNotEmpty || partialComponents.isNotEmpty) {
+            _reponseCommencee = true;
+          }
+          if (partialText.isNotEmpty || partialComponents.isNotEmpty) {
             final tour = _Tour(
               deLAssistant: true,
               contenu: partialText,
@@ -418,6 +425,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!mounted || navigation != _navigation) return;
     setState(() {
       _charge = false;
+      _reponseCommencee = false;
       final tour = _Tour(
         deLAssistant: true,
         contenu: response.content,
@@ -1692,7 +1700,9 @@ class _ChatScreenState extends State<ChatScreen> {
           AnimatedSize(
             duration: TovoTheme.normal,
             curve: TovoTheme.courbe,
-            child: _charge ? const _EnReflexion() : const SizedBox.shrink(),
+            child: _charge && !_reponseCommencee
+                ? const _EnReflexion()
+                : const SizedBox.shrink(),
           ),
           if (_transcribing || _voiceError != null || _voiceDraft)
             Padding(

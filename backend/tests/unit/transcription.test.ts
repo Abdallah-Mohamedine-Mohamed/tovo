@@ -5,7 +5,9 @@ import { chatRoutes } from '../../src/routes/chat.js';
 
 const generate = vi.hoisted(() => vi.fn());
 vi.mock('../../src/ai/llmClient.js', () => ({
-  llmClient: () => ({ model: 'test', generate }), llmEnabled: true,
+  llmClient: () => ({ model: 'test', generate }),
+  fastLlmClient: () => ({ model: 'test-fast', generate }),
+  llmEnabled: true,
   LlmUnavailableError: class extends Error {},
 }));
 
@@ -15,7 +17,10 @@ describe('Transcription avant envoi', () => {
   it('renvoie les paroles, pas une réponse commerciale', async () => {
     generate.mockResolvedValue({ text: JSON.stringify({ text: ' Deux tacos sans piment chez Otakoss. ' }), toolCalls: [] });
     expect(await transcribe({ mime: 'audio/mp4', data: 'YXVkaW8=' })).toBe('Deux tacos sans piment chez Otakoss.');
-    expect(generate.mock.calls[0]?.[0]).toMatchObject({ tools: [], cachePrompt: false, history: [{ audio: { mime: 'audio/mp4', data: 'YXVkaW8=' } }] });
+    expect(generate.mock.calls[0]?.[0]).toMatchObject({
+      tools: [], cachePrompt: false, thinking: 'off',
+      history: [{ audio: { mime: 'audio/mp4', data: 'YXVkaW8=' } }],
+    });
   });
 
   it('refuse une sortie non structurée plutôt que de créer un faux message', async () => {

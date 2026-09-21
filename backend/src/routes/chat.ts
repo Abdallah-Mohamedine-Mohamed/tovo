@@ -317,6 +317,56 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           ? body.data.text
           : interactionEnMessage(body.data.interaction!.action, body.data.interaction!.payload);
 
+    // Ces interactions désignent déjà exactement l'opération à effectuer.
+    // Les faire interpréter par Gemini ajoutait deux appels séquentiels : un
+    // pour choisir l'outil, puis un autre pour reformuler son résultat.
+    const actionDirecte = body.data.interaction?.action;
+    const outilDirect = actionDirecte === 'search_by_image'
+      ? 'rechercher_par_image'
+      : actionDirecte === 'compare_price'
+        ? 'comparer_prix'
+        : null;
+    if (outilDirect) {
+      const executer = EXECUTORS[outilDirect];
+      if (!executer) throw new Error(`outil ${outilDirect} absent`);
+      const resultat = await executer(body.data.interaction!.payload, {
+        db,
+        userId,
+        currentMessage: message,
+        ...(body.data.context ? { position: body.data.context } : {}),
+      });
+      const contenu = resultat.content ?? (resultat.components.length > 0
+        ? 'Voici ce que je trouve.'
+        : "Je n'ai rien trouvé pour le moment.");
+
+      emit({ type: 'conversation', conversation_id: conversationId });
+      emit({ type: 'results', components: resultat.components });
+      emit({ type: 'text', text: contenu });
+
+      await db.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'user',
+        content: libelleLisible(actionDirecte!, body.data.interaction!.payload) ?? message,
+        client_message_id: body.data.client_message_id,
+      });
+      await db.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: contenu,
+        components: resultat.components,
+      });
+
+      request.log.info({
+        conversationId,
+        action: actionDirecte,
+        duration_ms: Math.round(performance.now() - started),
+      }, 'interaction traitee sans orchestration');
+      return output.finish({
+        conversation_id: conversationId,
+        ...envelope(contenu, resultat.components),
+      });
+    }
+
     // Un envoi de colis n'a rien à interpréter : il ouvre toujours le même
     // formulaire. Le laisser au modèle lui faisait parfois appeler
     // `mes_adresses`, puis traiter le choix comme une livraison de panier.

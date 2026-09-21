@@ -22,8 +22,8 @@
 #      App Store Connect > Utilisateurs et accès > Intégrations >
 #      App Store Connect API > « + ». Rôle « App Manager » suffit, Admin
 #      n'est pas nécessaire. Récupérer : Issuer ID, Key ID, fichier .p8.
-#      Dans Codemagic : Teams > Integrations > App Store Connect, la nommer
-#      exactement `tovo_asc_key`.
+#      Déjà fait : la clé « clé tovopay » (KQ62G77UN9) est enregistrée dans
+#      Codemagic et couvre Tovo, puisque les deux apps partagent le compte.
 #
 #   2. Un groupe de variables `tovo_config` contenant, en SECRET :
 #      SUPABASE_URL, SUPABASE_ANON_KEY, API_BASE_URL.
@@ -53,12 +53,45 @@ workflows:
         # nouvelle fiche et ferait perdre les utilisateurs existants.
         BUNDLE_ID: com.tovoapp.UserApp
         APP_APPLE_ID: 6740201431
+
+        # 4.1.0, et non le 2.1.0 de pubspec.yaml.
+        #
+        # App Store Connect porte déjà une 4.0.12 (build 12, 22 août 2025).
+        # Un nom de version inférieur passerait sur TestFlight, mais rendrait
+        # la liste des builds incompréhensible — une 2.1.0 posée sous une
+        # 4.0.12, et personne ne saurait laquelle est la plus récente.
+        #
+        # Le nom vit ici plutôt que dans pubspec.yaml : celui-ci sert aux
+        # APK Android, dont la numérotation n'a jamais suivi celle d'iOS.
+        NOM_VERSION: 4.1.0
+      # SIGNATURE AUTOMATIQUE. Ces trois lignes, combinées à l'intégration
+      # ci-dessous, suffisent : Codemagic récupère le certificat et crée le
+      # profil de provisionnement avant la compilation, à partir de la clé
+      # API App Store Connect.
+      #
+      # J'avais d'abord ajouté une étape manuelle — `fetch-signing-files`,
+      # `keychain initialize`, `use-profiles`. C'est l'ancienne méthode, celle
+      # qu'on emploie quand on gère ses certificats soi-même. Les deux
+      # ensemble se marchent dessus. Elle est retirée.
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.tovoapp.UserApp
 
     integrations:
-      app_store_connect: tovo_asc_key
+      # Une clé API App Store Connect appartient à un COMPTE Apple, jamais à
+      # une app : elle ouvre toutes celles de l'équipe. Les deux clés
+      # enregistrées dans Codemagic — « clé tovopay » et « lenqueteur » —
+      # relèvent du même compte, donc les DEUX conviendraient.
+      #
+      # Celle-ci est retenue parce qu'elle est ÉPROUVÉE : elle envoie déjà
+      # des builds TovoPay. L'autre n'a jamais servi pour ce compte-ci, et
+      # une clé peut avoir un rôle trop restreint pour créer un profil ou
+      # téléverser — ça ne se voit qu'à l'échec.
+      #
+      # Si le build s'arrête à la signature, remplacer par « lenqueteur »
+      # est la première chose à essayer. Le nom doit correspondre au
+      # caractère près à celui de Settings > Integrations > Developer Portal.
+      app_store_connect: "clé tovopay"
 
     triggering:
       # Aucun déclenchement automatique. Un build iOS part chez Apple : il se
@@ -68,17 +101,6 @@ workflows:
     scripts:
       - name: Paquets Flutter
         script: flutter pub get
-
-      - name: Profils de signature
-        script: |
-          # Codemagic crée le profil s'il n'existe pas encore, à partir de la
-          # clé API. Aucun certificat à générer sur un Mac.
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create
-          keychain initialize
-          keychain add-certificates
-          xcode-project use-profiles
 
       - name: Pods
         script: |
@@ -94,8 +116,10 @@ workflows:
           DERNIER=$(app-store-connect get-latest-testflight-build-number \
                       "$APP_APPLE_ID" --platform IOS 2>/dev/null || echo "")
           if [ -z "$DERNIER" ]; then
-            # Aucun build TestFlight : on part de la version publiée (4).
-            DERNIER=4
+            # Repli si l'API ne répond pas. 12 est le plus haut build déjà
+            # chargé — la 4.0.12 du 22 août 2025, visible dans TestFlight.
+            # Un numéro inférieur serait refusé par Apple.
+            DERNIER=12
           fi
           echo "NUMERO_BUILD=$((DERNIER + 1))" >> "$CM_ENV"
 
@@ -106,7 +130,7 @@ workflows:
           # Sans lui, la compilation échoue sans expliquer pourquoi.
           flutter build ipa --release \
             -t lib/main_client.dart \
-            --build-name=2.1.0 \
+            --build-name="$NOM_VERSION" \
             --build-number="$NUMERO_BUILD" \
             --dart-define=SUPABASE_URL="$SUPABASE_URL" \
             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \

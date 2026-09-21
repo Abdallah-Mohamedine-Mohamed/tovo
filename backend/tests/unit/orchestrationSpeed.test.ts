@@ -5,7 +5,12 @@ import { llmClient } from '../../src/ai/llmClient.js';
 
 vi.mock('../../src/ai/llmClient.js', () => ({ llmClient: vi.fn(), LlmUnavailableError: class extends Error {} }));
 vi.mock('../../src/ai/systemPrompt.js', () => ({ SYSTEM_PROMPT: 'test', contexteUtilisateur: () => '' }));
-vi.mock('../../src/services/catalogue.js', () => ({ resolveCatalogueIntent: vi.fn(async () => undefined), merchantIntentAnswer: vi.fn() }));
+vi.mock('../../src/services/catalogue.js', () => ({
+  resolveCatalogueIntent: vi.fn(async () => undefined),
+  merchantIntentAnswer: vi.fn(),
+  cataloguePage: vi.fn(async () => ({ items: [], total: 0, offset: 0, next_offset: null, match_type: 'exact' })),
+  searchAnswer: vi.fn(),
+}));
 vi.mock('../../src/ai/tools.js', () => ({
   TOOL_DEFINITIONS: [{ name: 'obtenir_produit' }, { name: 'ajouter_au_panier' }],
   EXECUTORS: {
@@ -64,4 +69,35 @@ it('retire les premières cartes dès que la recherche affinée ne trouve rien',
   expect(results[1]?.components).toEqual([]);
   expect(response.components).toEqual([]);
   expect(events.indexOf(results[1]!)).toBeLessThan(events.findIndex((event) => event.type === 'text'));
+});
+
+it('ne rappelle pas le modèle quand un outil fournit déjà la réponse finale', async () => {
+  const generate = vi.fn(async () => ({
+    text: '',
+    toolCalls: [{ name: 'rechercher_produits', args: { requete: 'poulet' } }],
+  }));
+  vi.mocked(llmClient).mockReturnValue({ generate } as never);
+  const builder: Record<string, unknown> = {};
+  for (const method of ['select', 'eq', 'in', 'order', 'insert']) builder[method] = () => builder;
+  builder.limit = async () => ({ data: [] });
+  builder.single = async () => ({ data: { id: 'message' } });
+  const db = { from: () => builder } as unknown as SupabaseClient;
+
+  const original = (await import('../../src/ai/tools.js')).EXECUTORS.rechercher_produits;
+  (await import('../../src/ai/tools.js')).EXECUTORS.rechercher_produits = async () => ({
+    content: 'Voici les produits.',
+    summary: { resultats: 2 },
+    components: [],
+  });
+  try {
+    const response = await orchestrate({
+      db, userId: 'client', conversationId: 'conversation',
+      clientMessageId: 'message', message: 'Ajoute cette sélection à ma commande',
+    });
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(response.content).toBe('Voici les produits.');
+    expect(response.usage.cycles).toBe(1);
+  } finally {
+    (await import('../../src/ai/tools.js')).EXECUTORS.rechercher_produits = original!;
+  }
 });

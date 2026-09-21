@@ -75,6 +75,8 @@ export interface LlmRequest {
   cachePrompt?: boolean;
   responseSchema?: Record<string, unknown>;
   onText?: (text: string) => void;
+  /** `off` pour les tâches mécaniques où réfléchir ne fait qu'attendre. */
+  thinking?: 'low' | 'off';
 }
 
 export interface LlmClient {
@@ -203,7 +205,7 @@ export class GeminiClient implements LlmClient {
   }
 
   private async appeler(
-    { system, history, tools, responseSchema, onText }: LlmRequest,
+    { system, history, tools, responseSchema, onText, thinking = 'low' }: LlmRequest,
     cache: string | null,
   ): Promise<LlmResponse> {
     const url =
@@ -230,7 +232,7 @@ export class GeminiClient implements LlmClient {
         // Une conversation de commande doit rester rapide. Gemini 3.8
         // remplace les budgets numeriques par low / medium / high ; low
         // suffit pour choisir un outil et rediger une reponse courte.
-        thinkingConfig: { thinkingLevel: 'low' },
+        ...(thinking === 'low' ? { thinkingConfig: { thinkingLevel: 'low' } } : {}),
       },
     };
 
@@ -341,6 +343,7 @@ export class GeminiClient implements LlmClient {
 }
 
 let client: LlmClient | null = null;
+let fastClient: LlmClient | null = null;
 
 /**
  * Le client courant, ou `null` si aucune clé n'est configurée.
@@ -352,6 +355,12 @@ export function llmClient(): LlmClient | null {
   if (!env.GEMINI_API_KEY) return null;
   client ??= new GeminiClient(env.GEMINI_API_KEY);
   return client;
+}
+
+export function fastLlmClient(): LlmClient | null {
+  if (!env.GEMINI_API_KEY) return null;
+  fastClient ??= new GeminiClient(env.GEMINI_API_KEY, env.GEMINI_FAST_MODEL);
+  return fastClient;
 }
 
 export const llmEnabled = Boolean(env.GEMINI_API_KEY);
