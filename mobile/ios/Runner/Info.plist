@@ -6,6 +6,18 @@
 	     utilise tous les deux, le client choisit lequel. Sans ces deux
 	     clés, iOS termine l’application à l’instant où elle demande
 	     l’accès, et Apple refuse le téléversement du binaire. -->
+	<!-- LA CONFORMITÉ AU CHIFFREMENT, RÉPONDUE UNE FOIS POUR TOUTES.
+	
+	     Sans cette clé, App Store Connect pose la question à CHAQUE nouvelle
+	     version — « votre app utilise-t-elle du chiffrement ? » — et les
+	     testeurs ne peuvent rien installer tant que personne n'a répondu.
+	
+	     `false` est exact ici : Tovo n'emploie que HTTPS, qui relève des
+	     exemptions prévues par la réglementation américaine. Ce serait faux,
+	     et donc à corriger, le jour où l'application chiffrerait elle-même
+	     des données — un coffre local, une messagerie bout en bout. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Pour photographier un produit et le retrouver dans le catalogue Tovo.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

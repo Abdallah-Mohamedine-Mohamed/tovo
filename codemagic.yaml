@@ -216,6 +216,21 @@ workflows:
         # il mérite d'être lisible plutôt que sous-entendu.
         submit_to_app_store: false
 
+        # LES GROUPES REÇOIVENT LE BUILD TOUT SEULS.
+        #
+        # Sans ces lignes, chaque envoi atterrit dans TestFlight sans
+        # destinataire : il faut retourner dans App Store Connect et cocher
+        # les groupes à la main. Une manipulation par build, pour une
+        # information qui ne change jamais.
+        #
+        # Les noms doivent correspondre EXACTEMENT à ceux d'App Store
+        # Connect, casse comprise — « Team tovo » et « tovo » sont deux
+        # groupes distincts, et une faute de frappe fait échouer la
+        # distribution sans empêcher l'envoi.
+        beta_groups:
+          - Team tovo
+          - tovo
+
       email:
         recipients:
           - mohamedine@tovoapp.com
