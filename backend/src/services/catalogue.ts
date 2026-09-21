@@ -70,16 +70,20 @@ export async function cataloguePage(db: SupabaseClient, filter: CatalogueFilter,
   let page = response.data as CataloguePage;
   if (page.total === 0 && parameters.p_query && semantic && embeddingsEnabled) {
     const normalizedQuery = normaliserIntention(parameters.p_query);
-    if (!parameters.p_category && normalizedQuery && !normalizedQuery.includes(' ')) {
+    const singleWord = normalizedQuery.length > 0 && !normalizedQuery.includes(' ');
+    if (!parameters.p_category && singleWord) {
       const { data: categories, error } = await db.from('categories')
-        .select('id, name').eq('is_active', true).ilike('name', parameters.p_query).limit(2);
+        .select('id, name').eq('is_active', true).limit(500);
       if (error) throw error;
-      const category = categories?.length === 1 ? categories[0] : undefined;
-      if (category && normaliserIntention(category.name as string) === normalizedQuery) {
-        parameters.p_category = category.id as string;
-      }
+      const singular = (word: string) => word.replace(/s$/, '');
+      const matches = (categories ?? []).filter((category) =>
+        normaliserIntention(category.name as string).split(' ').some((word) => singular(word) === singular(normalizedQuery)));
+      const exact = matches.filter((category) => singular(normaliserIntention(category.name as string)) === singular(normalizedQuery));
+      const category = exact.length === 1 ? exact[0] : matches.length === 1 ? matches[0] : undefined;
+      if (category) parameters.p_category = category.id as string;
     }
-    const vector = await embed(parameters.p_query, 'query').catch(() => null);
+    const vector = singleWord && !parameters.p_category ? null
+      : await embed(parameters.p_query, 'query').catch(() => null);
     if (vector) {
       response = await db.rpc('catalog_products_page', { ...parameters, p_embedding: JSON.stringify(vector) });
       if (response.error) throw response.error;

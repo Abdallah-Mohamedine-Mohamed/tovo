@@ -97,7 +97,7 @@ beforeAll(async () => {
   await database.exec(migration);
   for (const merchant of merchants) await database.query('insert into merchants values ($1,$2,$3,$4)', [merchant.id, merchant.name, merchant.is_approved, merchant.is_open]);
   await database.query('insert into categories(id,name,parent_id,slug) values ($1,$2,null,$3),($4,$5,$1,null),($6,$7,$1,null),($8,$9,null,null)',
-    [root, 'Restaurants', 'restaurants-m3', category, 'Plats', boissons, 'Boissons', watches, 'Montre']);
+    [root, 'Restaurants', 'restaurants-m3', category, 'Plats', boissons, 'Boissons', watches, 'Montres et bijoux']);
   for (let index = 0; index < 75; index++) await database.query(
     'insert into products(id,merchant_id,category_id,name,price) values ($1,$2,$3,$4,2500)',
     [randomUUID(), index % 2 === 0 ? centre : marche, category, `Poulet ${String(index).padStart(2, '0')}`]);
@@ -123,11 +123,22 @@ describe('catalogue complet', () => {
     expect((raw.data as CataloguePage).items[0]?.name).toBe('Pastèque');
     const page = await cataloguePage(adapter, { q: 'Montre', limit: 8 });
     expect(page).toMatchObject({ total: 0, items: [], category_id: watches });
+    expect(await cataloguePage(adapter, { q: 'montres', limit: 8 })).toMatchObject({ total: 0, items: [], category_id: watches });
     const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),
       clientMessageId: randomUUID(), message: 'Montre' });
     expect(answer.content).toContain('Aucun résultat');
     expect(answer.components).toEqual([]);
     expect(answer.usage.cycles).toBe(0);
+  });
+
+  it('ne montre pas une boisson pour un article absent, même sans catégorie dédiée', async () => {
+    const page = await cataloguePage(adapter, { q: 'horloge', limit: 8 });
+    expect(page).toMatchObject({ total: 0, items: [] });
+    const answer = await EXECUTORS.rechercher_produits!({ requete: 'horloge' }, {
+      db: adapter, userId: randomUUID(), currentMessage: 'Il y a des horloges, quelle que soit la marque ?',
+    });
+    expect(answer.components).toEqual([]);
+    expect(answer.summary).toMatchObject({ total: 0 });
   });
 
   it('parcourt toutes les pages de poulet sans doublon ni plafond de 8 ou 60', async () => {
