@@ -64,18 +64,6 @@ workflows:
         # Le nom vit ici plutôt que dans pubspec.yaml : celui-ci sert aux
         # APK Android, dont la numérotation n'a jamais suivi celle d'iOS.
         NOM_VERSION: 4.1.0
-      # SIGNATURE AUTOMATIQUE. Ces trois lignes, combinées à l'intégration
-      # ci-dessous, suffisent : Codemagic récupère le certificat et crée le
-      # profil de provisionnement avant la compilation, à partir de la clé
-      # API App Store Connect.
-      #
-      # J'avais d'abord ajouté une étape manuelle — `fetch-signing-files`,
-      # `keychain initialize`, `use-profiles`. C'est l'ancienne méthode, celle
-      # qu'on emploie quand on gère ses certificats soi-même. Les deux
-      # ensemble se marchent dessus. Elle est retirée.
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.tovoapp.UserApp
 
     integrations:
       # Une clé API App Store Connect appartient à un COMPTE Apple, jamais à
@@ -101,6 +89,30 @@ workflows:
     scripts:
       - name: Paquets Flutter
         script: flutter pub get
+
+      - name: Certificat et profil de signature
+        script: |
+          # `--create` EST LE MOT IMPORTANT.
+          #
+          # J'avais d'abord confié la signature au bloc `ios_signing`, en le
+          # croyant équivalent. Il ne l'est pas : il CHERCHE un profil, il n'en
+          # crée pas. Le premier build a échoué sur « No matching profiles
+          # found for bundle identifier com.tovoapp.UserApp » — aucun profil
+          # App Store n'existait encore pour ce bundle.
+          #
+          # Cette commande le crée, et récupère au passage le certificat de
+          # distribution. Les deux approches ne peuvent pas coexister : la
+          # signature automatique s'exécute avant les scripts et fait échouer
+          # le build avant que celui-ci ne puisse rattraper quoi que ce soit.
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+
+          # Le certificat récupéré entre dans le trousseau de la machine,
+          # puis Xcode est configuré pour employer le profil.
+          keychain initialize
+          keychain add-certificates
+          xcode-project use-profiles
 
       - name: Pods
         script: |
