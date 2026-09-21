@@ -114,11 +114,6 @@ workflows:
           keychain add-certificates
           xcode-project use-profiles
 
-      - name: Pods
-        script: |
-          cd ios
-          pod install
-
       - name: Numéro de build
         script: |
           # Apple REFUSE un build dont le numéro n'est pas strictement
@@ -135,6 +130,16 @@ workflows:
           fi
           echo "NUMERO_BUILD=$((DERNIER + 1))" >> "$CM_ENV"
 
+      # PAS D'ÉTAPE `pod install` AVANT CELLE-CI.
+      #
+      # J'en avais mis une ; elle a fait échouer le deuxième build sur
+      # « No `Podfile` found in the project directory ». Et pour cause : ce
+      # projet n'a jamais été compilé pour iOS — il se développe sous
+      # Windows — donc le Podfile n'existe pas encore. C'est Flutter qui le
+      # génère, au moment du build, à partir des greffons de pubspec.yaml.
+      #
+      # `flutter build ipa` appelle CocoaPods lui-même. Le faire avant, c'est
+      # demander à installer des dépendances dont la liste n'est pas écrite.
       - name: Construire l'IPA
         script: |
           # -t est OBLIGATOIRE : il n'existe pas de lib/main.dart dans ce
