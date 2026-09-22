@@ -1306,13 +1306,14 @@ class _ChatScreenState extends State<ChatScreen> {
     final motionDuration = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero
         : TovoTheme.normal;
+    final listening = activity == AssistantActivity.listening;
     return PopScope<void>(
       canPop: focusedTour == null,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _closeFocusedResults();
       },
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: listening ? kAssistantListeningSurface : Colors.white,
         drawer: TiroirConversations(
           api: widget.api,
           conversationCourante: _conversationId,
@@ -1320,6 +1321,10 @@ class _ChatScreenState extends State<ChatScreen> {
           onNouvelle: _nouvelleConversation,
         ),
         appBar: AppBar(
+          backgroundColor: listening
+              ? kAssistantListeningSurface
+              : Colors.white,
+          surfaceTintColor: Colors.transparent,
           // Les trois traits, et rien d'autre.
           //
           // J'avais mis une icône de conversation, en me disant qu'elle
@@ -1359,9 +1364,9 @@ class _ChatScreenState extends State<ChatScreen> {
                     duration: motionDuration,
                     opacity: focusedTour != null
                         ? 0.28
-                        : activity == AssistantActivity.listening ||
+                        : listening ||
                               activity == AssistantActivity.transcribing
-                        ? 0.72
+                        ? 0.8
                         : 1,
                     child: IgnorePointer(
                       ignoring: focusedTour != null,
@@ -1429,10 +1434,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   Positioned.fill(
                     child: IgnorePointer(
                       child: TweenAnimationBuilder<double>(
-                        tween: Tween(
-                          begin: 0,
-                          end: activity == AssistantActivity.listening ? 1 : 0,
-                        ),
+                        tween: Tween(begin: 0, end: listening ? 1 : 0),
                         duration: motionDuration,
                         curve: TovoTheme.courbe,
                         builder: (context, progress, _) => progress == 0
@@ -1445,7 +1447,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 child: ColoredBox(
                                   color: const Color(
                                     0xFF6A707A,
-                                  ).withValues(alpha: progress * 0.16),
+                                  ).withValues(alpha: progress * 0.11),
                                 ),
                               ),
                       ),
@@ -1515,34 +1517,39 @@ class _ChatScreenState extends State<ChatScreen> {
                   ],
                 ),
               ),
-            AnimatedSwitcher(
+            AnimatedContainer(
               duration: motionDuration,
-              switchInCurve: TovoTheme.courbe,
-              child: activity == null
-                  ? _BarreDeSaisieNouveau(
-                      key: const ValueKey('composer'),
-                      controller: _saisie,
-                      onSend: _envoyer,
-                      onCamera: () => unawaited(_choisirLaSource()),
-                      photoPath: _photoDraft?.path,
-                      onRemovePhoto: () => setState(() => _photoDraft = null),
-                      onParoleTouche: _toucherLeMicro,
-                    )
-                  : AssistantActivityDock(
-                      key: const ValueKey('activity'),
-                      activity: activity,
-                      label: activity == AssistantActivity.searching
-                          ? _busyLabel
-                          : null,
-                      onPrimary: activity == AssistantActivity.listening
-                          ? () => unawaited(_toucherLeMicro())
-                          : null,
-                      onCancel: activity == AssistantActivity.listening
-                          ? () => unawaited(_annulerLaParole())
-                          : activity == AssistantActivity.transcribing
-                          ? _annulerTranscription
-                          : null,
-                    ),
+              curve: TovoTheme.courbe,
+              color: listening ? kAssistantListeningSurface : Colors.white,
+              child: AnimatedSwitcher(
+                duration: motionDuration,
+                switchInCurve: TovoTheme.courbe,
+                child: activity == null
+                    ? _BarreDeSaisieNouveau(
+                        key: const ValueKey('composer'),
+                        controller: _saisie,
+                        onSend: _envoyer,
+                        onCamera: () => unawaited(_choisirLaSource()),
+                        photoPath: _photoDraft?.path,
+                        onRemovePhoto: () => setState(() => _photoDraft = null),
+                        onParoleTouche: _toucherLeMicro,
+                      )
+                    : AssistantActivityDock(
+                        key: const ValueKey('activity'),
+                        activity: activity,
+                        label: activity == AssistantActivity.searching
+                            ? _busyLabel
+                            : null,
+                        onPrimary: activity == AssistantActivity.listening
+                            ? () => unawaited(_toucherLeMicro())
+                            : null,
+                        onCancel: activity == AssistantActivity.listening
+                            ? () => unawaited(_annulerLaParole())
+                            : activity == AssistantActivity.transcribing
+                            ? _annulerTranscription
+                            : null,
+                      ),
+              ),
             ),
           ],
         ),

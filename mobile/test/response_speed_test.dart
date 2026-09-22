@@ -16,6 +16,7 @@ import 'package:tovo/core/read_cache.dart';
 import 'package:tovo/core/theme.dart';
 import 'package:tovo/features/catalog/catalog_screen.dart';
 import 'package:tovo/features/catalog/product_screen.dart';
+import 'package:tovo/features/chat/assistant_activity_dock.dart';
 import 'package:tovo/features/chat/chat_screen.dart';
 
 http.Response jsonResponse(Object body) => http.Response(
@@ -417,7 +418,21 @@ void main() {
       expect(find.byType(BackdropFilter), findsOneWidget);
       expect(
         tester.widget<ColoredBox>(listeningTint).color,
-        const Color(0xFF6A707A).withValues(alpha: 0.16),
+        const Color(0xFF6A707A).withValues(alpha: 0.11),
+      );
+      expect(
+        tester.widget<AppBar>(find.byType(AppBar)).backgroundColor,
+        kAssistantListeningSurface,
+      );
+      expect(
+        tester
+            .widgetList<AnimatedContainer>(find.byType(AnimatedContainer))
+            .any(
+              (container) =>
+                  (container.decoration as BoxDecoration?)?.color ==
+                  kAssistantListeningSurface,
+            ),
+        isTrue,
       );
       expect(find.byTooltip('Arrêter et transcrire'), findsOneWidget);
       await tester.runAsync(() async {

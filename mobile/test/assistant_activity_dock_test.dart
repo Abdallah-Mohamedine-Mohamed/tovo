@@ -42,6 +42,8 @@ void main() {
     );
     expect(find.text('Je vous écoute'), findsOneWidget);
     expect(find.byIcon(Icons.mic_rounded), findsOneWidget);
+    expect(find.byType(CustomPaint), findsWidgets);
+    expect(find.byType(FadeTransition), findsWidgets);
     expect(
       find.byType(SizedBox).evaluate().any((element) {
         final box = element.widget as SizedBox;
