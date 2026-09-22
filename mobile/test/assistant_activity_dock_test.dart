@@ -42,6 +42,13 @@ void main() {
     );
     expect(find.text('Je vous écoute'), findsOneWidget);
     expect(find.byIcon(Icons.mic_rounded), findsOneWidget);
+    expect(
+      find.byType(SizedBox).evaluate().any((element) {
+        final box = element.widget as SizedBox;
+        return box.width == 58 && box.height == 58;
+      }),
+      isTrue,
+    );
     await tester.tap(find.byTooltip('Arrêter et transcrire'));
     await tester.tap(find.byTooltip('Annuler le vocal'));
     expect(stops, 1);
@@ -56,30 +63,5 @@ void main() {
     await showDock(tester, AssistantActivity.answering);
     expect(find.text('La réponse arrive…'), findsOneWidget);
     expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('le fond actif est fumé plutôt que blanc', (tester) async {
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(
-          body: Stack(
-            children: [
-              ColoredBox(color: Colors.white),
-              AssistantActivityAtmosphere(active: true),
-            ],
-          ),
-        ),
-      ),
-    );
-    final overlay = find.descendant(
-      of: find.byType(AssistantActivityAtmosphere),
-      matching: find.byType(ColoredBox),
-    );
-    expect(
-      tester.widgetList<ColoredBox>(overlay).map((box) => box.color),
-      contains(const Color(0x30434A54)),
-    );
-    expect(find.byType(BackdropFilter), findsOneWidget);
-    await tester.pumpWidget(const SizedBox.shrink());
   });
 }

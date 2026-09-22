@@ -1,161 +1,10 @@
 import 'dart:math';
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 
 enum AssistantActivity { listening, transcribing, searching, answering }
-
-class AssistantActivityAtmosphere extends StatefulWidget {
-  const AssistantActivityAtmosphere({super.key, required this.active});
-
-  final bool active;
-
-  @override
-  State<AssistantActivityAtmosphere> createState() =>
-      _AssistantActivityAtmosphereState();
-}
-
-class _AssistantActivityAtmosphereState
-    extends State<AssistantActivityAtmosphere>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse;
-
-  @override
-  void initState() {
-    super.initState();
-    _pulse = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2300),
-    );
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _updatePulse();
-  }
-
-  @override
-  void didUpdateWidget(AssistantActivityAtmosphere oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _updatePulse();
-  }
-
-  void _updatePulse() {
-    if (widget.active && !MediaQuery.disableAnimationsOf(context)) {
-      if (!_pulse.isAnimating) _pulse.repeat();
-    } else {
-      _pulse.stop();
-    }
-  }
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => IgnorePointer(
-    child: AnimatedOpacity(
-      opacity: widget.active ? 1 : 0,
-      duration: MediaQuery.disableAnimationsOf(context)
-          ? Duration.zero
-          : const Duration(milliseconds: 260),
-      child: RepaintBoundary(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            const ColoredBox(color: Color(0x30434A54)),
-            AnimatedBuilder(
-              animation: _pulse,
-              builder: (_, __) => ClipPath(
-                clipper: _LiquidClipper(_pulse.value),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                  child: const ColoredBox(color: Color(0x2094AFB5)),
-                ),
-              ),
-            ),
-            AnimatedBuilder(
-              animation: _pulse,
-              builder: (_, __) =>
-                  CustomPaint(painter: _AtmospherePainter(_pulse.value)),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-class _AtmospherePainter extends CustomPainter {
-  const _AtmospherePainter(this.progress);
-
-  final double progress;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(
-      size.width * (0.5 + 0.035 * sin(progress * 2 * pi)),
-      size.height * 0.9,
-    );
-    final radius = size.width * (0.72 + 0.05 * sin(progress * 2 * pi));
-    final glow = Paint()
-      ..shader = RadialGradient(
-        colors: const [Color(0x299DC5C5), Color(0x1699A0C3), Color(0x0099A0C3)],
-        stops: const [0, 0.55, 1],
-      ).createShader(Rect.fromCircle(center: center, radius: radius));
-    canvas.drawCircle(center, radius, glow);
-
-    canvas.drawPath(
-      _liquidPath(size, progress),
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: const [Color(0x00FFFFFF), Color(0x2793B5B4)],
-        ).createShader(Offset.zero & size),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _AtmospherePainter oldDelegate) =>
-      oldDelegate.progress != progress;
-}
-
-class _LiquidClipper extends CustomClipper<Path> {
-  const _LiquidClipper(this.progress);
-
-  final double progress;
-
-  @override
-  Path getClip(Size size) => _liquidPath(size, progress);
-
-  @override
-  bool shouldReclip(covariant _LiquidClipper oldClipper) =>
-      oldClipper.progress != progress;
-}
-
-Path _liquidPath(Size size, double progress) {
-  if (size.width <= 0 || size.height <= 0) return Path();
-  final waveTop = size.height * 0.78;
-  final amplitude = min(15.0, size.height * 0.025);
-  final wave = Path()..moveTo(0, size.height);
-  for (var position = 0.0; position <= size.width + 8; position += 8) {
-    final phase = position / size.width * 2 * pi;
-    final height =
-        waveTop +
-        amplitude * sin(phase + progress * 2 * pi) +
-        amplitude * 0.4 * sin(phase * 2 - progress * 2 * pi);
-    wave.lineTo(position, height);
-  }
-  return wave
-    ..lineTo(size.width, size.height)
-    ..close();
-}
 
 class AssistantActivityDock extends StatelessWidget {
   const AssistantActivityDock({
@@ -185,12 +34,24 @@ class AssistantActivityDock extends StatelessWidget {
       top: false,
       minimum: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: SizedBox(
-        height: 68,
+        height: listening ? 98 : 64,
         child: Stack(
           alignment: Alignment.bottomCenter,
           children: [
-            if (listening)
+            if (listening) ...[
+              const Positioned(
+                top: 0,
+                child: Text(
+                  'Je vous écoute',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: TovoTheme.tealDeep,
+                  ),
+                ),
+              ),
               const Positioned(bottom: 0, child: _ListeningPulse()),
+            ],
             Align(
               alignment: Alignment.bottomCenter,
               child: Tooltip(
@@ -198,41 +59,43 @@ class AssistantActivityDock extends StatelessWidget {
                     ? 'Arrêter et transcrire'
                     : label ?? _defaultLabel,
                 child: Material(
-                  color: TovoTheme.ink,
-                  elevation: 9,
-                  shadowColor: const Color(0x550E2525),
+                  color: TovoTheme.teal,
+                  elevation: 5,
+                  shadowColor: const Color(0x33006666),
                   borderRadius: BorderRadius.circular(32),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(32),
                     onTap: onPrimary,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 18,
-                        vertical: 15,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (listening)
-                            const Icon(
+                    child: listening
+                        ? const SizedBox.square(
+                            dimension: 58,
+                            child: Icon(
                               Icons.mic_rounded,
                               color: Colors.white,
-                              size: 19,
-                            )
-                          else
-                            const _ActivityWave(),
-                          const SizedBox(width: 10),
-                          Text(
-                            label ?? _defaultLabel,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
+                              size: 24,
+                            ),
+                          )
+                        : Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 18,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const _ActivityWave(),
+                                const SizedBox(width: 10),
+                                Text(
+                                  label ?? _defaultLabel,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                    ),
                   ),
                 ),
               ),
@@ -291,7 +154,7 @@ class _ListeningPulseState extends State<_ListeningPulse>
     child: AnimatedBuilder(
       animation: _animation,
       builder: (_, __) => CustomPaint(
-        size: const Size(220, 68),
+        size: const Size.square(74),
         painter: _PulsePainter(_animation.value),
       ),
     ),
@@ -305,36 +168,13 @@ class _PulsePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    for (var index = 0; index < 3; index++) {
-      final phase = (progress + index / 3) % 1;
-      final spread = 3 + phase * 16;
-      final rect = Rect.fromCenter(
-        center: size.center(Offset.zero),
-        width: 137 + spread * 2,
-        height: 43 + spread,
-      );
-      final path = Path();
-      for (var step = 0; step <= 48; step++) {
-        final angle = step / 48 * 2 * pi;
-        final ripple = 1 + 0.035 * sin(angle * 3 + progress * 2 * pi);
-        final point = Offset(
-          rect.center.dx + rect.width / 2 * cos(angle) * ripple,
-          rect.center.dy + rect.height / 2 * sin(angle) * ripple,
-        );
-        if (step == 0) {
-          path.moveTo(point.dx, point.dy);
-        } else {
-          path.lineTo(point.dx, point.dy);
-        }
-      }
-      path.close();
-      canvas.drawPath(
-        path,
-        Paint()
-          ..color = TovoTheme.teal.withValues(alpha: (1 - phase) * 0.16)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2,
-      );
+    for (var index = 0; index < 2; index++) {
+      final phase = (progress + index / 2) % 1;
+      final paint = Paint()
+        ..color = TovoTheme.teal.withValues(alpha: (1 - phase) * 0.25)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5;
+      canvas.drawCircle(size.center(Offset.zero), 30 + phase * 7, paint);
     }
   }
 

@@ -407,13 +407,22 @@ void main() {
       await tester.pump();
       await tester.pump();
       await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 850)),
+        () => Future<void>.delayed(const Duration(milliseconds: 1200)),
       );
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      final listeningTint = find.descendant(
+        of: find.byType(BackdropFilter),
+        matching: find.byType(ColoredBox),
+      );
+      expect(find.byType(BackdropFilter), findsOneWidget);
+      expect(
+        tester.widget<ColoredBox>(listeningTint).color,
+        const Color(0xFF6A707A).withValues(alpha: 0.16),
+      );
       expect(find.byTooltip('Arrêter et transcrire'), findsOneWidget);
       await tester.runAsync(() async {
-        await tester.tap(find.byTooltip('Arrêter et transcrire'));
-        await Future<void>.delayed(const Duration(milliseconds: 150));
+        await tester.tap(find.byIcon(Icons.mic_rounded));
+        await Future<void>.delayed(const Duration(milliseconds: 500));
       });
       await tester.pump();
       await tester.pump();
