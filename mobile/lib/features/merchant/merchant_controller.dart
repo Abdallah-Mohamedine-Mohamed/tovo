@@ -20,8 +20,8 @@ import '../../core/push.dart';
 /// une route ne ferait qu'ajouter un intermédiaire.
 class MerchantController extends ChangeNotifier {
   MerchantController({required TovoApi api, SupabaseClient? db})
-      : _api = api,
-        _db = db ?? Supabase.instance.client;
+    : _api = api,
+      _db = db ?? Supabase.instance.client;
 
   final TovoApi _api;
   final SupabaseClient _db;
@@ -30,7 +30,9 @@ class MerchantController extends ChangeNotifier {
   StreamSubscription<Map<String, String>>? _notifications;
   Timer? _secours;
   final Set<String> _actionsEnCours = {};
-  int _lectureCommandes = 0;
+  Future<void>? _lectureCommandes;
+  bool _relireCommandes = false;
+  bool _disposed = false;
 
   Map<String, dynamic>? boutique;
   List<Map<String, dynamic>> commandes = const [];
@@ -43,8 +45,9 @@ class MerchantController extends ChangeNotifier {
   bool get ouverte => boutique?['is_open'] as bool? ?? false;
 
   /// Commandes qui réclament une action immédiate du boutiquier.
-  List<Map<String, dynamic>> get aTraiter =>
-      commandes.where((c) => etapeSuivante(c['status'] as String? ?? '') != null).toList(growable: false);
+  List<Map<String, dynamic>> get aTraiter => commandes
+      .where((c) => etapeSuivante(c['status'] as String? ?? '') != null)
+      .toList(growable: false);
 
   bool actionEnCours(String id) => _actionsEnCours.contains(id);
 
@@ -61,6 +64,7 @@ class MerchantController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     if (_canal != null) _db.removeChannel(_canal!);
     _notifications?.cancel();
     _secours?.cancel();
@@ -124,13 +128,14 @@ class MerchantController extends ChangeNotifier {
 
       if (boutiqueId != null) {
         _ecouter();
-        await actualiserCommandes();
-
-        produits = await _db
+        final commandesRequest = actualiserCommandes();
+        final produitsRequest = _db
             .from('products')
             .select('id, name, price, is_available, image_url')
             .eq('merchant_id', boutiqueId!)
             .order('name');
+        await commandesRequest;
+        produits = await produitsRequest;
       }
     } on Exception catch (cause) {
       erreur = 'Impossible de charger : $cause';
@@ -141,19 +146,39 @@ class MerchantController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> actualiserCommandes() async {
-    if (boutiqueId == null) return;
-    final lecture = ++_lectureCommandes;
+  Future<void> actualiserCommandes() {
+    if (boutiqueId == null || _disposed) return Future.value();
+    final enCours = _lectureCommandes;
+    if (enCours != null) {
+      _relireCommandes = true;
+      return enCours;
+    }
+    final lecture = _chargerCommandes();
+    _lectureCommandes = lecture;
+    return lecture.whenComplete(() {
+      _lectureCommandes = null;
+      if (_relireCommandes && !_disposed) {
+        _relireCommandes = false;
+        unawaited(actualiserCommandes());
+      }
+    });
+  }
+
+  Future<void> _chargerCommandes() async {
     final reponse = await _api.get('/merchant/orders');
-    if (!reponse.ok || lecture != _lectureCommandes) return;
+    if (!reponse.ok || _disposed) return;
     final statutsLocaux = {
       for (final commande in commandes)
-        if (_actionsEnCours.contains(commande['id'])) commande['id']: commande['status'],
+        if (_actionsEnCours.contains(commande['id']))
+          commande['id']: commande['status'],
     };
-    commandes = reponse.list('orders').map((commande) {
-      final statut = statutsLocaux[commande['id']];
-      return statut == null ? commande : {...commande, 'status': statut};
-    }).toList(growable: false);
+    commandes = reponse
+        .list('orders')
+        .map((commande) {
+          final statut = statutsLocaux[commande['id']];
+          return statut == null ? commande : {...commande, 'status': statut};
+        })
+        .toList(growable: false);
     notifyListeners();
   }
 
@@ -197,7 +222,10 @@ class MerchantController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _db.from('products').update({'is_available': nouvelEtat}).eq('id', id);
+      await _db
+          .from('products')
+          .update({'is_available': nouvelEtat})
+          .eq('id', id);
     } on Exception {
       await refresh(silencieux: true);
     }
@@ -209,16 +237,30 @@ class MerchantController extends ChangeNotifier {
   /// qui met la commande en file de dispatch.
   Future<void> avancer(String orderId, String statut) async {
     if (_actionsEnCours.contains(orderId)) return;
-    final precedente = commandes.where((commande) => commande['id'] == orderId).firstOrNull;
+    final precedente = commandes
+        .where((commande) => commande['id'] == orderId)
+        .firstOrNull;
     if (precedente == null) return;
     _actionsEnCours.add(orderId);
-    commandes = commandes.map((commande) => commande['id'] == orderId
-        ? {...commande, 'status': statut} : commande).toList(growable: false);
+    commandes = commandes
+        .map(
+          (commande) => commande['id'] == orderId
+              ? {...commande, 'status': statut}
+              : commande,
+        )
+        .toList(growable: false);
     notifyListeners();
-    final reponse = await _api.post('/orders/$orderId/status', {'status': statut});
+    final reponse = await _api.post('/orders/$orderId/status', {
+      'status': statut,
+    });
     if (!reponse.ok) {
-      commandes = commandes.map((commande) => commande['id'] == orderId
-          ? {...commande, 'status': precedente['status']} : commande).toList(growable: false);
+      commandes = commandes
+          .map(
+            (commande) => commande['id'] == orderId
+                ? {...commande, 'status': precedente['status']}
+                : commande,
+          )
+          .toList(growable: false);
       erreur = reponse.content;
     }
     _actionsEnCours.remove(orderId);
@@ -227,29 +269,29 @@ class MerchantController extends ChangeNotifier {
   }
 
   static String? etapeSuivante(String statut) => switch (statut) {
-        'pending' => 'confirmed',
-        'confirmed' => 'ready',
-        'preparing' => 'ready',
-        _ => null,
-      };
+    'pending' => 'confirmed',
+    'confirmed' => 'ready',
+    'preparing' => 'ready',
+    _ => null,
+  };
 
   static String libelleEtape(String statut) => switch (statut) {
-        'pending' => 'Accepter',
-        'confirmed' => 'Commande prête',
-        'preparing' => 'Prête pour le livreur',
-        _ => '',
-      };
+    'pending' => 'Accepter',
+    'confirmed' => 'Commande prête',
+    'preparing' => 'Prête pour le livreur',
+    _ => '',
+  };
 
   static String libelleStatut(String statut) => switch (statut) {
-        'pending' => 'Nouvelle commande',
-        'confirmed' => 'Acceptée',
-        'preparing' => 'En préparation',
-        'ready' => 'En attente d’un livreur',
-        'assigned' => 'Livreur en route',
-        'picked_up' => 'Récupérée',
-        'delivering' => 'En livraison',
-        'delivered' => 'Livrée',
-        'cancelled' => 'Annulée',
-        _ => statut,
-      };
+    'pending' => 'Nouvelle commande',
+    'confirmed' => 'Acceptée',
+    'preparing' => 'En préparation',
+    'ready' => 'En attente d’un livreur',
+    'assigned' => 'Livreur en route',
+    'picked_up' => 'Récupérée',
+    'delivering' => 'En livraison',
+    'delivered' => 'Livrée',
+    'cancelled' => 'Annulée',
+    _ => statut,
+  };
 }

@@ -20,9 +20,9 @@ import 'sync_queue.dart';
 /// avance quand même : c'est la promesse de l'offline-first.
 class DriverController extends ChangeNotifier {
   DriverController({required TovoApi api, SyncQueue? queue, SupabaseClient? db})
-      : _api = api,
-        _db = db ?? Supabase.instance.client,
-        queue = queue ?? SyncQueue(api: api);
+    : _api = api,
+      _db = db ?? Supabase.instance.client,
+      queue = queue ?? SyncQueue(api: api);
 
   final TovoApi _api;
   final SupabaseClient _db;
@@ -36,6 +36,7 @@ class DriverController extends ChangeNotifier {
   bool _refreshApres = false;
   bool _presenceEnCours = false;
   String? _acceptationEnCours;
+  bool _disposed = false;
 
   bool _online = false;
   bool get online => _online;
@@ -73,8 +74,11 @@ class DriverController extends ChangeNotifier {
     final userId = _db.auth.currentUser?.id;
     if (userId != null) {
       try {
-        final profile = await _db.from('driver_profiles')
-            .select('is_online').eq('id', userId).maybeSingle();
+        final profile = await _db
+            .from('driver_profiles')
+            .select('is_online')
+            .eq('id', userId)
+            .maybeSingle();
         _online = profile?['is_online'] == true;
       } on Exception {
         _online = false;
@@ -94,6 +98,7 @@ class DriverController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _ping?.cancel();
     _rafraichissement?.cancel();
     _notifications?.cancel();
@@ -104,12 +109,15 @@ class DriverController extends ChangeNotifier {
 
   void _ecouter() {
     if (_canal != null) return;
-    _canal = _db.channel('tovo:driver:orders').onPostgresChanges(
-      event: PostgresChangeEvent.all,
-      schema: 'public',
-      table: 'orders',
-      callback: (_) => unawaited(refresh(silencieux: true)),
-    ).subscribe();
+    _canal = _db
+        .channel('tovo:driver:orders')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'orders',
+          callback: (_) => unawaited(refresh(silencieux: true)),
+        )
+        .subscribe();
   }
 
   // ------------------------------------------------------------------
@@ -121,7 +129,8 @@ class DriverController extends ChangeNotifier {
     final id = _db.auth.currentUser?.id;
     if (id == null) return;
     _presenceEnCours = true;
-    if (valeur && !await TovoLocation.ensurePermission(requestPermission: true)) {
+    if (valeur &&
+        !await TovoLocation.ensurePermission(requestPermission: true)) {
       erreur = 'Activez la localisation pour recevoir des courses.';
       _presenceEnCours = false;
       notifyListeners();
@@ -130,7 +139,10 @@ class DriverController extends ChangeNotifier {
     _online = valeur;
     notifyListeners();
     try {
-      await _db.from('driver_profiles').update({'is_online': valeur}).eq('id', id);
+      await _db
+          .from('driver_profiles')
+          .update({'is_online': valeur})
+          .eq('id', id);
       _programmerPing();
       if (valeur) unawaited(refresh(silencieux: true));
       if (!valeur && course == null) {
@@ -155,8 +167,9 @@ class DriverController extends ChangeNotifier {
   /// quartier se trouve le livreur.
   /// Rien hors ligne : la batterie et le forfait data d'un livreur sont des
   /// ressources qu'il paie lui-même.
-  Duration get _cadencePing =>
-      course != null ? const Duration(seconds: 10) : const Duration(seconds: 60);
+  Duration get _cadencePing => course != null
+      ? const Duration(seconds: 10)
+      : const Duration(seconds: 60);
 
   void _programmerPing() {
     _ping?.cancel();
@@ -227,12 +240,13 @@ class DriverController extends ChangeNotifier {
       return;
     }
 
-    final reponses = await Future.wait([
-      _api.get('/orders', query: {'limit': 5}),
-      _api.get('/driver/summary'),
-    ]);
-    final courses = reponses[0];
-    final resumeReponse = reponses[1];
+    final ordersRequest = _api.get('/orders', query: {'limit': 5});
+    final summaryRequest = _api.get('/driver/summary');
+    final poolRequest = _online && course == null
+        ? _api.get('/driver/pool')
+        : null;
+    final courses = await ordersRequest;
+    if (_disposed) return;
     final enCours = _trouverCourseActive(courses);
 
     if (enCours != null) {
@@ -244,21 +258,25 @@ class DriverController extends ChangeNotifier {
     } else if (courses.ok && !queue.hasPendingOrderChange) {
       course = null;
       if (_online) {
-        final reponse = await _api.get('/driver/pool');
+        final reponse = await (poolRequest ?? _api.get('/driver/pool'));
+        if (_disposed) return;
         if (reponse.ok) pool = _extraireOrdres(reponse);
       } else {
         pool = const [];
       }
     }
 
-    if (resumeReponse.ok && resumeReponse.raw.isNotEmpty) {
-      resume = resumeReponse.raw;
-    }
-
     if (!queue.hasPendingOrderChange) _acceptationEnCours = null;
     chargement = false;
     _programmerPing();
     notifyListeners();
+
+    final summary = await summaryRequest;
+    if (_disposed) return;
+    if (summary.ok && summary.raw.isNotEmpty) {
+      resume = summary.raw;
+      notifyListeners();
+    }
   }
 
   static const _statutsActifs = {'assigned', 'picked_up', 'delivering'};
@@ -266,7 +284,9 @@ class DriverController extends ChangeNotifier {
   String? _trouverCourseActive(TovoResponse reponse) {
     if (!reponse.ok) return null;
     for (final ordre in _extraireOrdres(reponse)) {
-      if (_statutsActifs.contains(ordre['status'])) return ordre['id'] as String?;
+      if (_statutsActifs.contains(ordre['status'])) {
+        return ordre['id'] as String?;
+      }
     }
     return null;
   }
@@ -299,9 +319,10 @@ class DriverController extends ChangeNotifier {
     await queue.flush();
     if (queue.hasPendingAccept(id)) return;
     _acceptationEnCours = null;
-    final refus = queue.rejets.skip(rejetsAvant).where(
-      (rejet) => rejet.action.path == '/orders/$id/accept',
-    ).firstOrNull;
+    final refus = queue.rejets
+        .skip(rejetsAvant)
+        .where((rejet) => rejet.action.path == '/orders/$id/accept')
+        .firstOrNull;
     if (refus != null) erreur = refus.message;
     notifyListeners();
     await refresh(silencieux: true);
@@ -315,7 +336,11 @@ class DriverController extends ChangeNotifier {
   /// la livraison reste confirmée.
   Future<void> avancer(String nouveauStatut, {String? preuveLocale}) async {
     final id = courseId;
-    if (id == null || queue.hasPendingOrderChange || prochaineEtape != nouveauStatut) return;
+    if (id == null ||
+        queue.hasPendingOrderChange ||
+        prochaineEtape != nouveauStatut) {
+      return;
+    }
 
     final ancienStatut = statut;
     final rejetsAvant = queue.rejets.length;
@@ -329,12 +354,20 @@ class DriverController extends ChangeNotifier {
   }
 
   Future<void> _finaliserStatut(
-    String id, String ancienStatut, String nouveauStatut, int rejetsAvant,
+    String id,
+    String ancienStatut,
+    String nouveauStatut,
+    int rejetsAvant,
   ) async {
     await queue.flush();
-    final refus = queue.rejets.skip(rejetsAvant).where((rejet) =>
-        rejet.action.path == '/orders/$id/status' &&
-        rejet.action.body['status'] == nouveauStatut).firstOrNull;
+    final refus = queue.rejets
+        .skip(rejetsAvant)
+        .where(
+          (rejet) =>
+              rejet.action.path == '/orders/$id/status' &&
+              rejet.action.body['status'] == nouveauStatut,
+        )
+        .firstOrNull;
     if (refus != null && courseId == id) {
       course = {...course!, 'status': ancienStatut};
       erreur = refus.message;
@@ -349,7 +382,8 @@ class DriverController extends ChangeNotifier {
   /// l'achat en ligne : le système ne peut alors rien voir. C'est au livreur
   /// de trancher, puisque c'est lui qui est devant le client.
   bool get paiementNitaADemander =>
-      course?['payment_method'] == 'mobile_money' && course?['payment_status'] == 'pending';
+      course?['payment_method'] == 'mobile_money' &&
+      course?['payment_status'] == 'pending';
 
   /// Le livreur déclare avoir constaté le paiement.
   ///
@@ -368,16 +402,16 @@ class DriverController extends ChangeNotifier {
   String? get prochaineEtape => etapeSuivante(statut);
 
   static String? etapeSuivante(String statut) => switch (statut) {
-        'assigned' => 'delivering',
-        'picked_up' => 'delivering',
-        'delivering' => 'delivered',
-        _ => null,
-      };
+    'assigned' => 'delivering',
+    'picked_up' => 'delivering',
+    'delivering' => 'delivered',
+    _ => null,
+  };
 
   String get libelleProchaineEtape => switch (statut) {
-        'assigned' => 'Je pars livrer',
-        'picked_up' => 'Je pars livrer',
-        'delivering' => 'Commande livrée',
-        _ => '',
-      };
+    'assigned' => 'Je pars livrer',
+    'picked_up' => 'Je pars livrer',
+    'delivering' => 'Commande livrée',
+    _ => '',
+  };
 }

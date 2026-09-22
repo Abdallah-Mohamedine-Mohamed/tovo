@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import '../../core/catalog_image.dart';
 import '../../core/icones_categories.dart';
 import '../../core/theme.dart';
 import '../registry.dart';
@@ -144,13 +145,12 @@ class _TuileState extends State<_Tuile> {
     final url = widget.imageUrl;
     if (url != null && url.isNotEmpty) {
       return ClipOval(
-        child: Image.network(
+        child: CatalogImage(
           url,
           width: 44,
           height: 44,
           fit: BoxFit.cover,
-          // Une image absente ne doit pas laisser un trou : le repli gris
-          // garde la grille alignée, ce qu'une icône cassée ne ferait pas.
+          decodeWidth: 88,
           errorBuilder: (_, __, ___) => _pastilleEmoji(),
         ),
       );

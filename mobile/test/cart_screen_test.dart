@@ -24,6 +24,7 @@ void main() {
   var blocked = false;
   var failure = false;
   Completer<http.Response>? pending;
+  Completer<http.Response>? pendingCart;
   final requests = <http.Request>[];
   late TovoApi api;
 
@@ -63,6 +64,7 @@ void main() {
     blocked = false;
     failure = false;
     pending = null;
+    pendingCart = null;
     requests.clear();
     api = TovoApi(
       tokenProvider: () => null,
@@ -102,6 +104,11 @@ void main() {
           summary['total'] = quantity * 3100 + 600;
           return http.Response(jsonEncode(data), 200);
         }
+        if (request.url.path == '/cart' &&
+            request.method == 'GET' &&
+            pendingCart != null) {
+          return pendingCart!.future;
+        }
         if (request.method == 'PATCH') {
           if (pending != null) return pending!.future;
           quantity = jsonDecode(request.body)['quantity'] as int;
@@ -112,7 +119,12 @@ void main() {
     );
   });
 
-  Future<void> open(WidgetTester tester, {double scale = 1}) async {
+  Future<void> open(
+    WidgetTester tester, {
+    double scale = 1,
+    TovoComponent? initialCart,
+    bool settle = true,
+  }) async {
     tester.view.physicalSize = const Size(360, 780);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -126,11 +138,49 @@ void main() {
           ).copyWith(textScaler: TextScaler.linear(scale)),
           child: child!,
         ),
-        home: CartScreen(api: api),
+        home: CartScreen(api: api, initialCart: initialCart),
       ),
     );
-    await tester.pumpAndSettle();
+    if (settle) {
+      await tester.pumpAndSettle();
+    } else {
+      await tester.pump();
+    }
   }
+
+  testWidgets(
+    'panier visible immédiatement mais commande bloquée jusqu’à vérification',
+    (tester) async {
+      pendingCart = Completer<http.Response>();
+      final preview = TovoComponent.fromJson(
+        (jsonDecode(cart().body) as Map<String, dynamic>)['components'][0]
+            as Map<String, dynamic>,
+      );
+      await open(tester, initialCart: preview, settle: false);
+      expect(find.text('Tacos aux boulettes'), findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Choisir la livraison'),
+            )
+            .onPressed,
+        isNull,
+      );
+
+      pendingCart!.complete(cart());
+      await tester.pumpAndSettle();
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Choisir la livraison'),
+            )
+            .onPressed,
+        isNotNull,
+      );
+    },
+  );
 
   testWidgets(
     'livraison, récapitulatif et confirmation restent dans le panier',

@@ -46,6 +46,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
   int _total = 0;
   int _generation = 0;
   int _cartTotal = 0;
+  TovoComponent? _cartPreview;
   bool _hasCart = false;
   bool _loading = true;
   bool _directory = false;
@@ -202,14 +203,14 @@ class _CatalogScreenState extends State<CatalogScreen> {
   Future<void> _loadCart() async {
     final response = await widget.api.get('/cart');
     if (!mounted || !response.ok) return;
-    for (final component in response.components.where(
-      (component) => component.type == 'cart_summary',
-    )) {
-      setState(() {
-        _cartTotal = component.money('total');
-        _hasCart = component.list('items').isNotEmpty;
-      });
-    }
+    final component = response.components
+        .where((component) => component.type == 'cart_summary')
+        .firstOrNull;
+    setState(() {
+      _cartPreview = component;
+      _cartTotal = component?.money('total') ?? 0;
+      _hasCart = component?.list('items').isNotEmpty ?? false;
+    });
   }
 
   Future<void> _openMerchant(String id) async {
@@ -242,7 +243,9 @@ class _CatalogScreenState extends State<CatalogScreen> {
 
   Future<void> _openCart() async {
     final order = await Navigator.of(context).push<TovoResponse>(
-      MaterialPageRoute(builder: (_) => CartScreen(api: widget.api)),
+      MaterialPageRoute(
+        builder: (_) => CartScreen(api: widget.api, initialCart: _cartPreview),
+      ),
     );
     if (!mounted) return;
     if (order != null) {

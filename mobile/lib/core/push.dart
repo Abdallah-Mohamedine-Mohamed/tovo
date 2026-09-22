@@ -17,13 +17,16 @@ class TovoPush {
   const TovoPush._();
 
   static bool _initialise = false;
+  static Future<void>? _initialisation;
 
-  /// À appeler au démarrage, avant `runApp`.
-  ///
-  /// Un échec ici ne doit pas empêcher l'app de démarrer : mieux vaut une
-  /// app sans notifications qu'une app qui ne s'ouvre pas.
-  static Future<void> initialiser() async {
-    if (_initialise) return;
+  static Future<void> initialiser() {
+    if (_initialise) return Future.value();
+    return _initialisation ??= _demarrer().whenComplete(() {
+      if (!_initialise) _initialisation = null;
+    });
+  }
+
+  static Future<void> _demarrer() async {
     try {
       await Firebase.initializeApp();
       _initialise = true;
@@ -36,6 +39,7 @@ class TovoPush {
   ///
   /// [app] vaut `client`, `driver` ou `merchant`.
   static Future<void> enregistrer(String app) async {
+    await initialiser();
     if (!_initialise) return;
     if (Supabase.instance.client.auth.currentUser == null) return;
 
@@ -73,11 +77,15 @@ class TovoPush {
   /// n'autorise à supprimer que ses propres jetons : d'où l'ordre, session
   /// encore ouverte.
   static Future<void> oublier() async {
+    await initialiser();
     if (!_initialise) return;
     try {
       final jeton = await FirebaseMessaging.instance.getToken();
       if (jeton == null) return;
-      await Supabase.instance.client.from('push_tokens').delete().eq('token', jeton);
+      await Supabase.instance.client
+          .from('push_tokens')
+          .delete()
+          .eq('token', jeton);
     } on Exception catch (cause) {
       // Un échec ici ne doit pas empêcher de se déconnecter : rester
       // connecté contre son gré est pire que recevoir une notification de
@@ -88,11 +96,14 @@ class TovoPush {
 
   static Future<void> _envoyer(String jeton, String app) async {
     try {
-      await Supabase.instance.client.rpc('register_push_token', params: {
-        'p_token': jeton,
-        'p_platform': Platform.isIOS ? 'ios' : 'android',
-        'p_app': app,
-      });
+      await Supabase.instance.client.rpc(
+        'register_push_token',
+        params: {
+          'p_token': jeton,
+          'p_platform': Platform.isIOS ? 'ios' : 'android',
+          'p_app': app,
+        },
+      );
     } on Exception catch (cause) {
       debugPrint('[push] jeton non enregistré : $cause');
     }
@@ -104,19 +115,23 @@ class TovoPush {
   /// remonte la charge utile pour que l'écran concerné se rafraîchisse — un
   /// boutiquier dont l'app est ouverte doit voir la commande apparaître,
   /// pas une bannière qu'il devra toucher.
-  static Stream<Map<String, String>> messagesEnAvantPlan() {
-    if (!_initialise) return const Stream.empty();
-    return FirebaseMessaging.onMessage.map(
+  static Stream<Map<String, String>> messagesEnAvantPlan() async* {
+    await initialiser();
+    if (!_initialise) return;
+    yield* FirebaseMessaging.onMessage.map(
       (message) => {
         ...message.data.map((k, v) => MapEntry(k, '$v')),
-        if (message.notification?.title != null) 'title': message.notification!.title!,
-        if (message.notification?.body != null) 'body': message.notification!.body!,
+        if (message.notification?.title != null)
+          'title': message.notification!.title!,
+        if (message.notification?.body != null)
+          'body': message.notification!.body!,
       },
     );
   }
 
   /// Notification touchée alors que l'app était fermée ou en arrière-plan.
   static Future<Map<String, String>?> messageDOuverture() async {
+    await initialiser();
     if (!_initialise) return null;
     final initial = await FirebaseMessaging.instance.getInitialMessage();
     if (initial == null) return null;

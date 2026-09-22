@@ -50,6 +50,7 @@ void main() {
   ];
   late TovoApi api;
   var conversation = false;
+  var liveSearch = false;
   var orderPosts = 0;
   var quoteFails = false;
   var orderBody = <String, dynamic>{};
@@ -95,11 +96,18 @@ void main() {
           const MethodChannel('plugins.flutter.io/image_picker'),
           (_) async => null,
         );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('flutter.baseflow.com/geolocator'),
+          (call) async =>
+              call.method == 'isLocationServiceEnabled' ? false : null,
+        );
   });
   tearDownAll(() async => Supabase.instance.dispose());
 
   setUp(() {
     conversation = false;
+    liveSearch = false;
     orderPosts = 0;
     quoteFails = false;
     orderBody = {};
@@ -130,14 +138,42 @@ void main() {
           );
         }
         switch (request.url.path) {
+          case '/chat':
+            if (liveSearch) {
+              final component = {
+                'type': 'product_carousel',
+                'data': {
+                  'title': 'Poulet',
+                  'items': products.take(3).toList(),
+                  'browse': {'merchant_id': 'garba', 'total': 6},
+                },
+              };
+              return http.Response(
+                '${jsonEncode({
+                  'type': 'results',
+                  'components': [component],
+                })}\n${jsonEncode({
+                  'type': 'done',
+                  'content': 'Voici les plats au poulet.',
+                  'components': [component],
+                  'conversation_id': 'demo',
+                })}\n',
+                200,
+                headers: {'content-type': 'application/x-ndjson'},
+              );
+            }
+            body = {'content': 'Aucun résultat.', 'components': []};
           case '/orders':
             if (request.method == 'POST') {
               orderPosts++;
               orderBody = jsonDecode(request.body) as Map<String, dynamic>;
-              return http.Response(jsonEncode({
-                'content': 'Commande enregistrée.',
-                'components': [],
-              }), 201);
+              return http.Response(
+                jsonEncode({
+                  'content': 'Commande enregistrée.',
+                  'components': [],
+                }),
+                201,
+              );
             }
             body = {'orders': []};
           case '/addresses':
@@ -341,6 +377,34 @@ void main() {
     await open(tester, ChatScreen(api: api));
     expect(find.text('Parcourir les 6 produits'), findsOneWidget);
     await capture(tester, '02-conversation');
+  });
+
+  visualTest('recherche : résultats au premier plan puis retour au fil', (
+    tester,
+  ) async {
+    liveSearch = true;
+    await open(tester, ChatScreen(api: api));
+    await tester.enterText(find.byType(TextField), 'poulet');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Envoyer'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () async => Future<void>.delayed(const Duration(milliseconds: 300)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Résultats'), findsOneWidget);
+    expect(
+      find.text('Voici les plats au poulet.').hitTestable(),
+      findsOneWidget,
+    );
+    expect(find.text('Attieke Poulet').hitTestable(), findsOneWidget);
+    expect(find.byTooltip('Retour à la discussion'), findsOneWidget);
+    await capture(tester, '09-resultats-focalises');
+    await tester.tap(find.byTooltip('Retour à la discussion'));
+    await tester.pumpAndSettle();
+    expect(find.text('Résultats'), findsNothing);
+    expect(find.text('poulet'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   visualTest('boutique : vrais produits, catégories et panier', (tester) async {

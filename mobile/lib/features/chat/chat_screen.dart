@@ -17,6 +17,7 @@ import '../../core/api.dart';
 import '../../core/location.dart';
 import '../../core/theme.dart';
 import '../../core/voix.dart';
+import 'assistant_activity_dock.dart';
 import 'conversations_drawer.dart';
 import 'photo_capture_sheet.dart';
 import '../catalog/catalog_screen.dart';
@@ -83,6 +84,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   bool _charge = false;
   bool _reponseCommencee = false;
+  String? _busyLabel;
+  int? _focusedTourIndex;
   String? _conversationId;
   int _navigation = 0;
   int _voiceGeneration = 0;
@@ -104,6 +107,34 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// Prénom du client, pour le salut d'accueil. Nul tant qu'on ne l'a pas.
   String? _prenom;
+
+  AssistantActivity? get _activity {
+    if (_enregistreLaVoix) return AssistantActivity.listening;
+    if (_transcribing) return AssistantActivity.transcribing;
+    if (_charge) {
+      return _reponseCommencee
+          ? AssistantActivity.answering
+          : AssistantActivity.searching;
+    }
+    return null;
+  }
+
+  static bool _hasDiscoveryResults(List<TovoComponent> components) =>
+      components.any(
+        (component) => const {
+          'product_carousel',
+          'product_list',
+          'product_card',
+          'merchant_card',
+          'price_comparison',
+        }.contains(component.type),
+      );
+
+  void _closeFocusedResults() {
+    if (_focusedTourIndex != null) {
+      setState(() => _focusedTourIndex = null);
+    }
+  }
 
   @override
   void initState() {
@@ -302,6 +333,7 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _charge = true;
       _reponseCommencee = false;
+      _busyLabel = 'Mise à jour…';
     });
     final reponse = await requete();
     if (!mounted || navigation != _navigation) return;
@@ -315,6 +347,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     setState(() {
       _charge = false;
+      _busyLabel = null;
       // On ne remplace que si le dernier tour montre bien la même chose :
       // écraser un message d'erreur ou une réponse de l'assistant ferait
       // disparaître une information que l'utilisateur n'a pas encore lue.
@@ -353,11 +386,13 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _parler({
     String? texte,
     Map<String, dynamic>? interaction,
+    String? statusLabel,
   }) async {
     final navigation = _navigation;
     setState(() {
       _charge = true;
       _reponseCommencee = false;
+      _busyLabel = statusLabel ?? 'Je cherche…';
     });
     final index = _tours.length;
     var partialText = '';
@@ -392,6 +427,9 @@ class _ChatScreenState extends State<ChatScreen> {
           if (partialText.isNotEmpty || partialComponents.isNotEmpty) {
             _reponseCommencee = true;
           }
+          if (_hasDiscoveryResults(partialComponents)) {
+            _focusedTourIndex = index;
+          }
           if (partialText.isNotEmpty || partialComponents.isNotEmpty) {
             final tour = _Tour(
               deLAssistant: true,
@@ -412,6 +450,7 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _charge = false;
       _reponseCommencee = false;
+      _busyLabel = null;
       final tour = _Tour(
         deLAssistant: true,
         contenu: response.content,
@@ -422,6 +461,11 @@ class _ChatScreenState extends State<ChatScreen> {
         _tours.add(tour);
       } else {
         _tours[index] = tour;
+      }
+      if (response.ok && _hasDiscoveryResults(response.components)) {
+        _focusedTourIndex = index;
+      } else if (_focusedTourIndex == index) {
+        _focusedTourIndex = null;
       }
       if (response.raw['conversation_id'] is String) {
         _conversationId = response.raw['conversation_id'] as String;
@@ -464,6 +508,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (_enregistreLaVoix) {
         await _envoyerLaParole();
       } else {
+        _closeFocusedResults();
         _navigation++;
         await _demarrerLaParole(generation);
       }
@@ -655,7 +700,23 @@ class _ChatScreenState extends State<ChatScreen> {
   // ------------------------------------------------------------------
 
   void _interaction(TovoInteraction interaction) {
-    if (_charge || _transcribing || _enregistreLaVoix || _voiceAction) return;
+    if (_transcribing || _enregistreLaVoix || _voiceAction) return;
+    if (_charge) {
+      final canOpenResult =
+          _focusedTourIndex != null &&
+          const {
+            'browse_catalog',
+            'select_product',
+            'select_category',
+          }.contains(interaction.action);
+      if (!canOpenResult) return;
+      setState(() {
+        _charge = false;
+        _reponseCommencee = false;
+        _busyLabel = null;
+      });
+    }
+    _closeFocusedResults();
     _navigation++;
     final p = interaction.payload;
 
@@ -794,6 +855,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _choisirLaSource() async {
     if (_charge || _transcribing || _enregistreLaVoix || _voiceAction) return;
+    _closeFocusedResults();
     FocusScope.of(context).unfocus();
     await _chercherParPhoto(ImageSource.camera);
   }
@@ -850,7 +912,10 @@ class _ChatScreenState extends State<ChatScreen> {
       caption.isEmpty ? '📷 Photo envoyée' : '📷 $caption',
       photoLocale: fichier.path,
     );
-    setState(() => _charge = true);
+    setState(() {
+      _charge = true;
+      _busyLabel = 'Analyse de la photo…';
+    });
 
     try {
       final utilisateur = Supabase.instance.client.auth.currentUser;
@@ -874,6 +939,7 @@ class _ChatScreenState extends State<ChatScreen> {
       // n'entrent jamais dans le contexte du modèle : ils y resteraient à
       // chaque tour, pour toujours.
       await _parler(
+        statusLabel: 'Analyse de la photo…',
         interaction: {
           'action': 'search_by_image',
           'payload': {
@@ -886,6 +952,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!mounted || navigation != _navigation) return;
       setState(() {
         _charge = false;
+        _busyLabel = null;
         _photoDraft = fichier;
         _saisie.text = caption;
         if (_tours.length > index &&
@@ -1048,6 +1115,8 @@ class _ChatScreenState extends State<ChatScreen> {
     final texte = _saisie.text.trim();
     final photo = _photoDraft;
     if (texte.isEmpty && photo == null) return;
+    _closeFocusedResults();
+    FocusScope.of(context).unfocus();
     _navigation++;
     _voiceDraft = false;
     _voiceError = null;
@@ -1083,10 +1152,16 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _ouvrirPanier({String? initialAddressId}) async {
     if (_charge || _transcribing || _enregistreLaVoix || _voiceAction) return;
     _navigation++;
+    final cartPreview = _tours.lastOrNull?.composants
+        .where((component) => component.type == 'cart_summary')
+        .firstOrNull;
     final order = await Navigator.of(context).push<TovoResponse>(
       MaterialPageRoute(
-        builder: (_) =>
-            CartScreen(api: widget.api, initialAddressId: initialAddressId),
+        builder: (_) => CartScreen(
+          api: widget.api,
+          initialAddressId: initialAddressId,
+          initialCart: cartPreview,
+        ),
       ),
     );
     if (mounted && order != null) await _appeler(() async => order);
@@ -1145,6 +1220,8 @@ class _ChatScreenState extends State<ChatScreen> {
       _saisie.clear();
       _loadingHistory = true;
       _charge = false;
+      _busyLabel = null;
+      _focusedTourIndex = null;
       _conversationId = id;
       _transcribing = false;
       _voiceDraft = false;
@@ -1183,6 +1260,8 @@ class _ChatScreenState extends State<ChatScreen> {
       _loadingHistory = false;
       _conversationId = null;
       _charge = false;
+      _busyLabel = null;
+      _focusedTourIndex = null;
       _saisie.clear();
       _transcribing = false;
       _voiceDraft = false;
@@ -1199,226 +1278,242 @@ class _ChatScreenState extends State<ChatScreen> {
     if (response.ok) _showCategories(response);
   }
 
+  void _annulerTranscription() {
+    _navigation++;
+    setState(() {
+      _transcribing = false;
+      _voiceError = null;
+      _pendingAudio = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      drawer: TiroirConversations(
-        api: widget.api,
-        conversationCourante: _conversationId,
-        onOuvrir: (id) => unawaited(_ouvrirConversation(id)),
-        onNouvelle: _nouvelleConversation,
-      ),
-      appBar: AppBar(
-        // Les trois traits, et rien d'autre.
-        //
-        // J'avais mis une icône de conversation, en me disant qu'elle
-        // annoncerait mieux ce qu'il y a derrière. C'était une erreur : le
-        // menu à trois traits est le seul symbole que tout le monde
-        // reconnaît sans y penser, et ce qu'on gagne à être explicite ne
-        // vaut pas ce qu'on perd en habitude.
-        leading: Builder(
-          builder: (context) => IconButton(
-            tooltip: 'Mes conversations',
-            icon: const Icon(Icons.menu_rounded, size: 25),
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
+    final activity = _activity;
+    final focusedIndex = _focusedTourIndex;
+    final focusedTour = focusedIndex != null && focusedIndex < _tours.length
+        ? _tours[focusedIndex]
+        : null;
+    final motionDuration = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : TovoTheme.normal;
+    return PopScope<void>(
+      canPop: focusedTour == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _closeFocusedResults();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        drawer: TiroirConversations(
+          api: widget.api,
+          conversationCourante: _conversationId,
+          onOuvrir: (id) => unawaited(_ouvrirConversation(id)),
+          onNouvelle: _nouvelleConversation,
         ),
-        leadingWidth: 52,
-        centerTitle: true,
-        title: SvgPicture.asset(
-          'assets/branding/tovo-logo.svg',
-          width: 88,
-          height: 28,
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Mon panier',
-            icon: const Icon(Icons.shopping_bag_outlined, size: 23),
-            onPressed: _ouvrirPanier,
-          ),
-          const SizedBox(width: 6),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Builder(
-              builder: (context) {
-                if (_loadingHistory && _tours.isEmpty) {
-                  return const ReadPlaceholder();
-                }
-                final afficheAccueil =
-                    _tours.isEmpty ||
-                    (_tours.length == 1 &&
-                        _tours.first.deLAssistant &&
-                        _tours.first.composants.any(
-                          (component) => component.type == 'category_grid',
-                        ));
-                final decalage = afficheAccueil ? 1 : 0;
-
-                return ListView.builder(
-                  controller: _scroll,
-                  keyboardDismissBehavior:
-                      ScrollViewKeyboardDismissBehavior.onDrag,
-                  padding: const EdgeInsets.only(bottom: 18),
-                  itemCount: _tours.length + decalage,
-                  itemBuilder: (context, i) {
-                    if (afficheAccueil && i == 0) {
-                      return _AccueilNouveau(
-                        prenom: _prenom,
-                        onSuggestion: _envoyerSuggestion,
-                        onCamera: () => unawaited(_choisirLaSource()),
-                      );
-                    }
-
-                    final tourIndex = i - decalage;
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: IgnorePointer(
-                        ignoring: _charge && tourIndex == _tours.length - 1,
-                        child: _TourVue(
-                          key: ValueKey('$_navigation:$tourIndex'),
-                          tour: _tours[tourIndex],
-                          onInteraction: _interaction,
-                          anime: !_charge && tourIndex == _tours.length - 1,
-                          scanne:
-                              _charge &&
-                              tourIndex == _tours.length - 1 &&
-                              _tours[tourIndex].photoLocale != null,
-                        ),
-                      ),
-                    );
-                  },
-                );
-              },
+        appBar: AppBar(
+          // Les trois traits, et rien d'autre.
+          //
+          // J'avais mis une icône de conversation, en me disant qu'elle
+          // annoncerait mieux ce qu'il y a derrière. C'était une erreur : le
+          // menu à trois traits est le seul symbole que tout le monde
+          // reconnaît sans y penser, et ce qu'on gagne à être explicite ne
+          // vaut pas ce qu'on perd en habitude.
+          leading: Builder(
+            builder: (context) => IconButton(
+              tooltip: 'Mes conversations',
+              icon: const Icon(Icons.menu_rounded, size: 25),
+              onPressed: () => Scaffold.of(context).openDrawer(),
             ),
           ),
-          // Un trait de progression ne dit rien de ce qui se passe. Trois
-          // points qui respirent disent « je réfléchis », ce qui est la
-          // vérité et ce que le client comprend sans y penser.
-          AnimatedSize(
-            duration: TovoTheme.normal,
-            curve: TovoTheme.courbe,
-            child:
-                _charge &&
-                    !_reponseCommencee &&
-                    (_tours.isEmpty || _tours.last.photoLocale == null)
-                ? const _EnReflexion()
-                : const SizedBox.shrink(),
+          leadingWidth: 52,
+          centerTitle: true,
+          title: SvgPicture.asset(
+            'assets/branding/tovo-logo.svg',
+            width: 88,
+            height: 28,
           ),
-          if (_transcribing || _voiceError != null || _voiceDraft)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-              child: Row(
+          actions: [
+            IconButton(
+              tooltip: 'Mon panier',
+              icon: const Icon(Icons.shopping_bag_outlined, size: 23),
+              onPressed: _ouvrirPanier,
+            ),
+            const SizedBox(width: 6),
+          ],
+        ),
+        body: Column(
+          children: [
+            Expanded(
+              child: Stack(
                 children: [
-                  Expanded(
-                    child: Text(
-                      _transcribing
-                          ? 'Transcription en cours…'
-                          : _voiceError ??
-                                'Vocal transcrit · modifiez puis envoyez',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _voiceError == null
-                            ? TovoTheme.muted
-                            : TovoTheme.danger,
+                  AnimatedOpacity(
+                    duration: motionDuration,
+                    opacity: focusedTour != null
+                        ? 0.28
+                        : activity == AssistantActivity.listening ||
+                              activity == AssistantActivity.transcribing
+                        ? 0.72
+                        : 1,
+                    child: IgnorePointer(
+                      ignoring: focusedTour != null,
+                      child: ExcludeSemantics(
+                        excluding: focusedTour != null,
+                        child: Builder(
+                          builder: (context) {
+                            if (_loadingHistory && _tours.isEmpty) {
+                              return const ReadPlaceholder();
+                            }
+                            final afficheAccueil =
+                                _tours.isEmpty ||
+                                (_tours.length == 1 &&
+                                    _tours.first.deLAssistant &&
+                                    _tours.first.composants.any(
+                                      (component) =>
+                                          component.type == 'category_grid',
+                                    ));
+                            final decalage = afficheAccueil ? 1 : 0;
+
+                            return ListView.builder(
+                              controller: _scroll,
+                              keyboardDismissBehavior:
+                                  ScrollViewKeyboardDismissBehavior.onDrag,
+                              padding: const EdgeInsets.only(bottom: 18),
+                              itemCount: _tours.length + decalage,
+                              itemBuilder: (context, i) {
+                                if (afficheAccueil && i == 0) {
+                                  return _AccueilNouveau(
+                                    prenom: _prenom,
+                                    onSuggestion: _envoyerSuggestion,
+                                    onCamera: () =>
+                                        unawaited(_choisirLaSource()),
+                                  );
+                                }
+
+                                final tourIndex = i - decalage;
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: IgnorePointer(
+                                    ignoring:
+                                        _charge &&
+                                        tourIndex == _tours.length - 1,
+                                    child: _TourVue(
+                                      key: ValueKey('$_navigation:$tourIndex'),
+                                      tour: _tours[tourIndex],
+                                      onInteraction: _interaction,
+                                      anime:
+                                          !_charge &&
+                                          tourIndex == _tours.length - 1,
+                                      scanne:
+                                          _charge &&
+                                          tourIndex == _tours.length - 1 &&
+                                          _tours[tourIndex].photoLocale != null,
+                                    ),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ),
-                  if (_voiceError != null && _pendingAudio != null)
-                    TextButton(
-                      onPressed: _transcribeVoice,
-                      child: const Text('Réessayer'),
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      ignoring: focusedTour == null,
+                      child: AnimatedSwitcher(
+                        duration: motionDuration,
+                        switchInCurve: TovoTheme.courbe,
+                        transitionBuilder: (child, animation) => FadeTransition(
+                          opacity: animation,
+                          child: SlideTransition(
+                            position: Tween<Offset>(
+                              begin: const Offset(0, 0.035),
+                              end: Offset.zero,
+                            ).animate(animation),
+                            child: child,
+                          ),
+                        ),
+                        child: focusedTour == null
+                            ? const SizedBox.shrink(key: ValueKey('discussion'))
+                            : _FocusedResultView(
+                                key: ValueKey('resultats-$focusedIndex'),
+                                tour: focusedTour,
+                                onClose: _closeFocusedResults,
+                                onInteraction: _interaction,
+                              ),
+                      ),
                     ),
-                  if (_transcribing || _voiceError != null)
-                    IconButton(
-                      tooltip: 'Annuler la transcription',
-                      icon: const Icon(Icons.close, size: 18),
-                      onPressed: () {
-                        _navigation++;
-                        setState(() {
-                          _transcribing = false;
-                          _voiceError = null;
-                          _pendingAudio = null;
-                        });
-                      },
-                    ),
+                  ),
                 ],
               ),
             ),
-          _BarreDeSaisieNouveau(
-            controller: _saisie,
-            onSend: _envoyer,
-            onCamera: () => unawaited(_choisirLaSource()),
-            photoPath: _photoDraft?.path,
-            onRemovePhoto: () => setState(() => _photoDraft = null),
-            enregistre: _enregistreLaVoix,
-            onParoleTouche: _toucherLeMicro,
-            onParoleAnnulee: _annulerLaParole,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Trois points qui respirent pendant que l'assistant travaille.
-///
-/// Remplace le trait de progression : celui-ci indiquait qu'il se passait
-/// quelque chose, sans dire quoi. Ici la forme dit d'elle-même « je
-/// réfléchis », et l'attente devient lisible plutôt que vide.
-class _EnReflexion extends StatefulWidget {
-  const _EnReflexion();
-
-  @override
-  State<_EnReflexion> createState() => _EnReflexionState();
-}
-
-class _EnReflexionState extends State<_EnReflexion>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1100),
-  )..repeat();
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 4, 18, 12),
-      child: Row(
-        children: [
-          for (var i = 0; i < 3; i++)
-            AnimatedBuilder(
-              animation: _c,
-              builder: (context, _) {
-                // Chaque point est décalé d'un tiers de cycle : l'onde va de
-                // gauche à droite au lieu de les faire clignoter ensemble.
-                final phase = (_c.value + i / 3) % 1.0;
-                final montee = (sin(phase * 2 * pi) + 1) / 2;
-                return Container(
-                  width: 5,
-                  height: 5,
-                  margin: const EdgeInsets.only(right: 4),
-                  decoration: BoxDecoration(
-                    color: Color.lerp(TovoTheme.line, TovoTheme.teal, montee),
-                    shape: BoxShape.circle,
-                  ),
-                );
-              },
+            if (_voiceError != null || _voiceDraft)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 4,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _voiceError ??
+                            'Vocal transcrit · modifiez puis envoyez',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _voiceError == null
+                              ? TovoTheme.muted
+                              : TovoTheme.danger,
+                        ),
+                      ),
+                    ),
+                    if (_voiceError != null && _pendingAudio != null)
+                      TextButton(
+                        onPressed: _transcribeVoice,
+                        child: const Text('Réessayer'),
+                      ),
+                    if (_voiceError != null)
+                      IconButton(
+                        tooltip: 'Annuler la transcription',
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: _annulerTranscription,
+                      ),
+                  ],
+                ),
+              ),
+            AnimatedSwitcher(
+              duration: motionDuration,
+              switchInCurve: TovoTheme.courbe,
+              child: activity == null
+                  ? _BarreDeSaisieNouveau(
+                      key: const ValueKey('composer'),
+                      controller: _saisie,
+                      onSend: _envoyer,
+                      onCamera: () => unawaited(_choisirLaSource()),
+                      photoPath: _photoDraft?.path,
+                      onRemovePhoto: () => setState(() => _photoDraft = null),
+                      onParoleTouche: _toucherLeMicro,
+                    )
+                  : AssistantActivityDock(
+                      key: const ValueKey('activity'),
+                      activity: activity,
+                      label: activity == AssistantActivity.searching
+                          ? _busyLabel
+                          : null,
+                      onPrimary: activity == AssistantActivity.listening
+                          ? () => unawaited(_toucherLeMicro())
+                          : null,
+                      onCancel: activity == AssistantActivity.listening
+                          ? () => unawaited(_annulerLaParole())
+                          : activity == AssistantActivity.transcribing
+                          ? _annulerTranscription
+                          : null,
+                    ),
             ),
-          const SizedBox(width: 4),
-          const Text(
-            'Je réfléchis…',
-            style: TextStyle(fontSize: 12, color: TovoTheme.muted),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1581,6 +1676,65 @@ class _TourVueState extends State<_TourVue> {
           for (final widget in widgets)
             Padding(padding: const EdgeInsets.only(bottom: 14), child: widget),
         ],
+      ),
+    );
+  }
+}
+
+class _FocusedResultView extends StatelessWidget {
+  const _FocusedResultView({
+    super.key,
+    required this.tour,
+    required this.onClose,
+    required this.onInteraction,
+  });
+
+  final _Tour tour;
+  final VoidCallback onClose;
+  final InteractionCallback onInteraction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      namesRoute: true,
+      label: 'Résultats de recherche',
+      child: Material(
+        color: Colors.white,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 4, 16, 8),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Retour à la discussion',
+                    onPressed: onClose,
+                    icon: const Icon(Icons.arrow_back_rounded),
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Résultats',
+                      style: TextStyle(
+                        fontSize: 21,
+                        fontWeight: FontWeight.w700,
+                        color: TovoTheme.ink,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: TovoTheme.line),
+            Expanded(
+              child: ListView(
+                key: const PageStorageKey('focused-results'),
+                padding: const EdgeInsets.fromLTRB(20, 22, 20, 24),
+                children: [_TourVue(tour: tour, onInteraction: onInteraction)],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1851,14 +2005,13 @@ class _Accueil extends StatelessWidget {
 
 class _BarreDeSaisieNouveau extends StatelessWidget {
   const _BarreDeSaisieNouveau({
+    super.key,
     required this.controller,
     required this.onSend,
     required this.onCamera,
     required this.photoPath,
     required this.onRemovePhoto,
-    required this.enregistre,
     required this.onParoleTouche,
-    required this.onParoleAnnulee,
   });
 
   final TextEditingController controller;
@@ -1866,9 +2019,7 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
   final VoidCallback onCamera;
   final String? photoPath;
   final VoidCallback onRemovePhoto;
-  final bool enregistre;
   final VoidCallback onParoleTouche;
-  final VoidCallback onParoleAnnulee;
 
   Widget _action({
     Key? key,
@@ -1881,7 +2032,7 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
       key: key,
       message: tooltip,
       child: Material(
-        color: principal ? TovoTheme.ink : Colors.transparent,
+        color: principal ? TovoTheme.teal : Colors.transparent,
         shape: const CircleBorder(),
         child: InkWell(
           customBorder: const CircleBorder(),
@@ -1896,43 +2047,6 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _enEcoute() {
-    return Row(
-      children: [
-        _action(
-          icon: Icons.close_rounded,
-          onTap: onParoleAnnulee,
-          tooltip: 'Annuler',
-        ),
-        const SizedBox(width: 12),
-        const _PointQuiBat(),
-        const SizedBox(width: 10),
-        const Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Je vous écoute',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-              ),
-              Text(
-                'Arrêtez pour relire votre message',
-                style: TextStyle(fontSize: 10.5, color: TovoTheme.muted),
-              ),
-            ],
-          ),
-        ),
-        _action(
-          icon: Icons.stop_rounded,
-          onTap: onParoleTouche,
-          tooltip: 'Arrêter et transcrire',
-          principal: true,
-        ),
-      ],
     );
   }
 
@@ -1985,63 +2099,60 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
                   ],
                 ),
               ),
-            if (enregistre)
-              _enEcoute()
-            else
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  _action(
-                    icon: Icons.add_rounded,
-                    onTap: onCamera,
-                    tooltip: 'Chercher avec une photo',
-                  ),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    child: TextField(
-                      controller: controller,
-                      minLines: 1,
-                      maxLines: 5,
-                      textCapitalization: TextCapitalization.sentences,
-                      textInputAction: TextInputAction.newline,
-                      onSubmitted: (_) {
-                        if (controller.text.trim().isNotEmpty ||
-                            photoPath != null) {
-                          onSend();
-                        }
-                      },
-                      decoration: const InputDecoration(
-                        hintText: 'Demandez à Tovo…',
-                        filled: false,
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 11,
-                        ),
-                      ),
-                      style: const TextStyle(fontSize: 14.5, height: 1.35),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  ValueListenableBuilder<TextEditingValue>(
-                    valueListenable: controller,
-                    builder: (context, valeur, _) {
-                      final aDuTexte =
-                          valeur.text.trim().isNotEmpty || photoPath != null;
-                      return _action(
-                        icon: aDuTexte
-                            ? Icons.arrow_upward_rounded
-                            : Icons.mic_none_rounded,
-                        onTap: aDuTexte ? onSend : onParoleTouche,
-                        tooltip: aDuTexte ? 'Envoyer' : 'Parler à Tovo',
-                        principal: true,
-                      );
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                _action(
+                  icon: Icons.add_rounded,
+                  onTap: onCamera,
+                  tooltip: 'Chercher avec une photo',
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    minLines: 1,
+                    maxLines: 5,
+                    textCapitalization: TextCapitalization.sentences,
+                    textInputAction: TextInputAction.newline,
+                    onSubmitted: (_) {
+                      if (controller.text.trim().isNotEmpty ||
+                          photoPath != null) {
+                        onSend();
+                      }
                     },
+                    decoration: const InputDecoration(
+                      hintText: 'Demandez à Tovo…',
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 11,
+                      ),
+                    ),
+                    style: const TextStyle(fontSize: 14.5, height: 1.35),
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 6),
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: controller,
+                  builder: (context, valeur, _) {
+                    final aDuTexte =
+                        valeur.text.trim().isNotEmpty || photoPath != null;
+                    return _action(
+                      icon: aDuTexte
+                          ? Icons.arrow_upward_rounded
+                          : Icons.mic_none_rounded,
+                      onTap: aDuTexte ? onSend : onParoleTouche,
+                      tooltip: aDuTexte ? 'Envoyer' : 'Parler à Tovo',
+                      principal: true,
+                    );
+                  },
+                ),
+              ],
+            ),
           ],
         ),
       ),

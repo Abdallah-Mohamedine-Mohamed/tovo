@@ -18,9 +18,15 @@ class _DeliveryPoint {
 }
 
 class CartScreen extends StatefulWidget {
-  const CartScreen({super.key, required this.api, this.initialAddressId});
+  const CartScreen({
+    super.key,
+    required this.api,
+    this.initialAddressId,
+    this.initialCart,
+  });
   final TovoApi api;
   final String? initialAddressId;
+  final TovoComponent? initialCart;
 
   @override
   State<CartScreen> createState() => _CartScreenState();
@@ -204,6 +210,7 @@ class _CartScreenState extends State<CartScreen> {
   @override
   void initState() {
     super.initState();
+    _cart = widget.initialCart;
     _load();
   }
 

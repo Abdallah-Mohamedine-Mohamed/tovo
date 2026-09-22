@@ -106,7 +106,10 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
    * conclut que l'application est vide, et il a raison de le croire.
    */
   app.get('/categories', async (request, reply) => {
-    const { data, error } = await db(request).rpc('browsable_categories');
+    const [{ data, error }, derniere] = await Promise.all([
+      db(request).rpc('browsable_categories'),
+      commandePrecedente(request),
+    ]);
 
     if (error) {
       const failure = toHttpFailure(error);
@@ -126,8 +129,6 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
     // dernière commande, quand il y en a une.
     // La dernière commande AVANT les catégories : c'est la réponse la plus
     // probable à « on mange quoi ? », et elle tient en un bouton.
-    const derniere = await commandePrecedente(request);
-
     return reply.send(
       envelope(derniere?.ligne ?? '', [
         ...(derniere ? [derniere.composant] : []),

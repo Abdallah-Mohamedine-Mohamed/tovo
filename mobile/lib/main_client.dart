@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -22,10 +24,6 @@ import 'features/chat/chat_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Un échec ici ne doit pas empêcher l'app de démarrer : mieux vaut une
-  // app sans notifications qu'une app qui ne s'ouvre pas.
-  await TovoPush.initialiser();
-
   registerTovoComponents();
 
   if (!TovoConfig.isConfigured) {
@@ -43,6 +41,9 @@ Future<void> main() async {
   );
 
   runApp(const TovoClientApp());
+  WidgetsBinding.instance.addPostFrameCallback(
+    (_) => unawaited(TovoPush.initialiser()),
+  );
 }
 
 class TovoClientApp extends StatelessWidget {

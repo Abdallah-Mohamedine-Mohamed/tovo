@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -20,10 +22,6 @@ import 'features/driver/driver_home.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Un échec ici ne doit pas empêcher l'app de démarrer : mieux vaut une
-  // app sans notifications qu'une app qui ne s'ouvre pas.
-  await TovoPush.initialiser();
-
   if (!TovoConfig.isConfigured) {
     runApp(const _EcranDeConfiguration());
     return;
@@ -35,6 +33,9 @@ Future<void> main() async {
   );
 
   runApp(const TovoDriverApp());
+  WidgetsBinding.instance.addPostFrameCallback(
+    (_) => unawaited(TovoPush.initialiser()),
+  );
 }
 
 class TovoDriverApp extends StatelessWidget {
