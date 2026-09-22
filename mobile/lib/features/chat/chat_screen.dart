@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io' show File;
 import 'dart:isolate';
 import 'dart:math';
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1357,12 +1356,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 children: [
                   AnimatedOpacity(
                     duration: motionDuration,
-                    opacity: focusedTour != null
-                        ? 0.28
-                        : activity == AssistantActivity.listening ||
-                              activity == AssistantActivity.transcribing
-                        ? 0.72
-                        : 1,
+                    opacity: focusedTour != null ? 0.28 : 1,
                     child: IgnorePointer(
                       ignoring: focusedTour != null,
                       child: ExcludeSemantics(
@@ -1411,9 +1405,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                       key: ValueKey('$_navigation:$tourIndex'),
                                       tour: _tours[tourIndex],
                                       onInteraction: _interaction,
-                                      anime:
-                                          !_charge &&
-                                          tourIndex == _tours.length - 1,
+                                      anime: tourIndex == _tours.length - 1,
                                       scanne:
                                           _charge &&
                                           tourIndex == _tours.length - 1 &&
@@ -1429,28 +1421,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                   Positioned.fill(
-                    child: IgnorePointer(
-                      child: TweenAnimationBuilder<double>(
-                        tween: Tween(
-                          begin: 0,
-                          end: activity == AssistantActivity.listening ? 1 : 0,
-                        ),
-                        duration: motionDuration,
-                        curve: TovoTheme.courbe,
-                        builder: (context, progress, _) => progress == 0
-                            ? const SizedBox.shrink()
-                            : BackdropFilter(
-                                filter: ImageFilter.blur(
-                                  sigmaX: progress * 6,
-                                  sigmaY: progress * 6,
-                                ),
-                                child: ColoredBox(
-                                  color: Colors.white.withValues(
-                                    alpha: progress * 0.24,
-                                  ),
-                                ),
-                              ),
-                      ),
+                    child: AssistantActivityAtmosphere(
+                      active: activity != null,
                     ),
                   ),
                   Positioned.fill(
@@ -1574,13 +1546,19 @@ class _TourVue extends StatefulWidget {
   State<_TourVue> createState() => _TourVueState();
 }
 
-class _TourVueState extends State<_TourVue> {
+class _TourVueState extends State<_TourVue>
+    with SingleTickerProviderStateMixin {
   double _opacite = 1;
   double _decalage = 0;
+  late final AnimationController _resultsReveal;
 
   @override
   void initState() {
     super.initState();
+    _resultsReveal = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 430),
+    );
     if (!widget.anime) return;
 
     _opacite = 0;
@@ -1598,14 +1576,46 @@ class _TourVueState extends State<_TourVue> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!widget.anime || MediaQuery.disableAnimationsOf(context)) {
+      _resultsReveal.value = 1;
+    } else if (widget.tour.composants.isNotEmpty && _resultsReveal.value == 0) {
+      _resultsReveal.forward();
+    }
+  }
+
+  @override
+  void didUpdateWidget(_TourVue oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.tour.composants.isEmpty &&
+        widget.tour.composants.isNotEmpty) {
+      if (widget.anime && !MediaQuery.disableAnimationsOf(context)) {
+        _resultsReveal.forward(from: 0);
+      } else {
+        _resultsReveal.value = 1;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _resultsReveal.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final duration = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : TovoTheme.normal;
     return AnimatedSlide(
       offset: Offset(0, _decalage / 100),
-      duration: TovoTheme.normal,
+      duration: duration,
       curve: TovoTheme.courbe,
       child: AnimatedOpacity(
         opacity: _opacite,
-        duration: TovoTheme.normal,
+        duration: duration,
         curve: TovoTheme.courbe,
         child: _contenu(context),
       ),
@@ -1707,8 +1717,40 @@ class _TourVueState extends State<_TourVue> {
                 couleur: tour.enErreur ? TovoTheme.danger : TovoTheme.ink,
               ),
             ),
-          for (final widget in widgets)
-            Padding(padding: const EdgeInsets.only(bottom: 14), child: widget),
+          for (var index = 0; index < widgets.length; index++)
+            FadeTransition(
+              opacity: _resultsReveal.drive(
+                CurveTween(
+                  curve: Interval(
+                    min(index * 0.12, 0.42),
+                    1,
+                    curve: Curves.easeOut,
+                  ),
+                ),
+              ),
+              child: SlideTransition(
+                position: _resultsReveal
+                    .drive(
+                      CurveTween(
+                        curve: Interval(
+                          min(index * 0.12, 0.42),
+                          1,
+                          curve: TovoTheme.courbe,
+                        ),
+                      ),
+                    )
+                    .drive(
+                      Tween<Offset>(
+                        begin: const Offset(0, 0.035),
+                        end: Offset.zero,
+                      ),
+                    ),
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: widgets[index],
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -1764,7 +1806,13 @@ class _FocusedResultView extends StatelessWidget {
               child: ListView(
                 key: const PageStorageKey('focused-results'),
                 padding: const EdgeInsets.fromLTRB(20, 22, 20, 24),
-                children: [_TourVue(tour: tour, onInteraction: onInteraction)],
+                children: [
+                  _TourVue(
+                    tour: tour,
+                    onInteraction: onInteraction,
+                    anime: true,
+                  ),
+                ],
               ),
             ),
           ],

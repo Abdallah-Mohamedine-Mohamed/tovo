@@ -331,6 +331,56 @@ void main() {
     },
   );
 
+  testWidgets('les cartes entrent progressivement dès leur arrivée', (
+    tester,
+  ) async {
+    final client = ProgressiveClient();
+    await open(
+      tester,
+      ChatScreen(
+        api: TovoApi(client: client, tokenProvider: () => null),
+      ),
+    );
+    await tester.enterText(find.byType(TextField), 'Poulet');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Envoyer'));
+    await tester.pump();
+    client.emit({
+      'type': 'results',
+      'components': [
+        {
+          'type': 'product_carousel',
+          'data': {
+            'title': 'Poulet',
+            'items': [
+              {
+                'id': 'plat',
+                'name': 'Poulet fondant',
+                'price': 2500,
+                'merchant_name': 'Tovo',
+              },
+            ],
+          },
+        },
+      ],
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Poulet fondant'), findsWidgets);
+    expect(find.text('Résultats'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 450));
+    expect(find.text('Poulet fondant'), findsWidgets);
+    client.emit({
+      'type': 'done',
+      'status': 200,
+      'content': 'Voici les plats.',
+      'components': [],
+    });
+    await client.events.close();
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets(
     'le vocal part après transcription et reste visible dans la conversation',
     (tester) async {

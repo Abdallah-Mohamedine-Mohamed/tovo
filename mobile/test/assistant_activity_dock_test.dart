@@ -57,4 +57,29 @@ void main() {
     expect(find.text('La réponse arrive…'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('le fond actif est fumé plutôt que blanc', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Stack(
+            children: [
+              ColoredBox(color: Colors.white),
+              AssistantActivityAtmosphere(active: true),
+            ],
+          ),
+        ),
+      ),
+    );
+    final overlay = find.descendant(
+      of: find.byType(AssistantActivityAtmosphere),
+      matching: find.byType(ColoredBox),
+    );
+    expect(
+      tester.widgetList<ColoredBox>(overlay).map((box) => box.color),
+      contains(const Color(0x30434A54)),
+    );
+    expect(find.byType(BackdropFilter), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
