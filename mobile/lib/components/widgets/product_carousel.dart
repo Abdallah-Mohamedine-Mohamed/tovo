@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 import '../../core/catalog_image.dart';
+import '../../core/viewport_reveal.dart';
 import '../registry.dart';
 
 class ProductCollection extends StatelessWidget {
@@ -29,15 +30,17 @@ class ProductCollection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (component.str('title').isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: Text(
-              component.str('title'),
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                letterSpacing: -0.35,
-                color: TovoTheme.ink,
+          ViewportReveal(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Text(
+                component.str('title'),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.35,
+                  color: TovoTheme.ink,
+                ),
               ),
             ),
           ),
@@ -48,11 +51,14 @@ class ProductCollection extends StatelessWidget {
               scrollDirection: Axis.horizontal,
               itemCount: items.length,
               separatorBuilder: (_, __) => const SizedBox(width: 16),
-              itemBuilder: (_, index) => SizedBox(
-                width: 190,
-                child: _ProductTile(
-                  data: items[index],
-                  onInteraction: onInteraction,
+              itemBuilder: (_, index) => ViewportReveal(
+                delay: Duration(milliseconds: index < 4 ? index * 110 : 330),
+                child: SizedBox(
+                  width: 190,
+                  child: _ProductTile(
+                    data: items[index],
+                    onInteraction: onInteraction,
+                  ),
                 ),
               ),
             ),

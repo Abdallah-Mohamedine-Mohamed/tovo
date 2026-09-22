@@ -12,11 +12,17 @@ class ProductScreen extends StatefulWidget {
     required this.api,
     required this.productId,
     this.initialProduct = const {},
+    this.embedded = false,
+    this.onClose,
+    this.onAdded,
   });
 
   final TovoApi api;
   final String productId;
   final Map<String, dynamic> initialProduct;
+  final bool embedded;
+  final VoidCallback? onClose;
+  final VoidCallback? onAdded;
 
   @override
   State<ProductScreen> createState() => _ProductScreenState();
@@ -169,7 +175,11 @@ class _ProductScreenState extends State<ProductScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Ajouté à votre panier')));
-      Navigator.pop(context, true);
+      if (widget.embedded) {
+        widget.onAdded?.call();
+      } else {
+        Navigator.pop(context, true);
+      }
     } else {
       setState(() => _error = response.content);
     }
@@ -181,6 +191,135 @@ class _ProductScreenState extends State<ProductScreen> {
     final photo = product['image_url'] as String? ?? '';
     final name = product['name'] as String? ?? '';
     final description = product['description'] as String? ?? '';
+    final body = _loading && product.isEmpty
+        ? widget.embedded
+              ? const SizedBox(height: 260, child: ReadPlaceholder())
+              : const ReadPlaceholder()
+        : _component == null && product.isEmpty
+        ? Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_error ?? 'Le produit n’a pas pu être chargé.'),
+                  TextButton(onPressed: _load, child: const Text('Réessayer')),
+                ],
+              ),
+            ),
+          )
+        : ListView(
+            shrinkWrap: widget.embedded,
+            physics: widget.embedded
+                ? const NeverScrollableScrollPhysics()
+                : null,
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+            children: [
+              if (_loading)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 16),
+                  child: Text(
+                    'Vérification du prix et des options…',
+                    style: TextStyle(fontSize: 12, color: TovoTheme.muted),
+                  ),
+                ),
+              if (!_loading && _component == null) ...[
+                Text(_error ?? 'Produit indisponible.'),
+                TextButton(onPressed: _load, child: const Text('Réessayer')),
+              ],
+              if (photo.isNotEmpty) ...[
+                Semantics(
+                  button: true,
+                  label: 'Agrandir la photo',
+                  child: InkWell(
+                    onTap: () => _showPhoto(photo),
+                    borderRadius: BorderRadius.circular(24),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(24),
+                      child: CatalogImage(
+                        photo,
+                        height: (MediaQuery.sizeOf(context).width - 40).clamp(
+                          180,
+                          widget.embedded ? 240 : 420,
+                        ),
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+              ],
+              Text(
+                name,
+                style: const TextStyle(
+                  fontSize: 28,
+                  height: 1.12,
+                  letterSpacing: -0.9,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                Money.format((product['price'] as num?)?.toInt() ?? 0),
+                style: const TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (description.isNotEmpty &&
+                  description.trim().toLowerCase() !=
+                      name.trim().toLowerCase()) ...[
+                const SizedBox(height: 14),
+                Text(
+                  description,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    height: 1.6,
+                    color: TovoTheme.inkDoux,
+                  ),
+                ),
+              ],
+              if (_options.isNotEmpty) ...[
+                const SizedBox(height: 28),
+                for (final option in _options) _optionGroup(option),
+              ],
+            ],
+          );
+    if (widget.embedded) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: ColoredBox(
+          color: Colors.white,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 16, 0),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Fermer la fiche',
+                      onPressed: _adding ? null : widget.onClose,
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                    Expanded(
+                      child: Text(
+                        product['merchant_name'] as String? ?? 'Le produit',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              body,
+              if (_component != null) _footer(),
+            ],
+          ),
+        ),
+      );
+    }
     return PopScope(
       canPop: !_adding,
       child: Scaffold(
@@ -194,104 +333,7 @@ class _ProductScreenState extends State<ProductScreen> {
           title: Text(product['merchant_name'] as String? ?? 'Le produit'),
         ),
         bottomNavigationBar: _component == null ? null : _footer(),
-        body: _loading && product.isEmpty
-            ? const ReadPlaceholder()
-            : _component == null && product.isEmpty
-            ? Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _error ?? 'Le produit n’a pas pu être chargé.',
-                        textAlign: TextAlign.center,
-                      ),
-                      TextButton(
-                        onPressed: _load,
-                        child: const Text('Réessayer'),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-                children: [
-                  if (_loading)
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 16),
-                      child: Text(
-                        'Vérification du prix et des options…',
-                        style: TextStyle(fontSize: 12, color: TovoTheme.muted),
-                      ),
-                    ),
-                  if (!_loading && _component == null) ...[
-                    Text(_error ?? 'Produit indisponible.'),
-                    TextButton(
-                      onPressed: _load,
-                      child: const Text('Réessayer'),
-                    ),
-                  ],
-                  if (photo.isNotEmpty) ...[
-                    Semantics(
-                      button: true,
-                      label: 'Agrandir la photo',
-                      child: InkWell(
-                        onTap: () => _showPhoto(photo),
-                        borderRadius: BorderRadius.circular(24),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(24),
-                          child: CatalogImage(
-                            photo,
-                            height: (MediaQuery.sizeOf(context).width - 40)
-                                .clamp(180, 420),
-                            width: double.infinity,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) =>
-                                const SizedBox.shrink(),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                  ],
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      fontSize: 28,
-                      height: 1.12,
-                      letterSpacing: -0.9,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    Money.format((product['price'] as num?)?.toInt() ?? 0),
-                    style: const TextStyle(
-                      fontSize: 19,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (description.isNotEmpty &&
-                      description.trim().toLowerCase() !=
-                          name.trim().toLowerCase()) ...[
-                    const SizedBox(height: 14),
-                    Text(
-                      description,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        height: 1.6,
-                        color: TovoTheme.inkDoux,
-                      ),
-                    ),
-                  ],
-                  if (_options.isNotEmpty) ...[
-                    const SizedBox(height: 28),
-                    for (final option in _options) _optionGroup(option),
-                  ],
-                ],
-              ),
+        body: body,
       ),
     );
   }
@@ -434,11 +476,14 @@ class _ProductScreenState extends State<ProductScreen> {
 
   Widget _footer() => SafeArea(
     top: false,
+    bottom: !widget.embedded,
     child: Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(top: BorderSide(color: Color(0xFFEEF0F0))),
+        border: widget.embedded
+            ? null
+            : const Border(top: BorderSide(color: Color(0xFFEEF0F0))),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -501,6 +546,10 @@ class _ProductScreenState extends State<ProductScreen> {
             ),
           const SizedBox(height: 4),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: TovoTheme.teal,
+              foregroundColor: Colors.white,
+            ),
             onPressed: !_adding && _complete && _available ? _add : null,
             child: _adding
                 ? const SizedBox(

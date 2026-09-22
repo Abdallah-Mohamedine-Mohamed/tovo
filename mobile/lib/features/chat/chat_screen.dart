@@ -2,11 +2,9 @@ import 'dart:async';
 import 'dart:io' show File;
 import 'dart:isolate';
 import 'dart:math';
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:image/image.dart' as image_lib;
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -17,6 +15,7 @@ import '../../components/widgets/read_placeholder.dart';
 import '../../core/api.dart';
 import '../../core/location.dart';
 import '../../core/theme.dart';
+import '../../core/viewport_reveal.dart';
 import '../../core/voix.dart';
 import 'assistant_activity_dock.dart';
 import 'conversations_drawer.dart';
@@ -87,6 +86,12 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _reponseCommencee = false;
   String? _busyLabel;
   int? _focusedTourIndex;
+  int? _selectedProductTourIndex;
+  String? _selectedProductId;
+  Map<String, dynamic>? _selectedProduct;
+  bool _productAdded = false;
+  final _productAnchorKey = GlobalKey();
+  final _latestResponseKey = GlobalKey();
   String? _conversationId;
   int _navigation = 0;
   int _voiceGeneration = 0;
@@ -396,6 +401,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _busyLabel = statusLabel ?? 'Je cherche…';
     });
     final index = _tours.length;
+    var responseAnchored = false;
     var partialText = '';
     List<TovoComponent> partialComponents = [];
     final response = await widget.api.chat(
@@ -428,9 +434,6 @@ class _ChatScreenState extends State<ChatScreen> {
           if (partialText.isNotEmpty || partialComponents.isNotEmpty) {
             _reponseCommencee = true;
           }
-          if (_hasDiscoveryResults(partialComponents)) {
-            _focusedTourIndex = index;
-          }
           if (partialText.isNotEmpty || partialComponents.isNotEmpty) {
             final tour = _Tour(
               deLAssistant: true,
@@ -444,7 +447,14 @@ class _ChatScreenState extends State<ChatScreen> {
             }
           }
         });
-        if (follow) _versLeBas(animate: false);
+        if (_hasDiscoveryResults(partialComponents)) {
+          if (!responseAnchored) {
+            responseAnchored = true;
+            _montrerLeDebutDeLaReponse();
+          }
+        } else if (follow) {
+          _versLeBas(animate: false);
+        }
       },
     );
     if (!mounted || navigation != _navigation) return;
@@ -452,10 +462,15 @@ class _ChatScreenState extends State<ChatScreen> {
       _charge = false;
       _reponseCommencee = false;
       _busyLabel = null;
+      final components = response.ok && response.components.isEmpty
+          ? partialComponents
+          : response.components;
       final tour = _Tour(
         deLAssistant: true,
-        contenu: response.content,
-        composants: response.components,
+        contenu: response.content.isEmpty && response.ok
+            ? partialText
+            : response.content,
+        composants: components,
         enErreur: !response.ok,
       );
       if (_tours.length == index) {
@@ -463,9 +478,7 @@ class _ChatScreenState extends State<ChatScreen> {
       } else {
         _tours[index] = tour;
       }
-      if (response.ok && _hasDiscoveryResults(response.components)) {
-        _focusedTourIndex = index;
-      } else if (_focusedTourIndex == index) {
+      if (_focusedTourIndex == index) {
         _focusedTourIndex = null;
       }
       if (response.raw['conversation_id'] is String) {
@@ -473,7 +486,11 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
     if (response.ok) _rememberConversation();
-    _versLeBas();
+    if (response.ok && _hasDiscoveryResults(_tours[index].composants)) {
+      if (!responseAnchored) _montrerLeDebutDeLaReponse();
+    } else {
+      _versLeBas();
+    }
   }
 
   // ------------------------------------------------------------------
@@ -704,15 +721,46 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void _montrerLeDebutDeLaReponse() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final responseContext = _latestResponseKey.currentContext;
+      if (responseContext == null) return;
+      unawaited(
+        Scrollable.ensureVisible(
+          responseContext,
+          duration: const Duration(milliseconds: 260),
+          curve: TovoTheme.courbe,
+          alignment: 0.06,
+        ),
+      );
+    });
+  }
+
+  void _montrerLaFiche() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final productContext = _productAnchorKey.currentContext;
+      if (productContext == null) return;
+      unawaited(
+        Scrollable.ensureVisible(
+          productContext,
+          duration: const Duration(milliseconds: 420),
+          curve: TovoTheme.courbe,
+          alignment: 0.08,
+        ),
+      );
+    });
+  }
+
   // ------------------------------------------------------------------
   // Interactions
   // ------------------------------------------------------------------
 
-  void _interaction(TovoInteraction interaction) {
+  void _interaction(TovoInteraction interaction, {int? sourceTourIndex}) {
     if (_transcribing || _enregistreLaVoix || _voiceAction) return;
     if (_charge) {
       final canOpenResult =
-          _focusedTourIndex != null &&
+          _tours.isNotEmpty &&
+          _hasDiscoveryResults(_tours.last.composants) &&
           const {
             'browse_catalog',
             'select_product',
@@ -753,10 +801,19 @@ class _ChatScreenState extends State<ChatScreen> {
         );
 
       case 'select_product':
-        _ouvrirProduit(
-          '${p['product_id']}',
-          p['product'] as Map<String, dynamic>?,
-        );
+        if (sourceTourIndex == null) {
+          _ouvrirProduit(
+            '${p['product_id']}',
+            p['product'] as Map<String, dynamic>?,
+          );
+        } else {
+          setState(() {
+            _selectedProductTourIndex = sourceTourIndex;
+            _selectedProductId = '${p['product_id']}';
+            _selectedProduct = p['product'] as Map<String, dynamic>?;
+            _productAdded = false;
+          });
+        }
 
       case 'add_to_cart':
         _appeler(
@@ -867,6 +924,13 @@ class _ChatScreenState extends State<ChatScreen> {
     _closeFocusedResults();
     FocusScope.of(context).unfocus();
     await _chercherParPhoto(ImageSource.camera);
+  }
+
+  Future<void> _choisirDansLesPhotos() async {
+    if (_charge || _transcribing || _enregistreLaVoix || _voiceAction) return;
+    _closeFocusedResults();
+    FocusScope.of(context).unfocus();
+    await _chercherParPhoto(ImageSource.gallery);
   }
 
   Future<void> _chercherParPhoto(ImageSource source) async {
@@ -1125,6 +1189,10 @@ class _ChatScreenState extends State<ChatScreen> {
     final photo = _photoDraft;
     if (texte.isEmpty && photo == null) return;
     _closeFocusedResults();
+    _selectedProductTourIndex = null;
+    _selectedProductId = null;
+    _selectedProduct = null;
+    _productAdded = false;
     FocusScope.of(context).unfocus();
     _navigation++;
     _voiceDraft = false;
@@ -1231,6 +1299,10 @@ class _ChatScreenState extends State<ChatScreen> {
       _charge = false;
       _busyLabel = null;
       _focusedTourIndex = null;
+      _selectedProductTourIndex = null;
+      _selectedProductId = null;
+      _selectedProduct = null;
+      _productAdded = false;
       _conversationId = id;
       _transcribing = false;
       _voiceDraft = false;
@@ -1271,6 +1343,10 @@ class _ChatScreenState extends State<ChatScreen> {
       _charge = false;
       _busyLabel = null;
       _focusedTourIndex = null;
+      _selectedProductTourIndex = null;
+      _selectedProductId = null;
+      _selectedProduct = null;
+      _productAdded = false;
       _saisie.clear();
       _transcribing = false;
       _voiceDraft = false;
@@ -1313,7 +1389,9 @@ class _ChatScreenState extends State<ChatScreen> {
         if (!didPop) _closeFocusedResults();
       },
       child: Scaffold(
-        backgroundColor: listening ? kAssistantListeningSurface : Colors.white,
+        backgroundColor: listening
+            ? kAssistantListeningSurface
+            : TovoTheme.canvas,
         drawer: TiroirConversations(
           api: widget.api,
           conversationCourante: _conversationId,
@@ -1323,33 +1401,22 @@ class _ChatScreenState extends State<ChatScreen> {
         appBar: AppBar(
           backgroundColor: listening
               ? kAssistantListeningSurface
-              : Colors.white,
+              : TovoTheme.canvas,
           surfaceTintColor: Colors.transparent,
-          // Les trois traits, et rien d'autre.
-          //
-          // J'avais mis une icône de conversation, en me disant qu'elle
-          // annoncerait mieux ce qu'il y a derrière. C'était une erreur : le
-          // menu à trois traits est le seul symbole que tout le monde
-          // reconnaît sans y penser, et ce qu'on gagne à être explicite ne
-          // vaut pas ce qu'on perd en habitude.
           leading: Builder(
             builder: (context) => IconButton(
               tooltip: 'Mes conversations',
-              icon: const Icon(Icons.menu_rounded, size: 25),
+              icon: const Icon(Icons.menu_rounded, size: 23),
+              color: TovoTheme.ink,
               onPressed: () => Scaffold.of(context).openDrawer(),
             ),
           ),
           leadingWidth: 52,
-          centerTitle: true,
-          title: SvgPicture.asset(
-            'assets/branding/tovo-logo.svg',
-            width: 88,
-            height: 28,
-          ),
           actions: [
             IconButton(
               tooltip: 'Mon panier',
-              icon: const Icon(Icons.shopping_bag_outlined, size: 23),
+              icon: const Icon(Icons.shopping_cart_outlined, size: 23),
+              color: TovoTheme.ink,
               onPressed: _ouvrirPanier,
             ),
             const SizedBox(width: 6),
@@ -1391,7 +1458,13 @@ class _ChatScreenState extends State<ChatScreen> {
                               controller: _scroll,
                               keyboardDismissBehavior:
                                   ScrollViewKeyboardDismissBehavior.onDrag,
-                              padding: const EdgeInsets.only(bottom: 18),
+                              padding: EdgeInsets.only(
+                                bottom: _selectedProductId != null
+                                    ? MediaQuery.sizeOf(context).height * 0.20
+                                    : _productAdded
+                                    ? 80
+                                    : 18,
+                              ),
                               itemCount: _tours.length + decalage,
                               itemBuilder: (context, i) {
                                 if (afficheAccueil && i == 0) {
@@ -1411,12 +1484,65 @@ class _ChatScreenState extends State<ChatScreen> {
                                   child: IgnorePointer(
                                     ignoring:
                                         _charge &&
-                                        tourIndex == _tours.length - 1,
+                                        tourIndex == _tours.length - 1 &&
+                                        !_hasDiscoveryResults(
+                                          _tours[tourIndex].composants,
+                                        ),
                                     child: _TourVue(
-                                      key: ValueKey('$_navigation:$tourIndex'),
+                                      key:
+                                          tourIndex == _tours.length - 1 &&
+                                              _tours[tourIndex].deLAssistant
+                                          ? _latestResponseKey
+                                          : ValueKey(tourIndex),
                                       tour: _tours[tourIndex],
-                                      onInteraction: _interaction,
+                                      onInteraction: (interaction) =>
+                                          _interaction(
+                                            interaction,
+                                            sourceTourIndex: tourIndex,
+                                          ),
                                       anime: tourIndex == _tours.length - 1,
+                                      shoppingStep:
+                                          _hasDiscoveryResults(
+                                            _tours[tourIndex].composants,
+                                          )
+                                          ? _selectedProductTourIndex ==
+                                                    tourIndex
+                                                ? _productAdded
+                                                      ? 2
+                                                      : 1
+                                                : 0
+                                          : null,
+                                      productDetail:
+                                          _selectedProductTourIndex ==
+                                                  tourIndex &&
+                                              _selectedProductId != null
+                                          ? Container(
+                                              key: _productAnchorKey,
+                                              child: ProductScreen(
+                                                key: ValueKey(
+                                                  _selectedProductId,
+                                                ),
+                                                api: widget.api,
+                                                productId: _selectedProductId!,
+                                                initialProduct:
+                                                    _selectedProduct ??
+                                                    const {},
+                                                embedded: true,
+                                                onClose: () => setState(() {
+                                                  _selectedProductTourIndex =
+                                                      null;
+                                                  _selectedProductId = null;
+                                                  _selectedProduct = null;
+                                                  _productAdded = false;
+                                                }),
+                                                onAdded: () => setState(
+                                                  () => _productAdded = true,
+                                                ),
+                                              ),
+                                            )
+                                          : null,
+                                      selectedProductId: _selectedProductId,
+                                      onProductExpanded: _montrerLaFiche,
                                       scanne:
                                           _charge &&
                                           tourIndex == _tours.length - 1 &&
@@ -1428,28 +1554,6 @@ class _ChatScreenState extends State<ChatScreen> {
                             );
                           },
                         ),
-                      ),
-                    ),
-                  ),
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: TweenAnimationBuilder<double>(
-                        tween: Tween(begin: 0, end: listening ? 1 : 0),
-                        duration: motionDuration,
-                        curve: TovoTheme.courbe,
-                        builder: (context, progress, _) => progress == 0
-                            ? const SizedBox.shrink()
-                            : BackdropFilter(
-                                filter: ImageFilter.blur(
-                                  sigmaX: progress * 6,
-                                  sigmaY: progress * 6,
-                                ),
-                                child: ColoredBox(
-                                  color: const Color(
-                                    0xFF6A707A,
-                                  ).withValues(alpha: progress * 0.11),
-                                ),
-                              ),
                       ),
                     ),
                   ),
@@ -1480,6 +1584,23 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                     ),
                   ),
+                  if (_productAdded)
+                    Positioned(
+                      bottom: 12,
+                      left: 16,
+                      right: 16,
+                      child: Center(
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: TovoTheme.teal,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: _ouvrirPanier,
+                          icon: const Icon(Icons.shopping_bag_outlined),
+                          label: const Text('Voir mon panier'),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -1520,7 +1641,7 @@ class _ChatScreenState extends State<ChatScreen> {
             AnimatedContainer(
               duration: motionDuration,
               curve: TovoTheme.courbe,
-              color: listening ? kAssistantListeningSurface : Colors.white,
+              color: listening ? kAssistantListeningSurface : TovoTheme.canvas,
               child: AnimatedSwitcher(
                 duration: motionDuration,
                 switchInCurve: TovoTheme.courbe,
@@ -1530,6 +1651,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         controller: _saisie,
                         onSend: _envoyer,
                         onCamera: () => unawaited(_choisirLaSource()),
+                        onGallery: () => unawaited(_choisirDansLesPhotos()),
                         photoPath: _photoDraft?.path,
                         onRemovePhoto: () => setState(() => _photoDraft = null),
                         onParoleTouche: _toucherLeMicro,
@@ -1565,10 +1687,18 @@ class _TourVue extends StatefulWidget {
     required this.onInteraction,
     this.anime = false,
     this.scanne = false,
+    this.shoppingStep,
+    this.productDetail,
+    this.selectedProductId,
+    this.onProductExpanded,
   });
 
   final _Tour tour;
   final InteractionCallback onInteraction;
+  final int? shoppingStep;
+  final Widget? productDetail;
+  final String? selectedProductId;
+  final VoidCallback? onProductExpanded;
 
   /// Le message vient d'arriver : il glisse et se révèle. Les précédents
   /// s'affichent directement, sinon la liste frémirait à chaque défilement.
@@ -1579,19 +1709,13 @@ class _TourVue extends StatefulWidget {
   State<_TourVue> createState() => _TourVueState();
 }
 
-class _TourVueState extends State<_TourVue>
-    with SingleTickerProviderStateMixin {
+class _TourVueState extends State<_TourVue> {
   double _opacite = 1;
   double _decalage = 0;
-  late final AnimationController _resultsReveal;
 
   @override
   void initState() {
     super.initState();
-    _resultsReveal = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 430),
-    );
     if (!widget.anime) return;
 
     _opacite = 0;
@@ -1606,35 +1730,6 @@ class _TourVueState extends State<_TourVue>
         });
       }
     });
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!widget.anime || MediaQuery.disableAnimationsOf(context)) {
-      _resultsReveal.value = 1;
-    } else if (widget.tour.composants.isNotEmpty && _resultsReveal.value == 0) {
-      _resultsReveal.forward();
-    }
-  }
-
-  @override
-  void didUpdateWidget(_TourVue oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.tour.composants.isEmpty &&
-        widget.tour.composants.isNotEmpty) {
-      if (widget.anime && !MediaQuery.disableAnimationsOf(context)) {
-        _resultsReveal.forward(from: 0);
-      } else {
-        _resultsReveal.value = 1;
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _resultsReveal.dispose();
-    super.dispose();
   }
 
   @override
@@ -1732,58 +1827,101 @@ class _TourVueState extends State<_TourVue>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (tour.contenu.isNotEmpty)
-            Container(
-              margin: EdgeInsets.only(bottom: widgets.isEmpty ? 0 : 14, top: 2),
-              padding: tour.enErreur
-                  ? const EdgeInsets.all(12)
-                  : EdgeInsets.zero,
-              decoration: tour.enErreur
-                  ? BoxDecoration(
-                      color: TovoTheme.coralSoft,
-                      borderRadius: BorderRadius.circular(
-                        TovoTheme.radiusSmall,
-                      ),
-                    )
-                  : null,
-              child: _TexteAssistant(
-                tour.contenu,
-                couleur: tour.enErreur ? TovoTheme.danger : TovoTheme.ink,
+            ViewportReveal(
+              enabled: widget.anime,
+              child: Container(
+                margin: EdgeInsets.only(
+                  bottom: widgets.isEmpty ? 0 : 14,
+                  top: 2,
+                ),
+                padding: tour.enErreur
+                    ? const EdgeInsets.all(12)
+                    : EdgeInsets.zero,
+                decoration: tour.enErreur
+                    ? BoxDecoration(
+                        color: TovoTheme.coralSoft,
+                        borderRadius: BorderRadius.circular(
+                          TovoTheme.radiusSmall,
+                        ),
+                      )
+                    : null,
+                child: _TexteAssistant(
+                  tour.contenu,
+                  couleur: tour.enErreur ? TovoTheme.danger : TovoTheme.ink,
+                ),
               ),
+            ),
+          if (widget.shoppingStep != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 18),
+              child: _ShoppingProgress(step: widget.shoppingStep!),
             ),
           for (var index = 0; index < widgets.length; index++)
-            FadeTransition(
-              opacity: _resultsReveal.drive(
-                CurveTween(
-                  curve: Interval(
-                    min(index * 0.12, 0.42),
-                    1,
-                    curve: Curves.easeOut,
-                  ),
-                ),
-              ),
-              child: SlideTransition(
-                position: _resultsReveal
-                    .drive(
-                      CurveTween(
-                        curve: Interval(
-                          min(index * 0.12, 0.42),
-                          1,
-                          curve: TovoTheme.courbe,
-                        ),
-                      ),
-                    )
-                    .drive(
-                      Tween<Offset>(
-                        begin: const Offset(0, 0.035),
-                        end: Offset.zero,
-                      ),
-                    ),
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: widgets[index],
-                ),
+            ViewportReveal(
+              key: ValueKey('component-$index'),
+              enabled: widget.anime,
+              delay: Duration(milliseconds: min(110 + index * 110, 440)),
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: widgets[index],
               ),
             ),
+          TweenAnimationBuilder<double>(
+            key: ValueKey(widget.selectedProductId),
+            tween: Tween(begin: 0, end: widget.productDetail == null ? 0 : 1),
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 600),
+            curve: TovoTheme.courbe,
+            onEnd: widget.productDetail == null
+                ? null
+                : widget.onProductExpanded,
+            builder: (context, progress, child) => ClipRect(
+              child: Align(
+                alignment: Alignment.topCenter,
+                heightFactor: progress,
+                child: child,
+              ),
+            ),
+            child: widget.productDetail == null
+                ? const SizedBox.shrink()
+                : ViewportReveal(
+                    key: ValueKey(widget.selectedProductId),
+                    duration: const Duration(milliseconds: 600),
+                    offset: 16,
+                    child: widget.productDetail!,
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ShoppingProgress extends StatelessWidget {
+  const _ShoppingProgress({required this.step});
+
+  final int step;
+
+  @override
+  Widget build(BuildContext context) {
+    const labels = ['Recherche', 'Choix', 'Commande'];
+    return Semantics(
+      label: 'Étape ${step + 1} sur 3 : ${labels[step]}',
+      child: Row(
+        children: [
+          for (var index = 0; index < labels.length; index++) ...[
+            if (index > 0)
+              const Expanded(child: Divider(color: TovoTheme.line)),
+            Text(
+              labels[index],
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: index == step ? FontWeight.w700 : FontWeight.w400,
+                color: index == step ? TovoTheme.teal : TovoTheme.muted,
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -2124,6 +2262,7 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
     required this.controller,
     required this.onSend,
     required this.onCamera,
+    required this.onGallery,
     required this.photoPath,
     required this.onRemovePhoto,
     required this.onParoleTouche,
@@ -2132,6 +2271,7 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
   final TextEditingController controller;
   final VoidCallback onSend;
   final VoidCallback onCamera;
+  final VoidCallback onGallery;
   final String? photoPath;
   final VoidCallback onRemovePhoto;
   final VoidCallback onParoleTouche;
@@ -2142,22 +2282,27 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
     required VoidCallback onTap,
     required String tooltip,
     bool principal = false,
+    bool enabled = true,
   }) {
     return Tooltip(
       key: key,
       message: tooltip,
       child: Material(
-        color: principal ? TovoTheme.teal : Colors.transparent,
+        color: principal
+            ? (enabled ? TovoTheme.teal : TovoTheme.surface)
+            : Colors.transparent,
         shape: const CircleBorder(),
         child: InkWell(
           customBorder: const CircleBorder(),
-          onTap: onTap,
+          onTap: enabled ? onTap : null,
           child: SizedBox.square(
-            dimension: 44,
+            dimension: 42,
             child: Icon(
               icon,
-              size: principal ? 20 : 19,
-              color: principal ? Colors.white : TovoTheme.teal,
+              size: principal ? 21 : 20,
+              color: principal
+                  ? (enabled ? Colors.white : TovoTheme.muted)
+                  : TovoTheme.ink,
             ),
           ),
         ),
@@ -2169,14 +2314,14 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
   Widget build(BuildContext context) {
     return SafeArea(
       top: false,
-      minimum: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      minimum: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Container(
-        constraints: const BoxConstraints(minHeight: 64),
-        padding: const EdgeInsets.fromLTRB(8, 7, 8, 7),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 7),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(22),
           border: Border.all(color: TovoTheme.line),
+          boxShadow: TovoTheme.ombre,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2214,57 +2359,57 @@ class _BarreDeSaisieNouveau extends StatelessWidget {
                   ],
                 ),
               ),
+            TextField(
+              controller: controller,
+              minLines: 1,
+              maxLines: 5,
+              textCapitalization: TextCapitalization.sentences,
+              textInputAction: TextInputAction.newline,
+              onSubmitted: (_) {
+                if (controller.text.trim().isNotEmpty || photoPath != null) {
+                  onSend();
+                }
+              },
+              decoration: const InputDecoration(
+                hintText: 'Demandez à Tovo…',
+                filled: false,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 4,
+                  vertical: 9,
+                ),
+              ),
+              style: const TextStyle(fontSize: 16, height: 1.4),
+            ),
             Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 _action(
-                  icon: Icons.add_rounded,
+                  icon: Icons.photo_outlined,
+                  onTap: onGallery,
+                  tooltip: 'Choisir une photo',
+                ),
+                _action(
+                  icon: Icons.camera_alt_outlined,
                   onTap: onCamera,
                   tooltip: 'Chercher avec une photo',
                 ),
-                const SizedBox(width: 7),
-                Expanded(
-                  child: TextField(
-                    controller: controller,
-                    minLines: 1,
-                    maxLines: 5,
-                    textCapitalization: TextCapitalization.sentences,
-                    textInputAction: TextInputAction.newline,
-                    onSubmitted: (_) {
-                      if (controller.text.trim().isNotEmpty ||
-                          photoPath != null) {
-                        onSend();
-                      }
-                    },
-                    decoration: const InputDecoration(
-                      hintText: 'Demandez à Tovo…',
-                      filled: false,
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 11,
-                      ),
-                    ),
-                    style: const TextStyle(fontSize: 14.5, height: 1.35),
-                  ),
+                _action(
+                  icon: Icons.mic_none_rounded,
+                  onTap: onParoleTouche,
+                  tooltip: 'Parler à Tovo',
                 ),
-                const SizedBox(width: 6),
+                const Spacer(),
                 ValueListenableBuilder<TextEditingValue>(
                   valueListenable: controller,
-                  builder: (context, valeur, _) {
-                    final aDuTexte =
-                        valeur.text.trim().isNotEmpty || photoPath != null;
-                    return _action(
-                      icon: aDuTexte
-                          ? Icons.arrow_upward_rounded
-                          : Icons.mic_none_rounded,
-                      onTap: aDuTexte ? onSend : onParoleTouche,
-                      tooltip: aDuTexte ? 'Envoyer' : 'Parler à Tovo',
-                      principal: true,
-                    );
-                  },
+                  builder: (context, valeur, _) => _action(
+                    icon: Icons.arrow_upward_rounded,
+                    onTap: onSend,
+                    tooltip: 'Envoyer',
+                    principal: true,
+                    enabled: valeur.text.trim().isNotEmpty || photoPath != null,
+                  ),
                 ),
               ],
             ),

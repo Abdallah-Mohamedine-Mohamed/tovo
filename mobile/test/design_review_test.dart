@@ -379,7 +379,7 @@ void main() {
     await capture(tester, '02-conversation');
   });
 
-  visualTest('recherche : résultats au premier plan puis retour au fil', (
+  visualTest('recherche : résultats intégrés au fil sans changement d’écran', (
     tester,
   ) async {
     liveSearch = true;
@@ -392,18 +392,24 @@ void main() {
       () async => Future<void>.delayed(const Duration(milliseconds: 300)),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Résultats'), findsOneWidget);
+    expect(find.text('Résultats'), findsNothing);
     expect(
       find.text('Voici les plats au poulet.').hitTestable(),
       findsOneWidget,
     );
-    expect(find.text('Attieke Poulet').hitTestable(), findsOneWidget);
-    expect(find.byTooltip('Retour à la discussion'), findsOneWidget);
-    await capture(tester, '09-resultats-focalises');
-    await tester.tap(find.byTooltip('Retour à la discussion'));
+    await tester.ensureVisible(find.text('Attieke Poulet'));
     await tester.pumpAndSettle();
-    expect(find.text('Résultats'), findsNothing);
-    expect(find.text('poulet'), findsOneWidget);
+    expect(find.text('Attieke Poulet').hitTestable(), findsOneWidget);
+    expect(find.byTooltip('Retour à la discussion'), findsNothing);
+    await capture(tester, '09-resultats-inline');
+    await tester.tap(find.text('Attieke Poulet'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ProductScreen), findsOneWidget);
+    await capture(tester, '10-fiche-inline');
+    await tester.tap(find.byTooltip('Fermer la fiche'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ProductScreen), findsNothing);
+    expect(find.text('Attieke Poulet'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -445,7 +451,7 @@ void main() {
   });
 
   Future<void> checkout(WidgetTester tester) async {
-    await tester.tap(find.byIcon(Icons.shopping_bag_outlined).first);
+    await tester.tap(find.byTooltip('Mon panier'));
     await tester.pumpAndSettle();
     await tester.runAsync(
       () async => Future<void>.delayed(const Duration(milliseconds: 300)),

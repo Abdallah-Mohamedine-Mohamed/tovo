@@ -143,6 +143,46 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
   }
 
+  testWidgets('en-tête épuré et actions séparées dans la saisie', (
+    tester,
+  ) async {
+    final sent = <String>[];
+    final api = TovoApi(
+      tokenProvider: () => null,
+      client: MockClient((request) async {
+        if (request.url.path == '/chat') {
+          sent.add(jsonDecode(request.body)['text'] as String);
+          return jsonResponse({'content': 'Bien reçu', 'components': []});
+        }
+        return jsonResponse(
+          request.url.path == '/categories' ? categoryBody : {},
+        );
+      }),
+    );
+    await open(tester, ChatScreen(api: api));
+
+    expect(tester.widget<AppBar>(find.byType(AppBar)).title, isNull);
+    final cart = tester.widget<IconButton>(
+      find.ancestor(
+        of: find.byTooltip('Mon panier'),
+        matching: find.byType(IconButton),
+      ),
+    );
+    expect((cart.icon as Icon).icon, Icons.shopping_cart_outlined);
+    expect(cart.color, TovoTheme.ink);
+    expect(find.byTooltip('Choisir une photo'), findsOneWidget);
+    expect(find.byTooltip('Chercher avec une photo'), findsOneWidget);
+    expect(find.byTooltip('Parler à Tovo'), findsOneWidget);
+    expect(find.byTooltip('Envoyer'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField).last, 'Bonjour Tovo');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Envoyer'));
+    await tester.pump();
+    expect(sent, ['Bonjour Tovo']);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'historique local visible sans attendre les commandes, puis nouveau fil protégé',
     (tester) async {
@@ -368,7 +408,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('Poulet fondant'), findsWidgets);
-    expect(find.text('Résultats'), findsOneWidget);
+    expect(find.text('Résultats'), findsNothing);
     await tester.pump(const Duration(milliseconds: 450));
     expect(find.text('Poulet fondant'), findsWidgets);
     client.emit({
@@ -379,8 +419,84 @@ void main() {
     });
     await client.events.close();
     await tester.pump();
+    expect(find.text('Poulet fondant'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+    'la fiche produit se déploie dans la discussion sans changer d’écran',
+    (tester) async {
+      final api = TovoApi(
+        tokenProvider: () => null,
+        client: MockClient((request) async {
+          if (request.url.path == '/chat') {
+            return jsonResponse({
+              'content': 'Voici un plat.',
+              'components': [
+                {
+                  'type': 'product_carousel',
+                  'data': {
+                    'title': 'Poulet',
+                    'items': [
+                      {
+                        'id': 'plat',
+                        'name': 'Poulet fondant',
+                        'price': 2500,
+                        'merchant_name': 'Tovo',
+                      },
+                    ],
+                  },
+                },
+              ],
+            });
+          }
+          if (request.url.path == '/products/plat') {
+            return jsonResponse({
+              'components': [
+                {
+                  'type': 'product_card',
+                  'data': {
+                    'id': 'plat',
+                    'name': 'Poulet fondant',
+                    'price': 2500,
+                    'actions': ['add_to_cart'],
+                  },
+                },
+              ],
+            });
+          }
+          if (request.url.path == '/categories') {
+            return jsonResponse(categoryBody);
+          }
+          return jsonResponse({});
+        }),
+      );
+      await open(tester, ChatScreen(api: api));
+      await tester.enterText(find.byType(TextField), 'Poulet');
+      await tester.pump();
+      await tester.tap(find.byTooltip('Envoyer'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.ensureVisible(find.text('Poulet fondant').first);
+      await tester.pump();
+      await tester.tap(find.text('Poulet fondant').first);
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ChatScreen), findsOneWidget);
+      expect(find.byType(ProductScreen), findsOneWidget);
+      expect(find.byTooltip('Fermer la fiche'), findsOneWidget);
+      expect(find.text('Résultats'), findsNothing);
+      await tester.ensureVisible(find.text('Ajouter au panier'));
+      await tester.pump();
+      await tester.tap(find.text('Ajouter au panier'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Voir mon panier'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets(
     'le vocal part après transcription et reste visible dans la conversation',
@@ -411,14 +527,10 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 1200)),
       );
       await tester.pump(const Duration(milliseconds: 300));
-      final listeningTint = find.descendant(
-        of: find.byType(BackdropFilter),
-        matching: find.byType(ColoredBox),
-      );
-      expect(find.byType(BackdropFilter), findsOneWidget);
+      expect(find.byType(BackdropFilter), findsNothing);
       expect(
-        tester.widget<ColoredBox>(listeningTint).color,
-        const Color(0xFF6A707A).withValues(alpha: 0.11),
+        tester.widget<Scaffold>(find.byType(Scaffold).first).backgroundColor,
+        kAssistantListeningSurface,
       );
       expect(
         tester.widget<AppBar>(find.byType(AppBar)).backgroundColor,
