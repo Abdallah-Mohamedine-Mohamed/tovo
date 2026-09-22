@@ -94,6 +94,10 @@ void main() {
       (_) async => null,
     );
     messenger.setMockMethodCallHandler(
+      const MethodChannel('flutter.baseflow.com/geolocator'),
+      (call) async => call.method == 'isLocationServiceEnabled' ? false : null,
+    );
+    messenger.setMockMethodCallHandler(
       const MethodChannel('com.llfbandit.record/messages'),
       (call) async {
         final arguments = (call.arguments as Map?) ?? {};
@@ -328,7 +332,7 @@ void main() {
   );
 
   testWidgets(
-    'le vocal devient un brouillon modifiable, jamais envoyé automatiquement',
+    'le vocal part après transcription et reste visible dans la conversation',
     (tester) async {
       final sent = <Map<String, dynamic>>[];
       var transcriptionCount = 0;
@@ -364,17 +368,14 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(transcriptionCount, 1);
-      expect(sent, isEmpty);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(sent.single['text'], 'Je veux du poulet');
+      expect(sent.single.containsKey('audio'), isFalse);
+      expect(find.text('Je veux du poulet'), findsOneWidget);
       expect(
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
-        'Je veux du poulet',
+        isEmpty,
       );
-      await tester.enterText(find.byType(TextField), 'Je veux du poisson');
-      await tester.pump();
-      await tester.tap(find.byTooltip('Envoyer'));
-      await tester.pump(const Duration(milliseconds: 300));
-      expect(sent.single['text'], 'Je veux du poisson');
-      expect(sent.single.containsKey('audio'), isFalse);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
     },

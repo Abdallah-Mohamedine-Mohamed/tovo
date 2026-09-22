@@ -87,6 +87,9 @@ describe('intentions de catalogue', () => {
   it('ne croit le filtre boutique du modele que si le client en designe une', () => {
     expect(nomBoutiqueApresMarqueur('Je veux manger du poulet')).toBeNull();
     expect(nomBoutiqueApresMarqueur('Montre-moi les plats chez Poulet')).toBe('poulet');
+    expect(nomBoutiqueApresMarqueur("J'ai envie de commander un restaurant. En fait j'ai envie de poulet.")).toBeNull();
+    expect(nomBoutiqueApresMarqueur("Un restaurant, en fait un tacos de chez O'Tacos"))
+      .toBe('o tacos');
   });
 
   it('conserve le produit demandé sans les mots de conversation', () => {
@@ -96,6 +99,8 @@ describe('intentions de catalogue', () => {
     expect(requeteProduitUtilisateur('Avez-vous une autre montre, quelle que soit la marque ?'))
       .toBe('montre');
     expect(requeteProduitUtilisateur('Montre-moi un bracelet')).toBe('bracelet');
+    expect(requeteProduitUtilisateur("J'ai envie de commander un restaurant. En fait j'ai envie de poulet. Qu'est-ce que vous avez comme poulet dans votre catalogue ?"))
+      .toBe('poulet');
   });
 
   it('reconnait une réaction qui ne doit pas lancer le catalogue', () => {

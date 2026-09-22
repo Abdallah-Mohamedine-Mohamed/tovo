@@ -31,11 +31,14 @@ const MOTS_RECHERCHE_VIDES = new Set([
 export function requeteProduitUtilisateur(texte: string): string {
   let normalise = normaliserIntention(texte);
   normalise = normalise.replace(/^montre(?:z)? moi\b/, '').trim();
-  return normalise
+  const correction = normalise.lastIndexOf('en fait ');
+  if (correction >= 0) normalise = normalise.slice(correction + 'en fait '.length);
+  const mots = normalise
     .split(' ')
     .filter(Boolean)
     .filter((mot) => !MOTS_RECHERCHE_VIDES.has(mot))
-    .join(' ');
+    .filter((mot) => !['envie', 'dans', 'votre', 'comme', 'commander'].includes(mot));
+  return (correction >= 0 ? [...new Set(mots)] : mots).join(' ');
 }
 
 /** Une phrase sociale ou émotionnelle ne doit jamais devenir un produit. */
@@ -67,10 +70,18 @@ export function demandeBoutiqueOuverte(texte: string): boolean {
 }
 
 export function nomBoutiqueApresMarqueur(texte: string): string | null {
-  const candidat = normaliserIntention(texte).match(
-    /\b(?:chez|boutique|enseigne|restaurant|resto)\s+(.+)$/,
-  )?.[1] ?? null;
+  const normalise = normaliserIntention(texte);
+  const marqueurs = [...normalise.matchAll(/\b(?:chez|boutique|enseigne|restaurant|resto)\b/g)];
+  const marqueur = marqueurs.at(-1);
+  const candidat = marqueur
+    ? normalise.slice(marqueur.index + marqueur[0].length).trim()
+      .split(/\b(?:en fait|je veux|j ai|qu est ce)\b/)[0]?.trim() ?? null
+    : null;
   if (!candidat) return null;
+
+  if (/^(?:en fait|un|une|des|du|de|la|le|les|que|qui|ou|pour|dans)\b/.test(candidat)) {
+    return null;
+  }
 
   // « une boutique ouverte présentement » décrit un besoin, pas une
   // enseigne appelée « ouverte présentement ». Si une enseigne suit « sur »,
@@ -158,9 +169,15 @@ function scoreNomBoutique(saisi: string, catalogue: string): number {
   const nomNormalise = normaliserIntention(catalogue);
   const cible = cibleNormalisee.replace(/ /g, '');
   const nom = nomNormalise.replace(/ /g, '');
+  const nomEnseigne = normaliserIntention(catalogue.replace(/\([^)]*\)/g, '')).replace(/ /g, '');
   if (cible.length < 3 || nom.length < 3) return 0;
 
   if (cible === nom) return 1;
+  const phonetique = (valeur: string) => valeur
+    .replace(/qu/g, 'k')
+    .replace(/c(?=[aou])/g, 'k')
+    .replace(/(.)\1+/g, '$1');
+  if (cible.length >= 5 && phonetique(cible) === phonetique(nomEnseigne)) return 0.97;
   if (nom.includes(cible)) return 0.99;
   if (cible.includes(nom)) return 0.98;
 

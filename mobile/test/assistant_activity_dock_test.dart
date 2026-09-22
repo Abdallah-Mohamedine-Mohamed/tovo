@@ -41,7 +41,8 @@ void main() {
       onCancel: () => cancels++,
     );
     expect(find.text('Je vous écoute'), findsOneWidget);
-    await tester.tap(find.text('Je vous écoute'));
+    expect(find.byIcon(Icons.mic_rounded), findsOneWidget);
+    await tester.tap(find.byTooltip('Arrêter et transcrire'));
     await tester.tap(find.byTooltip('Annuler le vocal'));
     expect(stops, 1);
     expect(cancels, 1);

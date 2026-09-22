@@ -29,20 +29,33 @@ class AssistantActivityDock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final duration = MediaQuery.disableAnimationsOf(context)
-        ? Duration.zero
-        : TovoTheme.normal;
+    final listening = activity == AssistantActivity.listening;
     return SafeArea(
       top: false,
       minimum: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: SizedBox(
-        height: 64,
+        height: listening ? 98 : 64,
         child: Stack(
-          alignment: Alignment.center,
+          alignment: Alignment.bottomCenter,
           children: [
-            UnconstrainedBox(
+            if (listening) ...[
+              const Positioned(
+                top: 0,
+                child: Text(
+                  'Je vous écoute',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: TovoTheme.tealDeep,
+                  ),
+                ),
+              ),
+              const Positioned(bottom: 0, child: _ListeningPulse()),
+            ],
+            Align(
+              alignment: Alignment.bottomCenter,
               child: Tooltip(
-                message: activity == AssistantActivity.listening
+                message: listening
                     ? 'Arrêter et transcrire'
                     : label ?? _defaultLabel,
                 child: Material(
@@ -53,47 +66,36 @@ class AssistantActivityDock extends StatelessWidget {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(32),
                     onTap: onPrimary,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 18,
-                        vertical: 15,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (activity == AssistantActivity.listening)
-                            const Icon(
+                    child: listening
+                        ? const SizedBox.square(
+                            dimension: 58,
+                            child: Icon(
                               Icons.mic_rounded,
                               color: Colors.white,
-                              size: 18,
-                            )
-                          else
-                            const _ActivityWave(),
-                          const SizedBox(width: 10),
-                          AnimatedSwitcher(
-                            duration: duration,
-                            switchInCurve: TovoTheme.courbe,
-                            child: Text(
-                              label ?? _defaultLabel,
-                              key: ValueKey('${activity.name}:${label ?? ''}'),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                              ),
+                              size: 24,
+                            ),
+                          )
+                        : Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 18,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const _ActivityWave(),
+                                const SizedBox(width: 10),
+                                Text(
+                                  label ?? _defaultLabel,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          if (activity == AssistantActivity.listening) ...[
-                            const SizedBox(width: 10),
-                            const Icon(
-                              Icons.stop_circle_outlined,
-                              color: Colors.white,
-                              size: 20,
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
                   ),
                 ),
               ),
@@ -101,8 +103,9 @@ class AssistantActivityDock extends StatelessWidget {
             if (onCancel != null)
               Positioned(
                 left: 0,
+                bottom: 7,
                 child: IconButton.filledTonal(
-                  tooltip: activity == AssistantActivity.listening
+                  tooltip: listening
                       ? 'Annuler le vocal'
                       : 'Annuler la transcription',
                   onPressed: onCancel,
@@ -114,6 +117,70 @@ class AssistantActivityDock extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ListeningPulse extends StatefulWidget {
+  const _ListeningPulse();
+
+  @override
+  State<_ListeningPulse> createState() => _ListeningPulseState();
+}
+
+class _ListeningPulseState extends State<_ListeningPulse>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _animation = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1300),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _animation.stop();
+    } else if (!_animation.isAnimating) {
+      _animation.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _animation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+    child: AnimatedBuilder(
+      animation: _animation,
+      builder: (_, __) => CustomPaint(
+        size: const Size.square(74),
+        painter: _PulsePainter(_animation.value),
+      ),
+    ),
+  );
+}
+
+class _PulsePainter extends CustomPainter {
+  const _PulsePainter(this.progress);
+
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (var index = 0; index < 2; index++) {
+      final phase = (progress + index / 2) % 1;
+      final paint = Paint()
+        ..color = TovoTheme.teal.withValues(alpha: (1 - phase) * 0.25)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5;
+      canvas.drawCircle(size.center(Offset.zero), 30 + phase * 7, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PulsePainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }
 
 class _ActivityWave extends StatefulWidget {

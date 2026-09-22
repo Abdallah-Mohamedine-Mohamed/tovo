@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io' show File;
 import 'dart:isolate';
 import 'dart:math';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -621,6 +622,13 @@ class _ChatScreenState extends State<ChatScreen> {
     });
     if (!mounted || navigation != _navigation) return;
     final transcript = response.raw['transcript'];
+    final autoSend =
+        response.ok &&
+        transcript is String &&
+        transcript.trim().isNotEmpty &&
+        _saisie.text.trim().isEmpty &&
+        _photoDraft == null &&
+        !_loadingHistory;
     setState(() {
       _transcribing = false;
       if (response.ok && transcript is String && transcript.trim().isNotEmpty) {
@@ -631,7 +639,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _saisie.selection = TextSelection.collapsed(
           offset: _saisie.text.length,
         );
-        _voiceDraft = true;
+        _voiceDraft = !autoSend;
         _pendingAudio = null;
       } else {
         _voiceError = response.statusCode == 404
@@ -639,6 +647,7 @@ class _ChatScreenState extends State<ChatScreen> {
             : response.content;
       }
     });
+    if (autoSend) _envoyer();
   }
 
   Future<void> _annulerLaParole() async {
@@ -1416,6 +1425,31 @@ class _ChatScreenState extends State<ChatScreen> {
                             );
                           },
                         ),
+                      ),
+                    ),
+                  ),
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween(
+                          begin: 0,
+                          end: activity == AssistantActivity.listening ? 1 : 0,
+                        ),
+                        duration: motionDuration,
+                        curve: TovoTheme.courbe,
+                        builder: (context, progress, _) => progress == 0
+                            ? const SizedBox.shrink()
+                            : BackdropFilter(
+                                filter: ImageFilter.blur(
+                                  sigmaX: progress * 6,
+                                  sigmaY: progress * 6,
+                                ),
+                                child: ColoredBox(
+                                  color: Colors.white.withValues(
+                                    alpha: progress * 0.24,
+                                  ),
+                                ),
+                              ),
                       ),
                     ),
                   ),

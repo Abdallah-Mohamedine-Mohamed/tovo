@@ -297,6 +297,22 @@ describe('catalogue complet', () => {
     expect((await resolveCatalogueIntent(adapter, 'chez Poulet')).merchants.map((merchant) => merchant.id)).toEqual([pouletShop]);
   });
 
+  it('corrige la prononciation O’Tacos sans prendre la suite de la phrase pour une enseigne', async () => {
+    const intent = await resolveCatalogueIntent(adapter, "Je veux un tacos poulet de chez O'Tacos");
+    expect(intent.merchants.map((merchant) => merchant.id).sort()).toEqual([centre, marche].sort());
+    expect((await resolveCatalogueIntent(adapter,
+      "J'ai envie de commander un restaurant. En fait j'ai envie de poulet. Qu'est-ce que vous avez comme poulet dans votre catalogue ?"
+    )).missing).toBeUndefined();
+  });
+
+  it('cherche le poulet dans une demande vocale qui corrige une envie de restaurant', async () => {
+    const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),
+      clientMessageId: randomUUID(), message: "J'ai envie de commander un restaurant. En fait j'ai envie de poulet. Qu'est-ce que vous avez comme poulet dans votre catalogue ?" });
+    expect(answer.usage.cycles).toBe(0);
+    expect(answer.content).toContain('produits');
+    expect(answer.components.some((component) => component.type === 'product_carousel')).toBe(true);
+  });
+
   it.each(['Otakoss', "O'TAKOSS", 'otakos'])('ne propose que les deux agences pour %s', async (message) => {
     const intent = await resolveCatalogueIntent(adapter, message);
     const answer = await merchantIntentAnswer(adapter, intent);
