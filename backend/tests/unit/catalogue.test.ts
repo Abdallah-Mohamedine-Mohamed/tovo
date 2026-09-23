@@ -263,6 +263,16 @@ describe('catalogue complet', () => {
     }
   });
 
+  it('les suggestions de l’accueil partent au modèle, jamais en « introuvable »', async () => {
+    for (const message of ['Je veux faire mes courses', 'Je cherche un bon restaurant à Niamey', 'Une idée pour ce soir ?']) {
+      llmGenerate.mockClear();
+      const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),
+        clientMessageId: randomUUID(), message });
+      expect(answer.content, message).not.toContain('Je ne trouve pas');
+      expect(llmGenerate.mock.calls.length, `${message} → ${JSON.stringify(answer)}`).toBe(1);
+    }
+  });
+
   it('une référence sans rien d’affiché auparavant suit le chemin normal', async () => {
     llmGenerate.mockClear();
     const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),

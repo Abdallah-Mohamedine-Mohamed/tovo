@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../components/registry.dart' show Money;
 import '../../core/theme.dart';
+import '../../core/viewport_reveal.dart';
 
 enum ConversationSymbol {
   menu,
@@ -332,6 +333,16 @@ class ConversationHome extends StatelessWidget {
     final hour = DateTime.now().hour;
     final greeting = hour >= 5 && hour < 17 ? 'Bonjour' : 'Bonsoir';
     final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    // Entrée en cascade : le salut, puis chaque section, puis chaque carte.
+    // Sans elle, l'accueil apparaissait d'un bloc, figé. Même courbe que le
+    // reste de l'app ; « réduire les animations » est respecté par
+    // ViewportReveal.
+    Widget entre(int rang, Widget child) => ViewportReveal(
+      delay: Duration(milliseconds: 70 * rang),
+      duration: const Duration(milliseconds: 420),
+      offset: 16,
+      child: child,
+    );
     return LayoutBuilder(
       builder: (context, constraints) => SingleChildScrollView(
         key: const PageStorageKey('conversation-home'),
@@ -345,77 +356,101 @@ class ConversationHome extends StatelessWidget {
                   : MainAxisAlignment.start,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 26),
-                  child: Text.rich(
-                    TextSpan(
-                      children: [
-                        TextSpan(
-                          text: '$greeting${firstName == null ? '.\n' : ', '}',
-                        ),
-                        if (firstName != null)
+                entre(
+                  0,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 26),
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
                           TextSpan(
-                            text: '$firstName.\n',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
+                            text:
+                                '$greeting${firstName == null ? '.\n' : ', '}',
                           ),
-                        const TextSpan(text: 'Comment puis-je vous aider '),
-                        const TextSpan(
-                          text: 'aujourd’hui',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        const TextSpan(
-                          text: ' ? Demandez-moi n’importe quoi.',
-                        ),
-                      ],
-                    ),
-                    style: const TextStyle(
-                      fontSize: 21,
-                      height: 1.3,
-                      letterSpacing: -0.45,
-                      color: Color(0xFF232323),
-                      fontWeight: FontWeight.w400,
+                          if (firstName != null)
+                            TextSpan(
+                              text: '$firstName.\n',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          const TextSpan(text: 'Comment puis-je vous aider '),
+                          const TextSpan(
+                            text: 'aujourd’hui',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          const TextSpan(
+                            text: ' ? Demandez-moi n’importe quoi.',
+                          ),
+                        ],
+                      ),
+                      style: const TextStyle(
+                        fontSize: 21,
+                        height: 1.3,
+                        letterSpacing: -0.45,
+                        color: Color(0xFF232323),
+                        fontWeight: FontWeight.w400,
+                      ),
                     ),
                   ),
                 ),
-                if (lastOrder != null && onReorder != null) ...[
-                  const SizedBox(height: 32),
-                  const _HomeSectionTitle('Votre dernière commande'),
-                  const SizedBox(height: 15),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 26),
-                    child: _LastOrderCard(
-                      order: lastOrder!,
-                      onReorder: () => onReorder!(lastOrder!),
+                if (lastOrder != null && onReorder != null)
+                  entre(
+                    1,
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 32),
+                        const _HomeSectionTitle('Votre dernière commande'),
+                        const SizedBox(height: 15),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 26),
+                          child: _LastOrderCard(
+                            order: lastOrder!,
+                            onReorder: () => onReorder!(lastOrder!),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-                if (recent.isNotEmpty) ...[
-                  const SizedBox(height: 32),
-                  const _HomeSectionTitle('Reprendre où vous en étiez'),
-                  const SizedBox(height: 15),
-                  SizedBox(
-                    height: 82 * scale,
-                    child: ListView.separated(
-                      clipBehavior: Clip.none,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 26,
-                        vertical: 4,
-                      ),
-                      scrollDirection: Axis.horizontal,
-                      itemCount: recent.length,
-                      separatorBuilder: (_, index) => const SizedBox(width: 10),
-                      itemBuilder: (context, index) => _HomePromptCard(
-                        title:
-                            '${recent[index]['title'] ?? 'Votre dernière discussion'}',
-                        asset: 'assets/branding/suggestion-meal.svg',
-                        compact: true,
-                        onTap: () => onResume('${recent[index]['id']}'),
-                      ),
+                if (recent.isNotEmpty)
+                  entre(
+                    2,
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 32),
+                        const _HomeSectionTitle('Reprendre où vous en étiez'),
+                        const SizedBox(height: 15),
+                        SizedBox(
+                          height: 82 * scale,
+                          child: ListView.separated(
+                            clipBehavior: Clip.none,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 26,
+                              vertical: 4,
+                            ),
+                            scrollDirection: Axis.horizontal,
+                            itemCount: recent.length,
+                            separatorBuilder: (_, index) =>
+                                const SizedBox(width: 10),
+                            itemBuilder: (context, index) => _HomePromptCard(
+                              title:
+                                  '${recent[index]['title'] ?? 'Votre dernière discussion'}',
+                              asset: 'assets/branding/suggestion-meal.svg',
+                              compact: true,
+                              onTap: () => onResume('${recent[index]['id']}'),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
                 const SizedBox(height: 32),
-                const _HomeSectionTitle('Essayez quelque chose de nouveau'),
+                entre(
+                  3,
+                  const _HomeSectionTitle('Essayez quelque chose de nouveau'),
+                ),
                 const SizedBox(height: 15),
                 SizedBox(
                   height: 112 * scale,
@@ -427,24 +462,34 @@ class ConversationHome extends StatelessWidget {
                     ),
                     scrollDirection: Axis.horizontal,
                     children: [
-                      _HomePromptCard(
-                        title: 'Trouve-moi un bon repas à Niamey',
-                        asset: 'assets/branding/suggestion-meal.svg',
-                        onTap: () => onSuggestion(
-                          'Je cherche un bon restaurant à Niamey',
+                      entre(
+                        4,
+                        _HomePromptCard(
+                          title: 'Trouve-moi un bon repas à Niamey',
+                          asset: 'assets/branding/suggestion-meal.svg',
+                          onTap: () => onSuggestion(
+                            'Je cherche un bon restaurant à Niamey',
+                          ),
                         ),
                       ),
                       const SizedBox(width: 10),
-                      _HomePromptCard(
-                        title: 'Aide-moi à préparer mes courses',
-                        asset: 'assets/branding/suggestion-grocery.svg',
-                        onTap: () => onSuggestion('Je veux faire mes courses'),
+                      entre(
+                        5,
+                        _HomePromptCard(
+                          title: 'Aide-moi à préparer mes courses',
+                          asset: 'assets/branding/suggestion-grocery.svg',
+                          onTap: () =>
+                              onSuggestion('Je veux faire mes courses'),
+                        ),
                       ),
                       const SizedBox(width: 10),
-                      _HomePromptCard(
-                        title: 'Je voudrais envoyer un colis',
-                        asset: 'assets/branding/suggestion-parcel.svg',
-                        onTap: () => onSuggestion('Je veux envoyer un colis'),
+                      entre(
+                        6,
+                        _HomePromptCard(
+                          title: 'Je voudrais envoyer un colis',
+                          asset: 'assets/branding/suggestion-parcel.svg',
+                          onTap: () => onSuggestion('Je veux envoyer un colis'),
+                        ),
                       ),
                     ],
                   ),
@@ -633,6 +678,8 @@ class ConversationComposer extends StatefulWidget {
     required this.onVoice,
     this.photoPath,
     required this.onRemovePhoto,
+    this.ecrit = false,
+    this.onEcrit,
   });
   final TextEditingController controller;
   final VoidCallback onSend;
@@ -641,6 +688,16 @@ class ConversationComposer extends StatefulWidget {
   final VoidCallback onVoice;
   final String? photoPath;
   final VoidCallback onRemovePhoto;
+
+  /// Le client converse par écrit : la box s'ouvre directement.
+  ///
+  /// Retenu par l'écran parent, parce que la box est détruite pendant chaque
+  /// réponse (l'indicateur d'activité prend sa place) : sans cela, chaque
+  /// message renvoyait au gros bouton micro, et il fallait rouvrir le clavier
+  /// à chaque échange.
+  final bool ecrit;
+  final ValueChanged<bool>? onEcrit;
+
   @override
   State<ConversationComposer> createState() => _ConversationComposerState();
 }
@@ -651,7 +708,16 @@ class _ConversationComposerState extends State<ConversationComposer> {
   @override
   void initState() {
     super.initState();
-    _typing = widget.controller.text.isNotEmpty || widget.photoPath != null;
+    _typing =
+        widget.ecrit ||
+        widget.controller.text.isNotEmpty ||
+        widget.photoPath != null;
+  }
+
+  void _changerMode(bool ecrit) {
+    if (!ecrit) _focus.unfocus();
+    if (mounted) setState(() => _typing = ecrit);
+    widget.onEcrit?.call(ecrit);
   }
 
   @override
@@ -709,109 +775,123 @@ class _ConversationComposerState extends State<ConversationComposer> {
     minimum: const EdgeInsets.fromLTRB(18, 12, 18, 18),
     child: _resize(
       _typing
-          ? ConversationSurface(
-              radius: 28,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(4, 6, 8, 6),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (widget.photoPath != null)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 6, 6, 8),
-                        child: Row(
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: Image.file(
-                                File(widget.photoPath!),
-                                width: 52,
-                                height: 52,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, error, stack) =>
-                                    const Icon(Icons.image_outlined),
+          ? TapRegion(
+              // Toucher une carte ou faire défiler range le clavier, mais
+              // garde la box : le client lit la réponse, puis continue
+              // d'écrire sans rien rouvrir. On ne revient au micro que par
+              // le bouton micro.
+              onTapOutside: (_) => _focus.unfocus(),
+              child: ConversationSurface(
+                radius: 28,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 6, 8, 6),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (widget.photoPath != null)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 6, 6, 8),
+                          child: Row(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.file(
+                                  File(widget.photoPath!),
+                                  width: 52,
+                                  height: 52,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, error, stack) =>
+                                      const Icon(Icons.image_outlined),
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            const Expanded(
-                              child: Text(
-                                'Photo prête à envoyer',
-                                style: TextStyle(fontSize: 13),
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Text(
+                                  'Photo prête à envoyer',
+                                  style: TextStyle(fontSize: 13),
+                                ),
                               ),
-                            ),
-                            IconButton(
-                              tooltip: 'Retirer la photo',
-                              onPressed: widget.onRemovePhoto,
-                              icon: const Icon(Icons.close_rounded),
-                            ),
-                          ],
-                        ),
-                      ),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        _attachments(),
-                        Expanded(
-                          child: TextField(
-                            controller: widget.controller,
-                            focusNode: _focus,
-                            minLines: 1,
-                            maxLines: 5,
-                            textCapitalization: TextCapitalization.sentences,
-                            textInputAction: TextInputAction.newline,
-                            onTapOutside: (_) {
-                              _focus.unfocus();
-                              setState(() => _typing = false);
-                            },
-                            decoration: const InputDecoration(
-                              hintText: 'Demandez à Tovo…',
-                              filled: false,
-                              border: InputBorder.none,
-                              enabledBorder: InputBorder.none,
-                              focusedBorder: InputBorder.none,
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 5,
-                                vertical: 12,
+                              IconButton(
+                                tooltip: 'Retirer la photo',
+                                onPressed: widget.onRemovePhoto,
+                                icon: const Icon(Icons.close_rounded),
                               ),
-                            ),
-                            style: const TextStyle(fontSize: 16, height: 1.3),
+                            ],
                           ),
                         ),
-                        ValueListenableBuilder<TextEditingValue>(
-                          valueListenable: widget.controller,
-                          builder: (context, value, child) {
-                            final hasDraft =
-                                value.text.trim().isNotEmpty ||
-                                widget.photoPath != null;
-                            return IconButton(
-                              tooltip: hasDraft ? 'Envoyer' : 'Parler à Tovo',
-                              onPressed: hasDraft
-                                  ? widget.onSend
-                                  : () {
-                                      _focus.unfocus();
-                                      setState(() => _typing = false);
-                                      widget.onVoice();
-                                    },
-                              style: IconButton.styleFrom(
-                                backgroundColor: hasDraft
-                                    ? TovoTheme.teal
-                                    : Colors.transparent,
-                                foregroundColor: hasDraft
-                                    ? Colors.white
-                                    : const Color(0xFF202020),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          _attachments(),
+                          Expanded(
+                            child: TextField(
+                              controller: widget.controller,
+                              focusNode: _focus,
+                              minLines: 1,
+                              maxLines: 5,
+                              textCapitalization: TextCapitalization.sentences,
+                              textInputAction: TextInputAction.newline,
+                              // Le « tap à l'extérieur » est géré par la
+                              // TapRegion qui entoure toute la box : attaché
+                              // au seul champ, il repliait la box dès que le
+                              // doigt touchait le bouton Envoyer — qui
+                              // disparaissait avant d'avoir reçu le tap.
+                              onTapOutside: (_) {},
+                              decoration: const InputDecoration(
+                                hintText: 'Demandez à Tovo…',
+                                filled: false,
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 12,
+                                ),
                               ),
-                              icon: Icon(
-                                hasDraft
-                                    ? Icons.arrow_upward_rounded
-                                    : Icons.mic_none_rounded,
-                                size: 22,
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
+                              style: const TextStyle(fontSize: 16, height: 1.3),
+                            ),
+                          ),
+                          ValueListenableBuilder<TextEditingValue>(
+                            valueListenable: widget.controller,
+                            builder: (context, value, child) {
+                              final hasDraft =
+                                  value.text.trim().isNotEmpty ||
+                                  widget.photoPath != null;
+                              return IconButton(
+                                tooltip: hasDraft ? 'Envoyer' : 'Parler à Tovo',
+                                onPressed: hasDraft
+                                    ? () {
+                                        // La box reste ouverte ; le clavier
+                                        // se range pour laisser lire la
+                                        // réponse.
+                                        _focus.unfocus();
+                                        widget.onSend();
+                                      }
+                                    : () {
+                                        _changerMode(false);
+                                        widget.onVoice();
+                                      },
+                                style: IconButton.styleFrom(
+                                  backgroundColor: hasDraft
+                                      ? TovoTheme.teal
+                                      : Colors.transparent,
+                                  foregroundColor: hasDraft
+                                      ? Colors.white
+                                      : const Color(0xFF202020),
+                                ),
+                                icon: Icon(
+                                  hasDraft
+                                      ? Icons.arrow_upward_rounded
+                                      : Icons.mic_none_rounded,
+                                  size: 22,
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             )
@@ -850,7 +930,7 @@ class _ConversationComposerState extends State<ConversationComposer> {
                   symbol: ConversationSymbol.keyboard,
                   label: 'Écrire un message',
                   onPressed: () {
-                    setState(() => _typing = true);
+                    _changerMode(true);
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (mounted) _focus.requestFocus();
                     });

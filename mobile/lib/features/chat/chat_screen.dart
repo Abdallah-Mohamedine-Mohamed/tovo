@@ -121,6 +121,10 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Nulle s'il n'y en a pas : un nouveau client ne voit rien de vide.
   Map<String, dynamic>? _derniereCommande;
 
+  /// Le client a choisi d'écrire : la box reste ouverte d'un message à
+  /// l'autre (voir ConversationComposer.ecrit).
+  bool _modeEcrit = false;
+
   AssistantActivity? get _activity {
     if (_enregistreLaVoix) return AssistantActivity.listening;
     if (_transcribing) return AssistantActivity.transcribing;
@@ -983,6 +987,13 @@ class _ChatScreenState extends State<ChatScreen> {
       case 'submit_courier':
         _envoyerColis(p);
 
+      // La base décide (aucun livreur parti, rien d'encaissé) et renvoie un
+      // motif lisible si elle refuse.
+      case 'cancel_order':
+        _appeler(
+          () => widget.api.post('/orders/${p['order_id']}/cancel', const {}),
+        );
+
       // Envoi silencieux : la carte affiche déjà le remerciement, et faire
       // répondre l'assistant après une note serait du bavardage.
       case 'rate_order':
@@ -1190,49 +1201,6 @@ class _ChatScreenState extends State<ChatScreen> {
   // Commande
   // ------------------------------------------------------------------
 
-  Future<String?> _choisirPaiement() {
-    return showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Text(
-                'Comment souhaitez-vous payer ?',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.payments_outlined,
-                color: TovoTheme.teal,
-              ),
-              title: const Text('Espèces'),
-              subtitle: const Text('Vous payez le livreur à l’arrivée'),
-              onTap: () => Navigator.pop(context, 'cash'),
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.phone_iphone_rounded,
-                color: TovoTheme.teal,
-              ),
-              title: const Text('Nita'),
-              subtitle: const Text(
-                'Un code à régler depuis MYNITA, ou payez au livreur',
-              ),
-              onTap: () => Navigator.pop(context, 'mobile_money'),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
   /// Enregistre la note d'une commande livrée.
   ///
   /// Sans passer par `_appeler` : celui-ci ajoute la réponse du serveur au
@@ -1254,29 +1222,29 @@ class _ChatScreenState extends State<ChatScreen> {
     final depart = (p['pickup'] as Map?)?.cast<String, dynamic>();
     final arrivee = (p['dropoff'] as Map?)?.cast<String, dynamic>();
 
-    if (depart?['lat'] == null || arrivee?['lat'] == null) {
+    // Seule la position de départ est requise : c'est là que vient le
+    // livreur, et il appelle le client pour le reste.
+    if (depart?['lat'] == null) {
       _erreurLocalisation();
       return;
     }
 
-    final paiement = await _choisirPaiement();
-    if (!mounted || paiement == null) return;
-
     _idCommandeEnCours ??= _nouvelIdentifiant();
 
+    // Le paiement est choisi sur la carte (espèces par défaut) : plus de
+    // fenêtre à part entre le geste et la commande.
     await _appeler(
       () => widget.api.post('/orders', {
         'type': 'courier',
         'client_order_id': _idCommandeEnCours,
         'pickup_hint': depart!['hint'],
         'pickup': {'lat': depart['lat'], 'lng': depart['lng']},
-        'dropoff_hint': arrivee!['hint'],
-        'dropoff': {'lat': arrivee['lat'], 'lng': arrivee['lng']},
-        // Sans lui le serveur refuse : c'est par ce numéro que le livreur
-        // joint le destinataire une fois sur place.
-        'dropoff_contact': p['dropoff_contact'] ?? '',
+        'dropoff_hint': p['dropoff_hint'] ?? arrivee?['hint'],
+        if (arrivee?['lat'] != null)
+          'dropoff': {'lat': arrivee!['lat'], 'lng': arrivee['lng']},
+        'dropoff_contact': p['dropoff_contact'],
         'parcel': p['parcel'] ?? 'small',
-        'payment_method': paiement,
+        'payment_method': p['payment_method'] ?? 'cash',
       }),
     );
 
@@ -1875,6 +1843,8 @@ class _ChatScreenState extends State<ChatScreen> {
                           onRemovePhoto: () =>
                               setState(() => _photoDraft = null),
                           onVoice: _toucherLeMicro,
+                          ecrit: _modeEcrit,
+                          onEcrit: (ecrit) => _modeEcrit = ecrit,
                         )
                       : AssistantActivityDock(
                           key: const ValueKey('activity'),

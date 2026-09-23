@@ -41,6 +41,21 @@ export function requeteProduitUtilisateur(texte: string): string {
   return (correction >= 0 ? [...new Set(mots)] : mots).join(' ');
 }
 
+/**
+ * Une envie ou une activité, pas un article : « faire mes courses », « un bon
+ * restaurant », « une idée pour ce soir ».
+ *
+ * Testé sur la requête DÉJÀ extraite (« je cherche du riz » → « riz »), pour
+ * que « cherche » ou « veux » ne détournent pas une vraie recherche. Envoyées à
+ * la voie rapide, ces phrases devenaient la recherche littérale de « faire mes
+ * courses » et le client lisait « introuvable » en touchant une suggestion de
+ * l'accueil. Un faux positif ne coûte qu'un passage par le modèle.
+ */
+export function demandeOuverte(requete: string): boolean {
+  return /\b(faire|preparer|aide|aider|conseil|conseille|conseiller|propose|proposer|suggere|suggestion|idee|idees|faim|soif|manger|boire|repas|restaurant|restaurants|resto|restos|courses|quelque|chose|bon|bonne|bons|bonnes|meilleur|meilleure|meilleurs|quoi|trouve|trouver)\b/
+    .test(normaliserIntention(requete));
+}
+
 /** Une phrase sociale ou émotionnelle ne doit jamais devenir un produit. */
 export function messageConversationnel(texte: string): boolean {
   const normalise = normaliserIntention(texte);
@@ -136,6 +151,13 @@ export function nomBoutiqueApresMarqueur(texte: string): string | null {
   if (!candidat) return null;
 
   if (/^(?:en fait|un|une|des|du|de|la|le|les|que|qui|ou|pour|dans)\b/.test(candidat)) {
+    return null;
+  }
+
+  // « un restaurant à Niamey », « un resto près d'ici » : un lieu, pas le nom
+  // d'une enseigne. La suggestion d'accueil « Trouve-moi un bon repas à
+  // Niamey » répondait « Je ne trouve pas l'enseigne à Niamey ».
+  if (/^(?:a|au|aux|en|pres|proche|autour|vers|ici|pas|a cote|dans le coin|du coin|sympa|bien)\b/.test(candidat)) {
     return null;
   }
 

@@ -10,6 +10,7 @@ import { signaler } from '../lib/observability.js';
 import { transcribe } from '../services/transcription.js';
 import { chatStream } from '../lib/chatStream.js';
 import { consommer, messageLimite } from '../services/rateLimit.js';
+import { commanderUnLivreur, demandeUnLivreur } from '../services/livreur.js';
 
 /**
  * POST /chat — le fil conversationnel.
@@ -392,11 +393,43 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    // Un envoi de colis n'a rien à interpréter : il ouvre toujours le même
-    // formulaire. Le laisser au modèle lui faisait parfois appeler
+    // « Je veux un livreur » : la commande part, sans carte ni question. La
+    // position vient du téléphone, le numéro du compte ; le livreur appelle
+    // pour le reste. Sans position connue, on retombe sur la carte, qui
+    // sait la demander.
+    if (body.data.text && body.data.context && demandeUnLivreur(body.data.text)) {
+      const resultat = await commanderUnLivreur(db, {
+        clientOrderId: body.data.client_message_id,
+        position: body.data.context,
+        journal: (cause, orderId) => request.log.error({ cause, orderId }, 'dispatch du livreur impossible'),
+      });
+
+      emit({ type: 'conversation', conversation_id: conversationId });
+      emit({ type: 'results', components: resultat.components });
+      emit({ type: 'text', text: resultat.content });
+
+      await db.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'user',
+        content: body.data.text,
+        client_message_id: body.data.client_message_id,
+      });
+      await db.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: resultat.content,
+        components: resultat.components,
+      });
+
+      request.log.info({ conversationId }, 'livreur commandé sans formulaire');
+      return output.finish({ conversation_id: conversationId, ...resultat });
+    }
+
+    // Un envoi de colis n'a rien à interpréter : il ouvre toujours la même
+    // carte. Le laisser au modèle lui faisait parfois appeler
     // `mes_adresses`, puis traiter le choix comme une livraison de panier.
     // C'est ainsi que « Livrer à Harobanda » finissait par « panier vide ».
-    if (body.data.text && demandeUnColis(body.data.text)) {
+    if (body.data.text && (demandeUnColis(body.data.text) || demandeUnLivreur(body.data.text))) {
       const executer = EXECUTORS['preparer_course'];
       if (!executer) throw new Error('outil preparer_course absent');
 
@@ -408,8 +441,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           ...(body.data.context ? { position: body.data.context } : {}),
         },
       );
-      const contenu =
-        'Bien sûr. Indiquez **le point de départ**, **le lieu de livraison** et **le numéro du destinataire**.';
+      const contenu = body.data.context
+        ? 'Un livreur vient chez vous et vous appelle pour les détails. Touchez **Appeler un livreur**.'
+        : 'Un livreur peut venir chez vous. Touchez **Ma position** pour qu’il sache où aller.';
 
       emit({ type: 'conversation', conversation_id: conversationId });
       emit({ type: 'results', components: resultat.components });

@@ -211,6 +211,16 @@ class _OrderTrackingState extends State<OrderTracking>
     final etapes = _etapesCommandeVisibles;
     final courante = _etapeCommandeVisible(_statut);
     final annulee = _statut == 'cancelled';
+    final colis = widget.component.str('type', '') == 'courier';
+    // Même règle que la base (cancel_my_order) : tant qu'aucun livreur
+    // n'est parti. La base tranche de toute façon, ce bouton ne fait
+    // qu'éviter de le proposer quand c'est perdu d'avance.
+    final annulable =
+        _livreur == null &&
+        const {'pending', 'confirmed', 'preparing', 'ready'}.contains(_statut);
+    final libelle = colis && (_statut == 'pending' || _statut == 'ready')
+        ? 'On vous trouve un livreur'
+        : _libelles[_statut] ?? _statut;
 
     return Container(
       decoration: BoxDecoration(
@@ -230,21 +240,35 @@ class _OrderTrackingState extends State<OrderTracking>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('VOTRE COMMANDE', style: TextStyle(
-                        fontSize: 10, fontWeight: FontWeight.w800,
-                        letterSpacing: 1.2, color: TovoTheme.inkDoux,
-                      )),
+                      const Text(
+                        'VOTRE COMMANDE',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.2,
+                          color: TovoTheme.inkDoux,
+                        ),
+                      ),
                       const SizedBox(height: 6),
-                      Text(_libelles[_statut] ?? _statut, style: TextStyle(
-                        fontSize: 17, fontWeight: FontWeight.w800,
-                        color: annulee ? TovoTheme.danger : TovoTheme.ink,
-                      )),
+                      Text(
+                        libelle,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: annulee ? TovoTheme.danger : TovoTheme.ink,
+                        ),
+                      ),
                     ],
                   ),
                 ),
-                Text(Money.format(widget.component.money('total')),
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800,
-                    color: TovoTheme.teal)),
+                Text(
+                  Money.format(widget.component.money('total')),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: TovoTheme.teal,
+                  ),
+                ),
               ],
             ),
           ),
@@ -258,33 +282,62 @@ class _OrderTrackingState extends State<OrderTracking>
                     Expanded(
                       child: Column(
                         children: [
-                          Row(children: [
-                            if (i > 0) Expanded(child: AnimatedContainer(
-                              duration: TovoTheme.normal, height: 2,
-                              color: i <= courante ? TovoTheme.teal : TovoTheme.line,
-                            )),
-                            AnimatedContainer(
-                              duration: TovoTheme.normal,
-                              width: i == courante ? 22 : 18,
-                              height: i == courante ? 22 : 18,
-                              decoration: BoxDecoration(
-                                color: i <= courante ? TovoTheme.teal : TovoTheme.line,
-                                shape: BoxShape.circle,
+                          Row(
+                            children: [
+                              if (i > 0)
+                                Expanded(
+                                  child: AnimatedContainer(
+                                    duration: TovoTheme.normal,
+                                    height: 2,
+                                    color: i <= courante
+                                        ? TovoTheme.teal
+                                        : TovoTheme.line,
+                                  ),
+                                ),
+                              AnimatedContainer(
+                                duration: TovoTheme.normal,
+                                width: i == courante ? 22 : 18,
+                                height: i == courante ? 22 : 18,
+                                decoration: BoxDecoration(
+                                  color: i <= courante
+                                      ? TovoTheme.teal
+                                      : TovoTheme.line,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: i <= courante
+                                    ? const Icon(
+                                        Icons.check,
+                                        size: 12,
+                                        color: Colors.white,
+                                      )
+                                    : null,
                               ),
-                              child: i <= courante
-                                  ? const Icon(Icons.check, size: 12, color: Colors.white)
-                                  : null,
-                            ),
-                            if (i < etapes.length - 1) Expanded(child: AnimatedContainer(
-                              duration: TovoTheme.normal, height: 2,
-                              color: i < courante ? TovoTheme.teal : TovoTheme.line,
-                            )),
-                          ]),
+                              if (i < etapes.length - 1)
+                                Expanded(
+                                  child: AnimatedContainer(
+                                    duration: TovoTheme.normal,
+                                    height: 2,
+                                    color: i < courante
+                                        ? TovoTheme.teal
+                                        : TovoTheme.line,
+                                  ),
+                                ),
+                            ],
+                          ),
                           const SizedBox(height: 8),
-                          Text(etapes[i], textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 10,
-                              fontWeight: i == courante ? FontWeight.w800 : FontWeight.w600,
-                              color: i <= courante ? TovoTheme.teal : TovoTheme.inkDoux)),
+                          Text(
+                            etapes[i],
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: i == courante
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
+                              color: i <= courante
+                                  ? TovoTheme.teal
+                                  : TovoTheme.inkDoux,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -299,6 +352,22 @@ class _OrderTrackingState extends State<OrderTracking>
                 TovoInteraction('call_driver', {
                   'phone': _livreur!['phone'] ?? '',
                 }),
+              ),
+            ),
+          if (annulable)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => widget.onInteraction(
+                    TovoInteraction('cancel_order', {'order_id': _orderId}),
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: TovoTheme.inkDoux,
+                  ),
+                  child: const Text('Annuler'),
+                ),
               ),
             ),
           // La notation apparaît au moment où elle a du sens, dans la carte

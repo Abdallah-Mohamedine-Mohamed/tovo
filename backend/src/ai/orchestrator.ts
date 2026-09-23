@@ -8,6 +8,7 @@ import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnsw
 import {
   demandeBoutiqueOuverte,
   demandeDeCommandePassee,
+  demandeOuverte,
   messageConversationnel,
   normaliserIntention,
   referenceAuxResultats,
@@ -89,6 +90,7 @@ function rechercheProduitRapide(message: string, query: string): boolean {
     .test(normaliserIntention(message));
   return query.length > 0
     && !messageConversationnel(message)
+    && !demandeOuverte(query)
     && !demandeBoutiqueOuverte(message)
     && (mots.length <= 6 || questionCourte)
     && !/\b(merci|bonjour|salut|oui|non|annule|commande|livreur|colis|panier|option|options|deuxieme|premier)\b/i.test(message);

@@ -17,6 +17,8 @@ import { embed, embedImage } from '../services/embeddings.js';
 import { serviceClient } from '../services/supabase.js';
 import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, merchantMenu, type CatalogueIntent } from '../services/catalogue.js';
 import { decrireImageDepuisOctets } from '../services/vision.js';
+import { offreVille } from '../services/livreur.js';
+import { paiementMobileActif } from '../config/env.js';
 import {
   demandeDeProximite,
   demandeDeRepas,
@@ -1041,12 +1043,29 @@ const historiqueCommandes: Executor = async (args, ctx) => {
   };
 };
 
+/**
+ * La carte « Un livreur vient chez vous ».
+ *
+ * Tout est pré-rempli, rien n'est exigé au-delà de la position : le départ
+ * est celle du téléphone, le reste (destination, destinataire) est repris de
+ * ce que le client a dit, s'il l'a dit. Le livreur appelle pour le reste.
+ */
 const preparerCourse: Executor = async (args, ctx) => {
-  const depart = args.depart as { lat?: number; lng?: number; hint?: string } | undefined;
-  const arrivee = args.arrivee as { lat?: number; lng?: number; hint?: string } | undefined;
+  type Point = { lat?: number; lng?: number; hint?: string };
+  const donne = args.depart as Point | undefined;
+  const depart: Point | undefined = donne?.lat && donne?.lng
+    ? donne
+    : ctx.position
+      ? { lat: ctx.position.lat, lng: ctx.position.lng, hint: donne?.hint || 'Ma position actuelle' }
+      : donne;
+  const arrivee = args.arrivee as Point | undefined;
+  const destinataire = texte(args, 'destinataire');
   const colis = texte(args, 'colis') || 'small';
+  const offre = await offreVille(ctx.db);
 
-  let estimate: Record<string, unknown> | null = null;
+  let estimate: Record<string, unknown> | null = offre.prix === null
+    ? null
+    : { price: offre.prix, flat: true };
 
   if (depart?.lat && depart?.lng && arrivee?.lat && arrivee?.lng) {
     // L'estimation vient de la base : les coefficients sont dans
@@ -1070,10 +1089,11 @@ const preparerCourse: Executor = async (args, ctx) => {
   return {
     summary: {
       depart: depart?.hint ?? null,
+      position_connue: Boolean(depart?.lat),
       arrivee: arrivee?.hint ?? null,
-      colis,
+      destinataire: destinataire || null,
       estimation: estimate?.price ?? null,
-      complet: Boolean(estimate),
+      consigne: 'La carte suffit : le client touche « Appeler un livreur ». Ne pose aucune question.',
     },
     components: [
       {
@@ -1081,15 +1101,11 @@ const preparerCourse: Executor = async (args, ctx) => {
         data: {
           pickup: depart ?? null,
           dropoff: arrivee ?? null,
+          dropoff_contact: destinataire || null,
           parcel: colis,
-          parcel_options: [
-            { value: 'small', label: 'Petit', icon: '📍', hint: 'documents, clés' },
-            { value: 'medium', label: 'Moyen', icon: '📦', hint: 'sac, carton' },
-            { value: 'large', label: 'Grand', icon: '🗃', hint: 'encombrant' },
-          ],
-          scheduling: ['now', 'later'],
           estimate,
-          confirm_label: estimate ? `Confirmer l'envoi — ${estimate.price} F` : null,
+          callback_minutes: offre.minutes,
+          mobile_money: paiementMobileActif,
         },
       },
     ],
@@ -1313,21 +1329,24 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
   {
     name: 'preparer_course',
     description:
-      "Prépare une course coursier : colis d'un point à un autre, sans boutique. Renvoie une estimation dès que les deux points sont connus. Ne valide jamais l'envoi.",
+      "Affiche la carte « Un livreur vient chez vous » pour un colis ou une course, sans boutique. " +
+      "Le départ est la position du client par défaut. Tout est facultatif : passe seulement ce que " +
+      "le client a DIT (destination, numéro du destinataire), n'invente rien et ne demande rien. " +
+      "Ne valide jamais l'envoi : le client touche « Appeler un livreur ».",
     parameters: {
       type: 'object',
       properties: {
         depart: {
           type: 'object',
-          description: 'Point de prise en charge',
+          description: "Point de prise en charge, seulement si le client en nomme un autre que sa position",
           properties: { lat: S.number('Latitude'), lng: S.number('Longitude'), hint: S.string('Repère') },
         },
         arrivee: {
           type: 'object',
-          description: 'Point de livraison',
+          description: 'Destination, seulement si le client la donne',
           properties: { lat: S.number('Latitude'), lng: S.number('Longitude'), hint: S.string('Repère') },
         },
-        colis: S.string('small, medium ou large'),
+        destinataire: S.string('Numéro de téléphone du destinataire, seulement si le client le donne'),
       },
     },
   },

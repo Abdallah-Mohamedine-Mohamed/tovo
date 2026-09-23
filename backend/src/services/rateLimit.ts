@@ -69,9 +69,29 @@ export function viderMemoireLimites(): void {
 // Décompte
 // ---------------------------------------------------------------------------
 
+/**
+ * Attente maximale d'une réponse de Redis.
+ *
+ * La limite est sur le chemin de CHAQUE message et de chaque vocal. Une
+ * connexion morte en silence (Railway coupe les sockets inactives) garde les
+ * commandes en suspens jusqu'à la reconnexion : en production, des vocaux ont
+ * attendu une minute pour une transcription d'une seconde, et l'app affichait
+ * « Connexion perdue ». Mieux vaut compter en mémoire un instant que bloquer.
+ */
+const DELAI_REDIS_MS = 250;
+
+function avecDelai<T>(promesse: Promise<T>, ms: number): Promise<T> {
+  let minuterie: NodeJS.Timeout | undefined;
+  const delai = new Promise<never>((_, rejeter) => {
+    minuterie = setTimeout(() => rejeter(new Error('redis trop lent')), ms);
+  });
+  return Promise.race([promesse, delai]).finally(() => clearTimeout(minuterie));
+}
+
 async function incrementer(cles: string[], fenetres: Fenetre[], maintenant: number): Promise<number[]> {
   const redis = redisConnexion();
-  if (redis) {
+  // Hors « ready » (connexion en cours, reconnexion), inutile d'essayer.
+  if (redis && redis.status === 'ready') {
     try {
       const transaction = redis.multi();
       cles.forEach((cle, i) => {
@@ -80,7 +100,11 @@ async function incrementer(cles: string[], fenetres: Fenetre[], maintenant: numb
         // l'expiration ne sert qu'à faire le ménage.
         transaction.expire(cle, fenetres[i]!.secondes + 5);
       });
-      const resultats = await transaction.exec();
+      const exec = transaction.exec();
+      // Si le délai l'emporte, la réponse tardive ne doit pas devenir une
+      // erreur non gérée qui ferait tomber le processus.
+      exec.catch(() => undefined);
+      const resultats = await avecDelai(exec, DELAI_REDIS_MS);
       if (resultats) {
         const comptes = cles.map((_, i) => {
           const [erreur, valeur] = resultats[i * 2] ?? [];

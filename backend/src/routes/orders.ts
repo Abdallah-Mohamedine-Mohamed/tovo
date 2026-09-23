@@ -9,6 +9,7 @@ import {
 import { queueDispatch } from '../services/dispatch.js';
 import { ouvrirPaiement } from '../services/payments.js';
 import { paiementMobileActif } from '../config/env.js';
+import { messageLivreurEnRoute } from '../services/livreur.js';
 
 /**
  * Commandes — sans tour LLM, et c'est délibéré.
@@ -37,27 +38,37 @@ const deliverySchema = z.object({
   note: z.string().max(500).nullable().default(null),
 });
 
+/** Un champ texte facultatif : vide ou blanc vaut absent. */
+const facultatif = (max: number) =>
+  z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+    z.string().max(max).nullable().default(null),
+  );
+
+/**
+ * Un livreur, pas un formulaire.
+ *
+ * Seule la prise en charge est requise : c'est là que le livreur se rend, et
+ * il appelle le client pour le reste. Destination, destinataire et taille
+ * sont facultatifs — au Niger, le téléphone fait le travail que l'adresse
+ * fait ailleurs. Sans destination, le prix est le tarif ville fixe
+ * (platform_settings.courier_city_flat).
+ */
 const courierSchema = z.object({
   type: z.literal('courier'),
   client_order_id: z.string().uuid(),
-  pickup_hint: z.string().min(1).max(300),
+  pickup_hint: facultatif(300),
   pickup: positionSchema,
-  dropoff_hint: z.string().min(1).max(300),
-  dropoff: positionSchema,
+  dropoff_hint: facultatif(300),
+  dropoff: positionSchema.nullable().default(null),
   parcel: z.enum(['small', 'medium', 'large']).default('small'),
   payment_method: z.enum(['cash', 'mobile_money']).default('cash'),
   scheduled_for: z.string().datetime().nullable().default(null),
-  parcel_note: z.string().max(300).nullable().default(null),
-  /**
-   * À qui remettre le colis.
-   *
-   * Obligatoire, contrairement à tout le reste : sans numéro, un livreur
-   * arrivé devant une porte close repart avec le paquet. Le repère amène
-   * dans le bon quartier, le téléphone fait les cinquante derniers mètres.
-   */
-  dropoff_contact: z.string().min(6).max(30),
+  parcel_note: facultatif(300),
+  /** Qui appeler à l'arrivée ; à défaut, le livreur appelle le client. */
+  dropoff_contact: facultatif(30),
   /** Chez qui le prendre, si ce n'est pas l'expéditeur lui-même. */
-  pickup_contact: z.string().max(30).nullable().default(null),
+  pickup_contact: facultatif(30),
 });
 
 const createOrderSchema = z.discriminatedUnion('type', [deliverySchema, courierSchema]);
@@ -89,8 +100,8 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
             p_pickup_lat: body.data.pickup.lat,
             p_pickup_lng: body.data.pickup.lng,
             p_dropoff_hint: body.data.dropoff_hint,
-            p_dropoff_lat: body.data.dropoff.lat,
-            p_dropoff_lng: body.data.dropoff.lng,
+            p_dropoff_lat: body.data.dropoff?.lat ?? null,
+            p_dropoff_lng: body.data.dropoff?.lng ?? null,
             p_parcel: body.data.parcel,
             p_payment: body.data.payment_method,
             p_scheduled_for: body.data.scheduled_for,
@@ -124,11 +135,14 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     // livraison. Retenir la commande pour ça la ferait arriver froide.
     let codeAchat: string | null = null;
     if (body.data.payment_method === 'mobile_money' && paiementMobileActif) {
+      // Un colis sans destination : la position connue est celle du client.
+      const point = (body.data.type === 'courier' ? body.data.dropoff : null)
+        ?? (body.data.type === 'courier' ? body.data.pickup : body.data.dropoff);
       try {
         const achat = await ouvrirPaiement(orderId as string, {
           adresseIp: request.ip,
-          lat: String(body.data.dropoff.lat),
-          lng: String(body.data.dropoff.lng),
+          lat: String(point.lat),
+          lng: String(point.lng),
         });
         codeAchat = achat.codeAchat;
       } catch (cause) {
@@ -156,10 +170,12 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     // La commande est déjà partie ; le code sert à régler d'avance plutôt
     // qu'à la débloquer. On le dit dans ces termes, sinon le client croit
     // devoir payer avant que la boutique ne commence.
-    const message = codeAchat
-      ? `Commande enregistrée, la boutique la prépare. Vous pouvez régler dès maintenant ` +
-        `avec le code ${codeAchat} depuis MYNITA, ou payer à la livraison.`
-      : 'Commande enregistrée. Je vous tiens au courant.';
+    const message = body.data.type === 'courier'
+      ? await messageLivreurEnRoute(db, codeAchat)
+      : codeAchat
+        ? `Commande enregistrée, la boutique la prépare. Vous pouvez régler dès maintenant ` +
+          `avec le code ${codeAchat} depuis MYNITA, ou payer à la livraison.`
+        : 'Commande enregistrée. Je vous tiens au courant.';
 
     return reply
       .code(201)
@@ -196,6 +212,35 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
         orderTracking(data as Record<string, unknown>),
       ]),
     );
+  });
+
+  /**
+   * Annuler — le bouton de la carte de suivi, sans passer par l'assistant.
+   *
+   * Indispensable depuis que « je veux un livreur » commande sans étape : un
+   * vocal mal compris ne doit pas faire venir quelqu'un pour rien. La base
+   * décide seule (cancel_my_order) : aucun livreur parti, rien d'encaissé.
+   * Un refus est un motif à lire, pas une erreur : 200 et le motif en texte.
+   */
+  app.post('/orders/:orderId/cancel', { preHandler: app.requireAuth }, async (request, reply) => {
+    const params = z.object({ orderId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'identifiant invalide' });
+
+    const db = request.supabase!;
+    const { data: refus, error } = await db.rpc('cancel_my_order', {
+      p_order_id: params.data.orderId,
+      p_motif: null,
+    });
+    if (error) {
+      const failure = toHttpFailure(error);
+      return reply.code(failure.status).send(failure.body);
+    }
+
+    const suivi = await db.rpc('order_tracking', { p_order_id: params.data.orderId });
+    return reply.send(envelope(
+      (refus as string | null) ?? 'C’est annulé. Aucun livreur ne viendra.',
+      suivi.data ? [orderTracking(suivi.data as Record<string, unknown>)] : [],
+    ));
   });
 
   app.get('/orders', { preHandler: app.requireAuth }, async (request, reply) => {
