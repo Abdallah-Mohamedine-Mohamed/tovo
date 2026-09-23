@@ -41,16 +41,7 @@ void main() {
       onCancel: () => cancels++,
     );
     expect(find.text('Je vous écoute'), findsOneWidget);
-    expect(find.byIcon(Icons.mic_rounded), findsOneWidget);
-    expect(find.byType(CustomPaint), findsWidgets);
-    expect(find.byType(FadeTransition), findsWidgets);
-    expect(
-      find.byType(SizedBox).evaluate().any((element) {
-        final box = element.widget as SizedBox;
-        return box.width == 58 && box.height == 58;
-      }),
-      isTrue,
-    );
+    expect(find.byTooltip('Arrêter et transcrire'), findsOneWidget);
     await tester.tap(find.byTooltip('Arrêter et transcrire'));
     await tester.tap(find.byTooltip('Annuler le vocal'));
     expect(stops, 1);

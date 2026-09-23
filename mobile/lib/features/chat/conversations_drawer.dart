@@ -6,6 +6,7 @@ import '../../core/api.dart';
 import '../../core/deconnexion.dart';
 import '../../core/theme.dart';
 import '../../components/widgets/read_placeholder.dart';
+import 'conversation_chrome.dart';
 
 /// La liste des conversations, en tiroir.
 ///
@@ -21,12 +22,16 @@ class TiroirConversations extends StatefulWidget {
     required this.onOuvrir,
     required this.onNouvelle,
     this.conversationCourante,
+    this.onPanier,
+    this.onCatalogue,
   });
 
   final TovoApi api;
   final void Function(String conversationId) onOuvrir;
   final VoidCallback onNouvelle;
   final String? conversationCourante;
+  final VoidCallback? onPanier;
+  final VoidCallback? onCatalogue;
 
   @override
   State<TiroirConversations> createState() => _TiroirConversationsState();
@@ -94,11 +99,29 @@ class _TiroirConversationsState extends State<TiroirConversations> {
   Widget build(BuildContext context) {
     return Drawer(
       width: MediaQuery.sizeOf(context).width.clamp(280, 360).toDouble(),
-      backgroundColor: TovoTheme.canvas,
+      backgroundColor: Colors.white,
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (widget.onPanier != null)
+              ListTile(
+                leading: const ConversationIcon(ConversationSymbol.cart),
+                title: const Text('Mon panier'),
+                onTap: () {
+                  Navigator.pop(context);
+                  widget.onPanier!();
+                },
+              ),
+            if (widget.onCatalogue != null)
+              ListTile(
+                leading: const Icon(Icons.storefront_outlined, size: 24),
+                title: const Text('Explorer les boutiques'),
+                onTap: () {
+                  Navigator.pop(context);
+                  widget.onCatalogue!();
+                },
+              ),
             const Padding(
               padding: EdgeInsets.fromLTRB(20, 18, 20, 16),
               child: Column(
@@ -169,7 +192,7 @@ class _TiroirConversationsState extends State<TiroirConversations> {
               ),
             Expanded(
               child: _charge
-                  ? const ReadPlaceholder()
+                  ? const SingleChildScrollView(child: ReadPlaceholder())
                   : _conversations.isEmpty
                   ? const Padding(
                       padding: EdgeInsets.fromLTRB(22, 20, 22, 0),

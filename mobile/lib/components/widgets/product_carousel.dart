@@ -52,7 +52,9 @@ class ProductCollection extends StatelessWidget {
               itemCount: items.length,
               separatorBuilder: (_, __) => const SizedBox(width: 16),
               itemBuilder: (_, index) => ViewportReveal(
-                delay: Duration(milliseconds: index < 4 ? index * 110 : 330),
+                delay: Duration(
+                  milliseconds: index < 4 ? 350 + index * 380 : 1490,
+                ),
                 child: SizedBox(
                   width: 190,
                   child: _ProductTile(

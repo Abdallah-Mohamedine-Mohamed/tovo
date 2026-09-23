@@ -7,10 +7,13 @@ import { envelope, type ChatEnvelope, type Component } from '../components/build
 import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type PendingMerchantChoice } from '../services/catalogue.js';
 import {
   demandeBoutiqueOuverte,
+  demandeDeCommandePassee,
   messageConversationnel,
   normaliserIntention,
+  referenceAuxResultats,
   requeteProduitUtilisateur,
 } from './intents.js';
+import { resumeAffichage } from './memoire.js';
 
 /**
  * Boucle d'orchestration.
@@ -93,8 +96,16 @@ function rechercheProduitRapide(message: string, query: string): boolean {
 
 export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateOutput> {
   const historique = chargerHistorique(input.db, input.conversationId);
+  // « Le deuxième », « ajoute-le » : le client désigne ce qu'il a déjà vu. Ces
+  // phrases ne contiennent aucun produit ; les passer aux voies rapides les
+  // transformait en recherche du mot « ajoute », qui répondait « introuvable ».
+  const reference = !input.audio && referenceAuxResultats(input.message);
+  // « Comme d'habitude » : aucun produit dans la phrase, seul le modèle sait
+  // relire l'historique des commandes. Toujours au modèle, affichage ou pas.
+  const commandePassee = !input.audio && demandeDeCommandePassee(input.message);
   const requeteInitiale = input.audio ? '' : requeteProduitUtilisateur(input.message);
-  const rechercheInitiale = !input.audio && rechercheProduitRapide(input.message, requeteInitiale)
+  const rechercheInitiale = !input.audio && !reference && !commandePassee
+    && rechercheProduitRapide(input.message, requeteInitiale)
     // Premier passage lexical uniquement : il doit rester plus rapide qu'un
     // appel modèle. Les fautes et rapprochements sémantiques restent pris en
     // charge par le chemin complet juste après.
@@ -102,9 +113,19 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     : Promise.resolve(null);
   const [previous, pageInitiale] = await Promise.all([historique, rechercheInitiale]);
 
+  // Une référence ne vaut que s'il y a quelque chose à désigner. Sinon, le
+  // message suit le chemin normal (« le moins cher » tout court reste une
+  // recherche).
+  //
+  // Exception : un choix d'agence en attente (« Otakoss » → Centre aéré ou
+  // Nouveau Marché ?). « Le premier » y est déjà résolu sans modèle par
+  // resolveCatalogueIntent, instantanément et sans risque d'erreur : on lui
+  // laisse la main.
+  const versModele = commandePassee || (reference && previous.affichage && !previous.pending);
+
   const photoRecente = previous.history.slice(-4).some((turn) =>
     turn.role === 'user' && /photo envoyee/i.test(normaliserIntention(turn.content)));
-  const correctionPhoto = photoRecente
+  const correctionPhoto = !versModele && photoRecente
     && /^(?:mais )?(?:c est|ce sont) (?:un |une |des )?/i.test(normaliserIntention(input.message));
   if (correctionPhoto && requeteInitiale) {
     const page = pageInitiale ?? await cataloguePage(input.db, { q: requeteInitiale, limit: 8 }, false);
@@ -136,7 +157,11 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
       usage: { input: 0, output: 0, cached: 0, cycles: 0 } };
   }
 
-  const intent = input.audio ? undefined : await resolveCatalogueIntent(input.db, input.message, previous.pending);
+  // Pour une référence, aucune intention de catalogue à résoudre : le modèle
+  // retrouve l'élément dans ce qu'il a affiché (voir memoire.ts).
+  const intent = input.audio || versModele
+    ? undefined
+    : await resolveCatalogueIntent(input.db, input.message, previous.pending);
   let direct = intent ? await merchantIntentAnswer(input.db, intent) : null;
   const requeteClient = requeteProduitUtilisateur(intent?.query ?? input.message);
   const keyword = rechercheProduitRapide(input.message, requeteClient);
@@ -354,7 +379,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
 async function chargerHistorique(
   db: SupabaseClient,
   conversationId: string,
-): Promise<{ history: LlmTurn[]; pending?: PendingMerchantChoice }> {
+): Promise<{ history: LlmTurn[]; pending?: PendingMerchantChoice; affichage: boolean }> {
   const { data } = await db
     .from('messages')
     .select('role, content, components')
@@ -368,14 +393,32 @@ async function chargerHistorique(
     ? (latest.components as Component[]).filter((component) => component.type === 'merchant_card' && component.data.choose_branch === true)
     : [];
   const pending = choices.length ? { merchant_ids: choices.map((choice) => choice.data.id as string), query: choices[0]?.data.pending_query as string ?? '' } : undefined;
-  const history = (data ?? [])
+  // Ce que le client a vu en dernier : produits et boutiques du message le plus
+  // récent qui en affichait. Un seul résumé, pas un par tour — le client
+  // désigne ce qu'il a sous les yeux, et chaque tour résumé coûterait des
+  // tokens à chaque appel.
+  const lignes = data ?? [];
+  let resume: string | null = null;
+  let indexAffiche = -1;
+  for (let i = 0; i < lignes.length; i++) {
+    if (lignes[i]!.role !== 'assistant') continue;
+    resume = resumeAffichage(lignes[i]!.components);
+    if (resume) {
+      indexAffiche = i;
+      break;
+    }
+  }
+  const history = lignes
+    .map((m, i) => {
+      const texte = (m.content as string) ?? '';
+      return {
+        role: m.role === 'assistant' ? ('model' as const) : ('user' as const),
+        content: i === indexAffiche && resume ? (texte ? `${texte}\n\n${resume}` : resume) : texte,
+      };
+    })
     .reverse()
-    .map((m) => ({
-      role: m.role === 'assistant' ? ('model' as const) : ('user' as const),
-      content: (m.content as string) ?? '',
-    }))
     .filter((t) => t.content.length > 0);
-  return { history, ...(pending ? { pending } : {}) };
+  return { history, ...(pending ? { pending } : {}), affichage: resume !== null };
 }
 
 /**

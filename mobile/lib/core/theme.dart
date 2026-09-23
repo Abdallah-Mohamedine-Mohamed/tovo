@@ -74,12 +74,22 @@ class TovoTheme {
   static ThemeData client() {
     final base = build();
     return base.copyWith(
+      textTheme: base.textTheme.apply(
+        fontFamily: 'CupertinoSystemText',
+        fontFamilyFallback: const ['Arial', 'DM Sans'],
+        bodyColor: const Color(0xFF202020),
+        displayColor: const Color(0xFF202020),
+      ),
+      primaryTextTheme: base.primaryTextTheme.apply(
+        fontFamily: 'CupertinoSystemText',
+        fontFamilyFallback: const ['Arial', 'DM Sans'],
+      ),
       scaffoldBackgroundColor: Colors.white,
       appBarTheme: base.appBarTheme.copyWith(
         backgroundColor: Colors.white,
         toolbarHeight: 56,
         titleTextStyle: const TextStyle(
-          fontFamily: fontFamily,
+          fontFamily: 'CupertinoSystemText',
           fontSize: 15,
           fontWeight: FontWeight.w600,
           color: ink,
@@ -109,7 +119,7 @@ class TovoTheme {
             borderRadius: BorderRadius.circular(16),
           ),
           textStyle: const TextStyle(
-            fontFamily: fontFamily,
+            fontFamily: 'CupertinoSystemText',
             fontSize: 15,
             fontWeight: FontWeight.w600,
           ),

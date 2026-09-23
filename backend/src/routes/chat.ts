@@ -9,6 +9,7 @@ import { demandeGeneraleDeRepas } from '../ai/intents.js';
 import { signaler } from '../lib/observability.js';
 import { transcribe } from '../services/transcription.js';
 import { chatStream } from '../lib/chatStream.js';
+import { consommer, messageLimite } from '../services/rateLimit.js';
 
 /**
  * POST /chat — le fil conversationnel.
@@ -165,6 +166,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
   app.post('/transcriptions', { preHandler: app.requireAuth }, async (request, reply) => {
     const body = z.object({ audio: audioSchema }).safeParse(request.body);
     if (!body.success) return reply.code(400).send({ error: 'enregistrement invalide' });
+    const limite = await consommer('transcription', request.user!.id);
+    if (!limite.ok) {
+      return reply
+        .code(429)
+        .header('retry-after', String(limite.reessayerDans))
+        .send({ error: messageLimite(limite.reessayerDans) });
+    }
     const started = performance.now();
     try {
       const transcript = await transcribe(body.data.audio);
@@ -280,6 +288,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const db = request.supabase!;
     const userId = request.user!.id;
     const streaming = request.headers.accept?.includes('application/x-ndjson') === true;
+
+    // Avant tout le reste, y compris la création de conversation : un client
+    // limité ne doit ni appeler le modèle ni écrire en base. Un rejeu réseau
+    // compte aussi — c'est rare, et la limite est large.
+    const limite = await consommer('chat', userId);
+    if (!limite.ok) {
+      request.log.warn({ userId, reessayer_dans_s: limite.reessayerDans }, 'limite de débit atteinte');
+      return reply
+        .code(429)
+        .header('retry-after', String(limite.reessayerDans))
+        .send({ error: messageLimite(limite.reessayerDans) });
+    }
+
     const output = chatStream(reply, streaming);
     const started = performance.now();
     let firstResultMs: number | undefined;

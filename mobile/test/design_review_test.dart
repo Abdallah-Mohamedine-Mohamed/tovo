@@ -20,8 +20,13 @@ import 'package:tovo/features/catalog/cart_screen.dart';
 import 'package:tovo/features/catalog/product_screen.dart';
 import 'package:tovo/features/chat/chat_screen.dart';
 
+class _VisualTestBinding extends AutomatedTestWidgetsFlutterBinding {
+  @override
+  bool get disableShadows => false;
+}
+
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
+  _VisualTestBinding();
   setUp(() => CatalogImage.providerOverride = (url) => NetworkImage(url));
   tearDown(() => CatalogImage.providerOverride = null);
   final fixture =
@@ -73,6 +78,19 @@ void main() {
       loader.addFont(rootBundle.load('assets/fonts/DMSans-$weight.ttf'));
     }
     await loader.load();
+    final previewFont = FontLoader('CupertinoSystemText');
+    final systemFonts = Platform.environment['WINDIR'];
+    for (final name in ['arial.ttf', 'arialbd.ttf']) {
+      final file = File('$systemFonts/Fonts/$name');
+      previewFont.addFont(
+        file.existsSync()
+            ? file.readAsBytes().then((bytes) => ByteData.sublistView(bytes))
+            : rootBundle.load(
+                'assets/fonts/DMSans-${name == 'arial.ttf' ? 'Regular' : 'Bold'}.ttf',
+              ),
+      );
+    }
+    await previewFont.load();
     final icons = FontLoader('MaterialIcons');
     icons.addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
     await icons.load();
@@ -103,7 +121,9 @@ void main() {
               call.method == 'isLocationServiceEnabled' ? false : null,
         );
   });
-  tearDownAll(() async => Supabase.instance.dispose());
+  tearDownAll(() async {
+    await Supabase.instance.dispose();
+  });
 
   setUp(() {
     conversation = false;
@@ -354,27 +374,48 @@ void main() {
     });
   }
 
-  visualTest(
-    'accueil : toutes les catégories visibles sans défilement automatique',
-    (tester) async {
-      await open(tester, ChatScreen(api: api));
-      for (final category in categories) {
-        expect(find.text(category.$1).hitTestable(), findsOneWidget);
-      }
-      expect(find.text('Votre envie,\nlivrée.').hitTestable(), findsOneWidget);
-      expect(
-        tester.getBottomLeft(find.text('Parapharmacie')).dy,
-        lessThan(tester.getTopLeft(find.byType(TextField)).dy),
-      );
-      await capture(tester, '01-accueil');
-    },
-  );
+  visualTest('accueil : conversation, suggestions et commandes flottantes', (
+    tester,
+  ) async {
+    await open(tester, ChatScreen(api: api));
+    expect(find.text('Essayez quelque chose de nouveau'), findsOneWidget);
+    expect(find.text('Trouve-moi un bon repas à Niamey'), findsOneWidget);
+    expect(find.byTooltip('Ajouter une photo'), findsOneWidget);
+    expect(find.byTooltip('Écrire un message'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+    await capture(tester, '01-accueil');
+    await tester.tap(find.byTooltip('Écrire un message'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsOneWidget);
+    await capture(tester, '11-saisie');
+    await tester.tapAt(const Offset(200, 260));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Parler à Tovo'), findsOneWidget);
+  });
+
+  visualTest('accueil : petits écrans et texte agrandi restent utilisables', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      ChatScreen(api: api),
+      scale: 1.4,
+      size: const Size(320, 640),
+    );
+    expect(find.byTooltip('Parler à Tovo').hitTestable(), findsOneWidget);
+    await capture(tester, '12-accueil-accessible');
+    expect(tester.takeException(), isNull);
+  });
 
   visualTest('conversation : réponse sans avatar et aperçu lisible', (
     tester,
   ) async {
     conversation = true;
     await open(tester, ChatScreen(api: api));
+    expect(find.text('Reprendre où vous en étiez'), findsOneWidget);
+    await capture(tester, '13-accueil-historique');
+    await tester.tap(find.text('Je voudrais du garba'));
+    await tester.pumpAndSettle();
     expect(find.text('Parcourir les 6 produits'), findsOneWidget);
     await capture(tester, '02-conversation');
   });
@@ -384,6 +425,8 @@ void main() {
   ) async {
     liveSearch = true;
     await open(tester, ChatScreen(api: api));
+    await tester.tap(find.byTooltip('Écrire un message'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'poulet');
     await tester.pump();
     await tester.tap(find.byTooltip('Envoyer'));
@@ -451,7 +494,9 @@ void main() {
   });
 
   Future<void> checkout(WidgetTester tester) async {
-    await tester.tap(find.byTooltip('Mon panier'));
+    await tester.tap(find.byTooltip('Mes conversations'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mon panier'));
     await tester.pumpAndSettle();
     await tester.runAsync(
       () async => Future<void>.delayed(const Duration(milliseconds: 300)),

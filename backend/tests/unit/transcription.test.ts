@@ -30,7 +30,11 @@ describe('Transcription avant envoi', () => {
 
   it('ne crée ni conversation ni commande et traite le silence', async () => {
     const app = Fastify();
-    app.decorate('requireAuth', async () => {});
+    // Comme le vrai requireAuth : une requête qui passe a un utilisateur
+    // (la limite de débit se compte par utilisateur).
+    app.decorate('requireAuth', async (request: { user?: unknown }) => {
+      request.user = { id: 'client-test' };
+    });
     await app.register(chatRoutes);
     generate.mockResolvedValue({ text: JSON.stringify({ text: 'Je veux manger' }), toolCalls: [] });
     const response = await app.inject({ method: 'POST', url: '/transcriptions', payload: { audio: { mime: 'audio/mp4', data: 'YXVkaW8=' } } });
@@ -38,6 +42,24 @@ describe('Transcription avant envoi', () => {
     generate.mockResolvedValue({ text: JSON.stringify({ text: '' }), toolCalls: [] });
     expect((await app.inject({ method: 'POST', url: '/transcriptions', payload: { audio: { mime: 'audio/mp4', data: 'YXVkaW8=' } } })).statusCode).toBe(422);
     expect((await app.inject({ method: 'POST', url: '/transcriptions', payload: { audio: { mime: 'text/plain', data: 'x' } } })).statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('au-delà du plafond, répond 429 sans solliciter le modèle', async () => {
+    const app = Fastify();
+    app.decorate('requireAuth', async (request: { user?: unknown }) => {
+      request.user = { id: 'client-pressé' };
+    });
+    await app.register(chatRoutes);
+    generate.mockResolvedValue({ text: JSON.stringify({ text: 'Du poulet' }), toolCalls: [] });
+    const envoyer = () => app.inject({ method: 'POST', url: '/transcriptions', payload: { audio: { mime: 'audio/mp4', data: 'YXVkaW8=' } } });
+    for (let i = 0; i < 12; i++) expect((await envoyer()).statusCode).toBe(200);
+    generate.mockClear();
+    const refus = await envoyer();
+    expect(refus.statusCode).toBe(429);
+    expect(Number(refus.headers['retry-after'])).toBeGreaterThan(0);
+    expect(refus.json().error).toContain('minute');
+    expect(generate).not.toHaveBeenCalled();
     await app.close();
   });
 

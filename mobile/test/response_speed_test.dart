@@ -16,7 +16,7 @@ import 'package:tovo/core/read_cache.dart';
 import 'package:tovo/core/theme.dart';
 import 'package:tovo/features/catalog/catalog_screen.dart';
 import 'package:tovo/features/catalog/product_screen.dart';
-import 'package:tovo/features/chat/assistant_activity_dock.dart';
+import 'package:tovo/features/chat/conversation_chrome.dart';
 import 'package:tovo/features/chat/chat_screen.dart';
 
 http.Response jsonResponse(Object body) => http.Response(
@@ -161,26 +161,59 @@ void main() {
     );
     await open(tester, ChatScreen(api: api));
 
-    expect(tester.widget<AppBar>(find.byType(AppBar)).title, isNull);
-    final cart = tester.widget<IconButton>(
-      find.ancestor(
-        of: find.byTooltip('Mon panier'),
-        matching: find.byType(IconButton),
+    expect(find.byTooltip('Mes conversations'), findsOneWidget);
+    expect(find.byTooltip('Mes commandes'), findsOneWidget);
+    expect(find.byTooltip('Ajouter une photo'), findsOneWidget);
+    expect(find.byTooltip('Parler à Tovo'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+    expect(
+      tester.getCenter(find.byTooltip('Parler à Tovo')).dx,
+      closeTo(
+        tester.view.physicalSize.width / tester.view.devicePixelRatio / 2,
+        1,
       ),
     );
-    expect((cart.icon as Icon).icon, Icons.shopping_cart_outlined);
-    expect(cart.color, TovoTheme.ink);
-    expect(find.byTooltip('Choisir une photo'), findsOneWidget);
-    expect(find.byTooltip('Chercher avec une photo'), findsOneWidget);
-    expect(find.byTooltip('Parler à Tovo'), findsOneWidget);
-    expect(find.byTooltip('Envoyer'), findsOneWidget);
+    await tester.tap(find.byTooltip('Ajouter une photo'));
+    await tester.pumpAndSettle();
+    expect(find.text('Photos'), findsOneWidget);
+    expect(find.text('Appareil photo'), findsOneWidget);
+    await tester.tap(find.text('Photos'));
+    await tester.pumpAndSettle();
 
+    await tester.tap(find.byTooltip('Écrire un message'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last, 'Bonjour Tovo');
     await tester.pump();
+    expect(find.byTooltip('Parler à Tovo'), findsNothing);
+    expect(find.byTooltip('Envoyer'), findsOneWidget);
     await tester.tap(find.byTooltip('Envoyer'));
     await tester.pump();
     expect(sent, ['Bonjour Tovo']);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('la carte d’accueil lance une vraie recherche', (tester) async {
+    final sent = <String>[];
+    final api = TovoApi(
+      tokenProvider: () => null,
+      client: MockClient((request) async {
+        if (request.url.path == '/chat') {
+          sent.add(jsonDecode(request.body)['text'] as String);
+          return jsonResponse({
+            'content': 'Voici des restaurants',
+            'components': [],
+          });
+        }
+        return jsonResponse(
+          request.url.path == '/categories' ? categoryBody : {},
+        );
+      }),
+    );
+    await open(tester, ChatScreen(api: api));
+
+    await tester.tap(find.text('Trouve-moi un bon repas à Niamey'));
+    await tester.pump();
+    expect(sent, ['Je cherche un bon restaurant à Niamey']);
   });
 
   testWidgets(
@@ -215,7 +248,8 @@ void main() {
       pendingOrders.complete(jsonResponse({'orders': []}));
       await tester.pump(const Duration(milliseconds: 350));
       expect(find.text('Réponse tardive à ignorer'), findsNothing);
-      expect(find.text('Ma discussion conservée'), findsNothing);
+      expect(find.text('Ma discussion conservée'), findsOneWidget);
+      expect(find.text('Reprendre où vous en étiez'), findsOneWidget);
       expect(find.byType(CircularProgressIndicator), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -346,6 +380,8 @@ void main() {
           api: TovoApi(client: client, tokenProvider: () => null),
         ),
       );
+      await tester.tap(find.byTooltip('Écrire un message'));
+      await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'Cherche du poulet');
       await tester.pump();
       await tester.tap(find.byTooltip('Envoyer'));
@@ -382,6 +418,8 @@ void main() {
         api: TovoApi(client: client, tokenProvider: () => null),
       ),
     );
+    await tester.tap(find.byTooltip('Écrire un message'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'Poulet');
     await tester.pump();
     await tester.tap(find.byTooltip('Envoyer'));
@@ -472,6 +510,8 @@ void main() {
         }),
       );
       await open(tester, ChatScreen(api: api));
+      await tester.tap(find.byTooltip('Écrire un message'));
+      await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'Poulet');
       await tester.pump();
       await tester.tap(find.byTooltip('Envoyer'));
@@ -529,26 +569,14 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.byType(BackdropFilter), findsNothing);
       expect(
-        tester.widget<Scaffold>(find.byType(Scaffold).first).backgroundColor,
-        kAssistantListeningSurface,
-      );
-      expect(
-        tester.widget<AppBar>(find.byType(AppBar)).backgroundColor,
-        kAssistantListeningSurface,
-      );
-      expect(
         tester
-            .widgetList<AnimatedContainer>(find.byType(AnimatedContainer))
-            .any(
-              (container) =>
-                  (container.decoration as BoxDecoration?)?.color ==
-                  kAssistantListeningSurface,
-            ),
+            .widget<ConversationBackdrop>(find.byType(ConversationBackdrop))
+            .listening,
         isTrue,
       );
       expect(find.byTooltip('Arrêter et transcrire'), findsOneWidget);
       await tester.runAsync(() async {
-        await tester.tap(find.byIcon(Icons.mic_rounded));
+        await tester.tap(find.byTooltip('Arrêter et transcrire'));
         await Future<void>.delayed(const Duration(milliseconds: 500));
       });
       await tester.pump();
@@ -558,10 +586,7 @@ void main() {
       expect(sent.single['text'], 'Je veux du poulet');
       expect(sent.single.containsKey('audio'), isFalse);
       expect(find.text('Je veux du poulet'), findsOneWidget);
-      expect(
-        tester.widget<TextField>(find.byType(TextField)).controller!.text,
-        isEmpty,
-      );
+      expect(find.byType(TextField), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
     },

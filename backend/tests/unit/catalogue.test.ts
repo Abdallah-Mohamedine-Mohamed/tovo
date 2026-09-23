@@ -235,6 +235,42 @@ describe('catalogue complet', () => {
     expect(llmGenerate).not.toHaveBeenCalled();
   });
 
+  it('« ajoute-le » après un affichage part au modèle, avec la liste de ce que le client a vu', async () => {
+    const conversationId = randomUUID();
+    const send = (message: string) => orchestrate({ db: adapter, userId: randomUUID(), conversationId, clientMessageId: randomUUID(), message });
+    const affiche = await send('Poulet');
+    const premier = (affiche.components.find((c) => c.type === 'product_carousel' || c.type === 'product_list')
+      ?.data.items as Array<Record<string, unknown>> | undefined)?.[0];
+    expect(premier?.id, JSON.stringify(affiche)).toBeTruthy();
+
+    llmGenerate.mockClear();
+    const answer = await send('ajoute-le');
+    // Avant : recherche lexicale du mot « ajoute » → « introuvable », sans modèle.
+    expect(llmGenerate.mock.calls.length, JSON.stringify(answer)).toBe(1);
+    const history = (llmGenerate.mock.calls[0] as unknown as [{ history: Array<{ content: string }> }])[0].history;
+    const contexte = history.map((turn) => turn.content).join('\n');
+    expect(contexte).toContain('[Affiché au client');
+    expect(contexte).toContain(`1. ${premier!.name as string}`);
+    expect(contexte).toContain(`product_id=${premier!.id as string}`);
+  });
+
+  it('« comme d’habitude » part au modèle au lieu d’une recherche de produit', async () => {
+    for (const message of ['comme d’habitude', 'la même chose que la dernière fois', 'reprends ma dernière commande']) {
+      llmGenerate.mockClear();
+      const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),
+        clientMessageId: randomUUID(), message });
+      expect(llmGenerate.mock.calls.length, `${message} → ${JSON.stringify(answer)}`).toBe(1);
+    }
+  });
+
+  it('une référence sans rien d’affiché auparavant suit le chemin normal', async () => {
+    llmGenerate.mockClear();
+    const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),
+      clientMessageId: randomUUID(), message: 'le moins cher' });
+    const history = (llmGenerate.mock.calls[0] as unknown as [{ history: Array<{ content: string }> }] | undefined)?.[0].history ?? [];
+    expect(history.map((turn) => turn.content).join('\n'), JSON.stringify(answer)).not.toContain('[Affiché au client');
+  });
+
   it('ne transforme pas une phrase de conversation en recherche de produits', async () => {
     llmGenerate.mockClear();
     const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),

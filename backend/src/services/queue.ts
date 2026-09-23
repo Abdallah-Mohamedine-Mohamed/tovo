@@ -63,6 +63,16 @@ function construireConnexion(url: string): IORedis {
 
 export const queuesEnabled = Boolean(env.REDIS_URL);
 
+/**
+ * La connexion Redis partagée, ou `null` en mode direct.
+ *
+ * Exposée pour les compteurs de limite de débit : une seconde connexion
+ * doublerait les sockets ouverts vers Railway pour le même service.
+ */
+export function redisConnexion(): IORedis | null {
+  return redis();
+}
+
 const queues = new Map<string, Queue>();
 
 export function getQueue(name: string): Queue | null {

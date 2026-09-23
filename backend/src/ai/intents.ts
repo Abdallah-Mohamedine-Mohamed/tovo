@@ -49,6 +49,62 @@ export function messageConversationnel(texte: string): boolean {
     || /\b(stupide|bete|idiot|nulle?|mauvais)\b/.test(normalise);
 }
 
+/**
+ * Le client désigne-t-il un résultat DÉJÀ affiché plutôt que d'en chercher un ?
+ *
+ * « Le deuxième », « celui à 2 000 », « ajoute-le », « le même » : ces phrases
+ * ne contiennent aucun produit. Envoyées aux voies rapides, elles devenaient
+ * une recherche du mot « ajoute » ou « deuxieme », et le client lisait
+ * « introuvable » alors qu'il venait de faire son choix.
+ *
+ * Volontairement large : un faux positif ne coûte qu'un passage par le modèle,
+ * qui sait aussi traiter une vraie recherche. L'orchestrateur ne s'en sert que
+ * si des résultats ont effectivement été montrés au tour précédent.
+ */
+export function referenceAuxResultats(texte: string): boolean {
+  const n = normaliserIntention(texte);
+  if (!n) return false;
+  return (
+    // Rang : « le deuxième », « la 3e », « le dernier », « le numéro 2 », « le 2 ».
+    /\b(premier|premiere|1er|1ere|deuxieme|2e|2eme|second|seconde|troisieme|3e|3eme|quatrieme|4e|4eme|cinquieme|5e|5eme|dernier|derniere)\b/.test(n)
+    || /\b(numero|no) [1-8]\b/.test(n)
+    || /\b(le|la) [1-8]\b/.test(n)
+    // Démonstratifs : « celui-là », « celle à 2 000 ».
+    || /\b(celui|celle|ceux|celles)\b/.test(n)
+    // Pronom en fin de phrase : « ajoute-le », « prends-la », « mets-les ».
+    || /\b(ajoute|ajoutez|ajouter|prends|prenez|prend|mets|mettez|met|garde|gardez|choisis|choisissez|donne|donnez)( moi)? (le|la|les|l)$/.test(n)
+    // « je le prends », « je la veux ».
+    || /\bje (le|la|les|l) (prends|prend|veux|garde|choisis|commande)\b/.test(n)
+    // « je prends ça », « ajoute ça ».
+    || /\b(prends|prend|veux|garde|choisis|ajoute|mets|commande) (ca|cela|ceci)\b/.test(n)
+    // « le même », « pareil ».
+    || /\b(le|la|les) memes?\b/.test(n)
+    || /\bpareil\b/.test(n)
+    // Superlatif sur ce qui est affiché : « le moins cher », « le plus proche ».
+    || /\b(le|la) (moins|plus) (cher|chere|proche|grand|grande|petit|petite)\b/.test(n)
+  );
+}
+
+/**
+ * Le client veut-il reprendre une commande passée ?
+ *
+ * « Comme d'habitude », « la même chose que la dernière fois » : la demande
+ * du client fidèle, le plus précieux. Envoyée aux voies rapides, elle devenait
+ * une recherche du produit « d habitude » et répondait « introuvable ». Seul
+ * le modèle, avec historique_commandes, sait y répondre.
+ */
+export function demandeDeCommandePassee(texte: string): boolean {
+  const n = normaliserIntention(texte);
+  return /\b(comme d habitude|d habitude|comme la derniere fois|la derniere fois|comme hier|comme la semaine derniere)\b/.test(n)
+    || /\b(derniere|precedente|ancienne|meme) commande\b/.test(n)
+    || /\bcommande (d hier|de la derniere fois|precedente)\b/.test(n)
+    || /\b(recommander|recommande|recommandez|reprendre|reprends|reprenez|refaire|refais|refaites) (ma|mes|la|une|ce que|comme)\b/.test(n)
+    || /\bmeme chose\b/.test(n)
+    // Tap sur « Reprendre : Tacos XL » : la valeur du bouton est
+    // « recommander:<uuid> », normalisée ici en « recommander 3a1ab2f3 … ».
+    || /\brecommander [0-9a-f]{8}\b/.test(n);
+}
+
 export function demandeDeRepas(texte: string): boolean {
   const normalise = normaliserIntention(texte);
   return /\b(manger|mange|faim|repas|restaurant|restaurants|resto|restos|plat|plats|dejeuner|diner|cuisine)\b/.test(

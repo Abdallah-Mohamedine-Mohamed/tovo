@@ -3,12 +3,14 @@ import {
   boutiquesCorrespondantes,
   boutiquesMentionnees,
   demandeBoutiqueOuverte,
+  demandeDeCommandePassee,
   demandeDeProximite,
   demandeDeRepas,
   demandeGeneraleDeRepas,
   nomBoutiqueApresMarqueur,
   normaliserIntention,
   messageConversationnel,
+  referenceAuxResultats,
   requeteProduitUtilisateur,
 } from '../../src/ai/intents.js';
 
@@ -107,5 +109,62 @@ describe('intentions de catalogue', () => {
     expect(messageConversationnel('Tu es bête')).toBe(true);
     expect(messageConversationnel('Bonjour, ça va ?')).toBe(true);
     expect(messageConversationnel('montre')).toBe(false);
+  });
+});
+
+describe("référence à un résultat déjà affiché", () => {
+  it("reconnaît le rang, le démonstratif et le pronom", () => {
+    for (const phrase of [
+      "Le deuxième",
+      "je prends le 2",
+      "la 3e",
+      "le dernier",
+      "le numéro 4",
+      "celui à 2000",
+      "celle-là",
+      "Ajoute-le",
+      "mets-les",
+      "je le prends",
+      "je prends ça",
+      "le même",
+      "pareil",
+      "le moins cher",
+    ]) {
+      expect(referenceAuxResultats(phrase), phrase).toBe(true);
+    }
+  });
+
+  it("laisse passer une vraie recherche de produit", () => {
+    for (const phrase of [
+      "du poulet",
+      "ajoute le poulet braisé",
+      "je veux une pizza",
+      "avez-vous du gaz",
+      "de la vaisselle",
+      "Bonjour",
+    ]) {
+      expect(referenceAuxResultats(phrase), phrase).toBe(false);
+    }
+  });
+});
+
+describe("reprise d’une commande passée", () => {
+  it("reconnaît le client qui revient", () => {
+    for (const phrase of [
+      "Comme d’habitude",
+      "la même chose que la dernière fois",
+      "reprends ma dernière commande",
+      "je veux refaire ma commande d’hier",
+      "même chose",
+      "Reprendre : Tacos XL [recommander:3a1ab2f3-ba3f-4970-9731-cd5b52fc0d18]",
+    ]) {
+      expect(demandeDeCommandePassee(phrase), phrase).toBe(true);
+    }
+  });
+
+  it("ne confond pas « recommander » au sens de conseiller, ni une recherche", () => {
+    for (const phrase of ["tu me recommandes quoi ?", "recommande-moi un plat", "du poulet", "le dernier iPhone"]) {
+      expect(demandeDeCommandePassee(phrase), phrase).toBe(false);
+    }
   });
 });

@@ -1175,7 +1175,7 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
   {
     name: 'obtenir_produit',
     description:
-      "Détaille un produit et ses options. À appeler OBLIGATOIREMENT avant tout ajout au panier, pour connaître les choix disponibles.",
+      "Détaille un produit et ses options. À appeler OBLIGATOIREMENT avant d'ajouter au panier un produit qui a des options à choisir, pour connaître les choix disponibles. Un produit sans options s'ajoute directement.",
     parameters: {
       type: 'object',
       properties: { product_id: S.string('Identifiant renvoyé par une recherche') },
