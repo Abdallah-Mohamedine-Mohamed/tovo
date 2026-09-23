@@ -204,9 +204,12 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       .safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: 'requête invalide' });
 
+    // La boutique et les articles en plus : l'accueil en tire sa carte
+    // « Recommander », sans seconde requête. « 4 500 F » ne rappelle à
+    // personne ce qu'il a mangé ; « 2 × Tacos poulet — Otakoss », si.
     const { data, error } = await request.supabase!
       .from('orders')
-      .select('id, type, status, total, placed_at, delivered_at, merchant_id')
+      .select('id, type, status, total, placed_at, delivered_at, merchant_id, merchants(name), order_items(product_name, quantity)')
       .order('placed_at', { ascending: false })
       .limit(query.data.limit);
 
@@ -215,6 +218,15 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(failure.status).send(failure.body);
     }
 
-    return reply.send({ orders: data ?? [] });
+    // Champs existants inchangés : les versions déjà installées ignorent
+    // simplement `merchant_name` et `articles`.
+    const orders = (data ?? []).map(({ merchants, order_items, ...commande }) => ({
+      ...commande,
+      merchant_name: (Array.isArray(merchants) ? merchants[0]?.name : (merchants as { name?: string } | null)?.name) ?? null,
+      articles: ((order_items ?? []) as Array<{ product_name: string; quantity: number }>)
+        .map((a) => ({ nom: a.product_name, quantite: a.quantity })),
+    }));
+
+    return reply.send({ orders });
   });
 }

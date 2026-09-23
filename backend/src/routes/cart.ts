@@ -181,6 +181,67 @@ export async function cartRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(result.envelope);
   });
 
+  /**
+   * Recommander une commande livrée — la carte « Recommander » de l'accueil.
+   *
+   * Sans le modèle : le client a déjà dit ce qu'il voulait en touchant le
+   * bouton, lui faire interpréter ce geste coûtait un appel et deux secondes.
+   * `reorder_into_cart` remet les articles aux prix du jour et rend ceux qui
+   * ne sont plus disponibles plutôt que de les omettre en silence.
+   *
+   * `vider` : réponse au conflit de boutique. « Vider et recommencer » tout
+   * court aurait vidé le panier sans rien recommander.
+   */
+  app.post('/cart/reorder', { preHandler: app.requireAuth }, async (request, reply) => {
+    const body = z
+      .object({
+        order_id: z.string().uuid(),
+        vider: z.boolean().default(false),
+        lat: z.number().min(-90).max(90).optional(),
+        lng: z.number().min(-180).max(180).optional(),
+      })
+      .safeParse(request.body);
+    if (!body.success) {
+      return reply.code(400).send({ error: 'requête invalide', details: body.error.issues });
+    }
+
+    const db = request.supabase!;
+    if (body.data.vider) {
+      const { error } = await db.from('carts').delete().eq('user_id', request.user!.id);
+      if (error) {
+        const failure = toHttpFailure(error);
+        return reply.code(failure.status).send(failure.body);
+      }
+    }
+
+    const { data, error } = await db.rpc('reorder_into_cart', { p_order_id: body.data.order_id });
+    if (error) {
+      const failure = toHttpFailure(error);
+      if (error.code === 'P0003') {
+        return reply.code(409).send({
+          ...envelope(failure.body.error, [
+            quickReplies([
+              { label: 'Vider et recommander', value: `vider_et_recommander:${body.data.order_id}` },
+              { label: 'Garder mon panier', value: 'garder_panier' },
+            ]),
+          ]),
+          // Voir POST /cart/items : l'application lit `error` sur un statut ≥ 400.
+          error: failure.body.error,
+        });
+      }
+      return reply.code(failure.status).send(failure.body);
+    }
+
+    const ignores = ((data ?? {}) as { ignores?: string[] }).ignores ?? [];
+    const content = ignores.length === 0
+      ? 'C’est dans votre panier, aux prix du jour.'
+      : `C’est dans votre panier, aux prix du jour. Plus disponible : ${ignores.join(', ')}.`;
+
+    const result = await renvoyerPanier(db, body.data.lat, body.data.lng, content);
+    if (result.failure) return reply.code(result.failure.status).send(result.failure.body);
+    return reply.send(result.envelope);
+  });
+
   /** Vider le panier — la suite du choix proposé en cas de conflit de boutique. */
   app.delete('/cart', { preHandler: app.requireAuth }, async (request, reply) => {
     const { error } = await request.supabase!.from('carts').delete().eq('user_id', request.user!.id);

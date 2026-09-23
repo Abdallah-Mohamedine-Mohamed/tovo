@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../components/registry.dart' show Money;
 import '../../core/theme.dart';
 
 enum ConversationSymbol {
@@ -314,11 +315,17 @@ class ConversationHome extends StatelessWidget {
     required this.recent,
     required this.onResume,
     required this.onSuggestion,
+    this.lastOrder,
+    this.onReorder,
   });
   final String? firstName;
   final List<Map<String, dynamic>> recent;
   final ValueChanged<String> onResume;
   final ValueChanged<String> onSuggestion;
+
+  /// Dernière commande livrée (GET /orders), ou nulle.
+  final Map<String, dynamic>? lastOrder;
+  final ValueChanged<Map<String, dynamic>>? onReorder;
 
   @override
   Widget build(BuildContext context) {
@@ -333,7 +340,7 @@ class ConversationHome extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.only(top: 28, bottom: 68),
             child: Column(
-              mainAxisAlignment: recent.isEmpty
+              mainAxisAlignment: recent.isEmpty && lastOrder == null
                   ? MainAxisAlignment.center
                   : MainAxisAlignment.start,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -370,6 +377,18 @@ class ConversationHome extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (lastOrder != null && onReorder != null) ...[
+                  const SizedBox(height: 32),
+                  const _HomeSectionTitle('Votre dernière commande'),
+                  const SizedBox(height: 15),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 26),
+                    child: _LastOrderCard(
+                      order: lastOrder!,
+                      onReorder: () => onReorder!(lastOrder!),
+                    ),
+                  ),
+                ],
                 if (recent.isNotEmpty) ...[
                   const SizedBox(height: 32),
                   const _HomeSectionTitle('Reprendre où vous en étiez'),
@@ -455,6 +474,95 @@ class _HomeSectionTitle extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// « Otakoss · 2 × Tacos poulet, 1 × Bissap · 4 500 F » et un seul bouton.
+///
+/// Le contenu plutôt que la date : « commande du 20 septembre » ne rappelle
+/// à personne ce qu'il a mangé. Le total affiché est celui d'alors ; le
+/// panier, lui, reprend les prix du jour, et le serveur le dit.
+class _LastOrderCard extends StatelessWidget {
+  const _LastOrderCard({required this.order, required this.onReorder});
+  final Map<String, dynamic> order;
+  final VoidCallback onReorder;
+
+  @override
+  Widget build(BuildContext context) {
+    final articles = ((order['articles'] as List?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map((a) => '${a['quantite'] ?? 1} × ${a['nom'] ?? ''}')
+        .join(', ');
+    final boutique = order['merchant_name'] as String?;
+    final total = (order['total'] as num?)?.toInt();
+    return ConversationSurface(
+      radius: 16,
+      color: const Color(0xF0F8F8F9),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (boutique != null)
+                    Text(
+                      boutique,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.3,
+                        color: Color(0xFF202020),
+                      ),
+                    ),
+                  const SizedBox(height: 3),
+                  Text(
+                    articles,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      height: 1.25,
+                      color: Color(0xFF6B6B6B),
+                    ),
+                  ),
+                  if (total != null) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      Money.format(total),
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF202020),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton(
+              onPressed: onReorder,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF202020),
+                foregroundColor: Colors.white,
+                minimumSize: const Size(0, 44),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                shape: const StadiumBorder(),
+                textStyle: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              child: const Text('Recommander'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _HomePromptCard extends StatelessWidget {

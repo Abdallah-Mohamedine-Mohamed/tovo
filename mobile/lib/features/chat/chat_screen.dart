@@ -117,6 +117,10 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Prénom du client, pour le salut d'accueil. Nul tant qu'on ne l'a pas.
   String? _prenom;
 
+  /// Dernière commande livrée, pour la carte « Recommander » de l'accueil.
+  /// Nulle s'il n'y en a pas : un nouveau client ne voit rien de vide.
+  Map<String, dynamic>? _derniereCommande;
+
   AssistantActivity? get _activity {
     if (_enregistreLaVoix) return AssistantActivity.listening;
     if (_transcribing) return AssistantActivity.transcribing;
@@ -218,11 +222,21 @@ class _ChatScreenState extends State<ChatScreen> {
 
     Map<String, dynamic>? enCours;
     if (commandes.ok) {
-      final liste = (commandes.raw['orders'] as List?) ?? const [];
-      enCours = liste.cast<Map<String, dynamic>>().where((o) {
+      final liste = ((commandes.raw['orders'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>();
+      enCours = liste.where((o) {
         final s = '${o['status']}';
         return s != 'delivered' && s != 'cancelled';
       }).firstOrNull;
+      // Un colis ne se « recommande » pas : l'adresse et le destinataire
+      // changent à chaque fois. Sans articles (serveur plus ancien), il n'y
+      // aurait rien à montrer.
+      final derniere = liste.where((o) {
+        return '${o['status']}' == 'delivered' &&
+            '${o['type']}' != 'courier' &&
+            ((o['articles'] as List?)?.isNotEmpty ?? false);
+      }).firstOrNull;
+      if (derniere != null) setState(() => _derniereCommande = derniere);
     }
 
     if (enCours != null && mounted) {
@@ -997,6 +1011,11 @@ class _ChatScreenState extends State<ChatScreen> {
         // faire interpréter serait payer un aller-retour pour rien.
         if (valeur == 'vider_panier') {
           _appeler(() => widget.api.delete('/cart'));
+        } else if (valeur.startsWith('vider_et_recommander:')) {
+          _recommander(
+            valeur.substring('vider_et_recommander:'.length),
+            vider: true,
+          );
         } else if (valeur == 'garder_panier') {
           _appeler(() => widget.api.get('/cart'));
         } else if (valeur.startsWith('adresse:')) {
@@ -1342,6 +1361,18 @@ class _ChatScreenState extends State<ChatScreen> {
     _envoyer();
   }
 
+  /// Remet une commande livrée au panier, sans passer par l'assistant : le
+  /// geste dit déjà tout. En cas de panier d'une autre boutique, le serveur
+  /// propose « Vider et recommander », qui revient ici avec [vider].
+  void _recommander(String orderId, {bool vider = false}) {
+    _appeler(
+      () => widget.api.post('/cart/reorder', {
+        'order_id': orderId,
+        if (vider) 'vider': true,
+      }),
+    );
+  }
+
   Future<void> _ouvrirProduit(String id, Map<String, dynamic>? product) async {
     await Navigator.of(context).push<bool>(
       MaterialPageRoute(
@@ -1633,6 +1664,14 @@ class _ChatScreenState extends State<ChatScreen> {
                                     }
                                   },
                                   onSuggestion: _envoyerSuggestion,
+                                  lastOrder: _derniereCommande,
+                                  onReorder: (commande) {
+                                    _ajouterTourUtilisateur(
+                                      'Recommander ma commande'
+                                      '${commande['merchant_name'] == null ? '' : ' chez ${commande['merchant_name']}'}',
+                                    );
+                                    _recommander('${commande['id']}');
+                                  },
                                 );
                               }
                               if (_loadingHistory && _tours.isEmpty) {
