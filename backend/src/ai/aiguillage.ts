@@ -63,9 +63,9 @@ export type Route =
   | { type: 'clarifier'; contenu: string; components: Component[]; decision: DecisionJev }
   | { type: 'habituel'; decision: DecisionJev | null };
 
-export function decider(decision: DecisionJev | null, message: string): Route {
+export function decider(decision: DecisionJev | null, message: string, seuil: number = env.JEV_SEUIL): Route {
   if (!decision?.choix) return { type: 'habituel', decision };
-  if (decision.confiance >= env.JEV_SEUIL) return { type: 'intention', intention: decision.choix, decision };
+  if (decision.confiance >= seuil) return { type: 'intention', intention: decision.choix, decision };
 
   // Les pistes plausibles, de la plus probable à la moins probable.
   const pistes = (Object.entries(decision.probabilites) as Array<[Intention, number]>)

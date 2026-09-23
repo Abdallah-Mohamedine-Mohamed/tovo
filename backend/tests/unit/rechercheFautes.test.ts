@@ -4,18 +4,23 @@ import { randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { vector } from '@electric-sql/pglite-pgvector';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
+import { fuzzystrmatch } from '@electric-sql/pglite/contrib/fuzzystrmatch';
 
 /**
  * Migration 0056 : trouver le produit même mal écrit, sans rien trouver
  * quand le catalogue n'a vraiment rien.
  */
-const db = new PGlite({ extensions: { vector, pg_trgm } });
+const db = new PGlite({ extensions: { vector, pg_trgm, fuzzystrmatch } });
 const boutique = randomUUID();
 
 beforeAll(async () => {
   await db.exec(readFileSync('tests/fixtures/catalogue.sql', 'utf8'));
   await db.exec('create table platform_settings(id int primary key default 1)');
   await db.exec(readFileSync('../supabase/migrations/0056_variantes_et_fautes.sql', 'utf8'));
+  // 0057 : la même recherche, précalculée. Le comportement doit être identique.
+  await db.exec(readFileSync('../supabase/migrations/0057_recherche_precalculee.sql', 'utf8'));
+  // 0058 : un mot juste, un mot de travers.
+  await db.exec(readFileSync('../supabase/migrations/0058_un_mot_de_travers.sql', 'utf8'));
   await db.query('insert into merchants values ($1, $2, true, true)', [boutique, 'Maquis Test']);
   for (const [nom, variantes] of [
     ['Attiéké poulet', null],
@@ -28,6 +33,9 @@ beforeAll(async () => {
     ['Doukounou (5 pièces)', null],
     ['Kilichi', null],
     ['Gâteau chocolat', null],
+    ['Double Burger', null],
+    ['Pain Poulet', null],
+    ['Brochettes de poulet', null],
   ] as const) {
     await db.query(
       'insert into products(id, merchant_id, name, price, search_aliases) values ($1, $2, $3, 1000, $4)',
@@ -73,6 +81,20 @@ describe('recherche tolérante aux fautes (0056)', () => {
       expect(page.items.map((i) => i.name), q).toContain(attendu);
       expect(page.match_type, q).toBe('exact');
     }
+  });
+
+  it('un mot juste, un mot de travers (0058)', async () => {
+    for (const [q, attendu] of [
+      ['doble burger', 'Double Burger'],
+      ['pan poulet', 'Pain Poulet'],
+      ['broshet poulet', 'Brochettes de poulet'],
+    ] as const) {
+      expect((await chercher(q)).items.map((i) => i.name), q).toContain(attendu);
+    }
+    // « bain » ne passe pas l'étape mot à mot (première lettre différente) :
+    // seul le dernier recours le rapproche de « pain », et le présente comme
+    // une SUGGESTION proche, jamais comme le produit demandé.
+    expect((await chercher('bain poulet')).match_type).toBe('similar');
   });
 
   it('bien écrit : inchangé, exact d’abord', async () => {

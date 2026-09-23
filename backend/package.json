@@ -30,12 +30,16 @@
     "corpus:generer": "tsx --env-file=.env scripts/corpus/generer.ts",
     "recherche:generer": "tsx --env-file=.env scripts/recherche/generer.ts",
     "recherche:banc": "tsx --env-file=.env scripts/recherche/banc.ts",
+    "jev:cloudflare": "tsx --env-file=.env scripts/jev/cloudflare.ts",
     "classifieur:banc": "tsx scripts/classifieur/banc.ts",
     "images:banc": "tsx --env-file=.env scripts/images/banc.ts",
     "recherche:variantes": "tsx --env-file=.env scripts/recherche/variantes.ts",
-    "staging:nettoyer": "tsx --env-file=.env.staging scripts/scenarios/nettoyer.ts"
+    "staging:nettoyer": "tsx --env-file=.env.staging scripts/scenarios/nettoyer.ts",
+    "classifieur:indexer": "tsx --env-file=.env scripts/classifieur/indexer.ts",
+    "classifieur:distiller": "tsx --env-file=.env scripts/classifieur/distiller.ts"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.0",
     "@sentry/node": "^10.69.0",
     "@supabase/supabase-js": "^2.45.0",
     "bullmq": "^6.0.5",
@@ -48,7 +52,6 @@
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "@electric-sql/pglite-pgvector": "^0.0.9",
-    "@huggingface/transformers": "^4.3.0",
     "@types/node": "^20.14.0",
     "pino-pretty": "^11.2.0",
     "sharp": "^0.35.4",

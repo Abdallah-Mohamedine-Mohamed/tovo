@@ -249,11 +249,18 @@ export function demandeGeneraleDeRepas(texte: string): boolean {
   return motsSpecifiques.length === 0;
 }
 
+/**
+ * Distance d'édition où deux lettres INVERSÉES comptent pour une seule faute
+ * (Damerau, variante « alignement optimal »). C'est la faute la plus
+ * fréquente au pouce sur un téléphone : « lina hcips », « petit marhce ».
+ * Comptée double, elle faisait échouer la reconnaissance de l'enseigne.
+ */
 function distanceLevenshtein(a: string, b: string): number {
   if (a === b) return 0;
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
 
+  let avantDerniere: number[] = [];
   let precedente = Array.from({ length: b.length + 1 }, (_, index) => index);
 
   for (let ligne = 1; ligne <= a.length; ligne++) {
@@ -265,7 +272,11 @@ function distanceLevenshtein(a: string, b: string): number {
         precedente[colonne]! + 1,
         precedente[colonne - 1]! + cout,
       );
+      if (ligne > 1 && colonne > 1 && a[ligne - 1] === b[colonne - 2] && a[ligne - 2] === b[colonne - 1]) {
+        courante[colonne] = Math.min(courante[colonne]!, avantDerniere[colonne - 2]! + 1);
+      }
     }
+    avantDerniere = precedente;
     precedente = courante;
   }
 
@@ -287,7 +298,11 @@ function scoreNomBoutique(saisi: string, catalogue: string): number {
     .replace(/(.)\1+/g, '$1');
   if (cible.length >= 5 && phonetique(cible) === phonetique(nomEnseigne)) return 0.97;
   if (nom.includes(cible)) return 0.99;
-  if (cible.includes(nom)) return 0.98;
+  // Le nom doit apparaître en MOTS ENTIERS dans ce que le client a écrit.
+  // Espaces retirés, « scenario tacos » devenait « scenariotacos », qui
+  // contient « otacos » — une variante légitime d'O'Takoss : l'enseigne
+  // demandée se retrouvait noyée parmi trois fausses correspondances.
+  if (` ${cibleNormalisee} `.includes(` ${nomNormalise} `)) return 0.98;
 
   let meilleur = 1 - distanceLevenshtein(cible, nom) / Math.max(cible.length, nom.length);
 

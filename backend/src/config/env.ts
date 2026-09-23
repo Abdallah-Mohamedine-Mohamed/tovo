@@ -71,10 +71,17 @@ const schema = z.object({
   // Au-dessus : Jev décide. En dessous : tuiles, ou chemin habituel.
   JEV_SEUIL: z.coerce.number().min(0).max(1).default(0.8),
   // Au-delà, on n'attend plus Jev : le message suit le chemin habituel.
-  // 2 500 ms : Jev tourne en parallèle de la préparation de la conversation,
-  // l'attente réelle ajoutée est bien moindre. À 1 500 ms, un appel sur
-  // quatre était abandonné depuis Niamey (scénarios du 23/09).
-  JEV_DELAI_MS: z.coerce.number().int().positive().default(2500),
+  // Budget de Jev. Dans la cascade, il n'est consulté que si le classifieur
+  // local hésite : au-delà de ce délai, on ne l'attend plus. Mesuré le
+  // 23/09 : 0,7 s de médiane certains moments, 4,9 s à d'autres.
+  JEV_DELAI_MS: z.coerce.number().int().positive().default(1200),
+
+  // Classifieur d'intentions LOCAL (ai/classifieur.ts) : première marche de
+  // la cascade, ~20 ms, sans réseau. Charge ~120 Mo de modèle au démarrage
+  // (en arrière-plan) et ~300 Mo de mémoire.
+  CLASSIFIEUR_LOCAL: z.enum(['0', '1']).default('0'),
+  // Au-dessus : il décide seul. Mesuré : ≥ 0,8 → 1 % d'erreur.
+  CLASSIFIEUR_SEUIL: z.coerce.number().min(0).max(1).default(0.8),
 
   REDIS_URL: z.string().optional(),
   SENTRY_DSN: z.string().optional(),

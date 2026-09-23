@@ -16,8 +16,14 @@ import { pipeline } from '@huggingface/transformers';
 import type { Intention } from '../../src/ai/jev.js';
 
 const MODELE = process.argv[2] ?? 'Xenova/multilingual-e5-small';
-// Les modèles e5 ont été entraînés avec ce préfixe ; les autres non.
-const PREFIXE = /e5/i.test(MODELE) ? 'query: ' : '';
+// Chaque famille a été entraînée avec sa propre forme d'entrée : e5 attend
+// « query: », Qwen3 une consigne suivie de « Query: » et la sortie du DERNIER
+// jeton (pas la moyenne).
+const QWEN = /qwen3/i.test(MODELE);
+const PREFIXE = QWEN
+  ? 'Instruct: Identifier ce que veut faire le client d’une application de livraison\nQuery: '
+  : /e5/i.test(MODELE) ? 'query: ' : '';
+const REGROUPEMENT = QWEN ? 'last_token' : 'mean';
 const K = 7;
 
 interface Ligne { texte: string; intention: Intention; registre: string }
@@ -42,7 +48,7 @@ async function vecteurs(textes: string[]): Promise<Float32Array[]> {
   const sortie: Float32Array[] = [];
   for (let i = 0; i < textes.length; i += 32) {
     const lot = textes.slice(i, i + 32).map((t) => PREFIXE + t);
-    const t = await extracteur(lot, { pooling: 'mean', normalize: true });
+    const t = await extracteur(lot, { pooling: REGROUPEMENT as 'mean', normalize: true });
     const [n, d] = t.dims as [number, number];
     for (let j = 0; j < n; j++) sortie.push((t.data as Float32Array).slice(j * d, (j + 1) * d));
   }

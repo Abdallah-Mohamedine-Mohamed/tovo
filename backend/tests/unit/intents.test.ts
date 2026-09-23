@@ -58,6 +58,19 @@ describe('intentions de catalogue', () => {
     expect(boutiquesCorrespondantes('restaurant inconnu', BOUTIQUES)).toEqual([]);
   });
 
+  it('un nom se reconnaît en mots entiers, pas collé à un autre', () => {
+    const avecVariante = [
+      { id: 'otakoss', name: 'O TACOS' },
+      { id: 'scenario', name: 'Scénario Tacos' },
+    ];
+    // « scenariotacos » contient « otacos » : ce n'était pas une raison.
+    expect(boutiquesCorrespondantes('scenario tacos', avecVariante).map((b) => b.id)).toEqual(['scenario']);
+  });
+
+  it('lettres inversées : une seule faute (« lina hcips »)', () => {
+    expect(boutiquesCorrespondantes('lina hcips', [{ id: 'lina', name: 'LINA CHIPS' }]).map((b) => b.id)).toEqual(['lina']);
+  });
+
   it('conserve toutes les agences portant la même enseigne', () => {
     expect(boutiquesCorrespondantes('otakoss', BOUTIQUES).map((b) => b.id)).toEqual([
       'otakoss-centre',

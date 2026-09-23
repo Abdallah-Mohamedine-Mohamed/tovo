@@ -71,11 +71,12 @@ describe('decider — la route selon la confiance de Jev', () => {
 
 function fausseBase() {
   const inserts: Array<Record<string, unknown>> = [];
-  const rpc = vi.fn(async (nom: string) => {
+  const rpc = vi.fn(async (nom: string, args?: Record<string, unknown>) => {
     if (nom === 'place_courier_order') return { data: COMMANDE, error: null };
     if (nom === 'order_tracking') return { data: { order_id: COMMANDE, type: 'courier', status: 'ready' }, error: null };
     if (nom === 'courier_city_offer') return { data: { price: 1000, callback_minutes: 7 }, error: null };
-    if (nom === 'catalog_products_page') {
+    // Trouvé exactement seulement pour « riz » : le reste du catalogue est vide.
+    if (nom === 'catalog_products_page' && String(args?.p_query ?? '').includes('riz')) {
       return {
         data: {
           items: [{ id: '55555555-5555-4555-8555-555555555555', name: 'Riz parfumé 5 kg', price: 4500, merchant_name: 'Épicerie', is_available: true }],
@@ -112,6 +113,7 @@ const envoyer = (app: Awaited<ReturnType<typeof appAvec>>, payload: Record<strin
 describe('POST /chat — aiguillage réel', () => {
   it('Jev comprend ce que les mots ratent : « une moto pour une course » commande un livreur', async () => {
     jev.decision = d('livreur', 0.94);
+    jev.actif = true;
     const db = fausseBase();
     const app = await appAvec(db);
     const res = await envoyer(app, { text: 'il me faut une moto pour une course' });
@@ -123,6 +125,7 @@ describe('POST /chat — aiguillage réel', () => {
 
   it('Jev hésite : tuiles, aucune commande passée', async () => {
     jev.decision = d('livreur', 0.55, { livreur: 0.55, suivi: 0.4 });
+    jev.actif = true;
     const db = fausseBase();
     const app = await appAvec(db);
     const res = await envoyer(app, { text: 'le livreur' });
@@ -145,6 +148,7 @@ describe('POST /chat — aiguillage réel', () => {
 
   it('Jev décide « suivi » : les mots ne transforment plus la phrase en recherche de livreur', async () => {
     jev.decision = d('suivi', 0.92);
+    jev.actif = true;
     const db = fausseBase();
     const app = await appAvec(db);
     generate.mockResolvedValue({ text: 'Je regarde votre commande.', toolCalls: [], usage: { input: 1, output: 1, cached: 0 } });

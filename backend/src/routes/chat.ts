@@ -19,7 +19,8 @@ import { chatStream } from '../lib/chatStream.js';
 import { consommer, messageLimite } from '../services/rateLimit.js';
 import { commanderUnLivreur } from '../services/livreur.js';
 import { ombreJev, type Intention } from '../ai/jev.js';
-import { aiguillageActif, consulterJev, decider, indication, intentionChoisie } from '../ai/aiguillage.js';
+import { decider, indication, intentionChoisie } from '../ai/aiguillage.js';
+import { aiguiller, cascadeActive } from '../ai/cascade.js';
 import { rechercheProduitRapide } from '../ai/orchestrator.js';
 import { cataloguePage, type CataloguePage } from '../services/catalogue.js';
 
@@ -309,14 +310,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Aiguillage (JEV_AIGUILLAGE=1) : lancé MAINTENANT, en parallèle de la
     // conversation et du contrôle d'idempotence, pour ne presque rien ajouter
     // au temps de réponse. Attendu plus bas ; `null` s'il est éteint ou lent.
-    const decisionJev = body.data.text ? consulterJev(body.data.text) : Promise.resolve(null);
+    const decisionCascade = body.data.text && cascadeActive()
+      ? aiguiller(body.data.text).catch(() => null)
+      : Promise.resolve(null);
 
     // Et la recherche catalogue EN MÊME TEMPS. « du riz », « coca » : si elle
     // trouve exactement, on répond sans attendre Jev — c'est le cas le plus
     // courant, et Jev y ajoutait près d'une seconde. Seulement pour une
     // recherche évidente (pas « annule », « le deuxième », « comme d'habitude »).
     const textePourRecherche = body.data.text ?? '';
-    const recherchePrealable = aiguillageActif() && textePourRecherche
+    const recherchePrealable = cascadeActive() && textePourRecherche
       && !referenceAuxResultats(textePourRecherche) && !demandeDeCommandePassee(textePourRecherche)
       && rechercheProduitRapide(textePourRecherche, requeteProduitUtilisateur(textePourRecherche))
       ? cataloguePage(db, { q: requeteProduitUtilisateur(textePourRecherche), limit: 8 }, false).catch(() => null)
@@ -434,18 +437,20 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     }
 
     if (!choisie && !pageInitiale && body.data.text) {
-      const route = decider(await decisionJev, body.data.text);
-      if (route.decision) {
+      const cascade = await decisionCascade;
+      const route = cascade?.route ?? decider(null, body.data.text);
+      if (cascade) {
+        const resume = (d: typeof cascade.local) => d && {
+          choix: d.choix, confiance: Number(d.confiance.toFixed(2)), ms: Math.round(d.ms),
+          ...(d.erreur ? { erreur: d.erreur } : {}),
+        };
         request.log.info({
           ref: body.data.client_message_id,
-          jev: {
-            choix: route.decision.choix,
-            confiance: Number(route.decision.confiance.toFixed(2)),
-            ms: Math.round(route.decision.ms),
-          },
+          source: cascade.source,
+          local: resume(cascade.local),
+          jev: resume(cascade.jev),
           route: route.type,
-          ...(route.decision.erreur ? { erreur: route.decision.erreur } : {}),
-        }, 'aiguillage jev');
+        }, 'aiguillage');
       }
       if (route.type === 'intention') intention = route.intention;
 
