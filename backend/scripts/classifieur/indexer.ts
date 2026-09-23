@@ -14,7 +14,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { pipeline } from '@huggingface/transformers';
-import { MODELE_CLASSIFIEUR, PREFIXE_CLASSIFIEUR } from '../../src/ai/classifieur.js';
+import { entrainerLogistique, MODELE_CLASSIFIEUR, predireLogistique, PREFIXE_CLASSIFIEUR } from '../../src/ai/classifieur.js';
 import type { Intention } from '../../src/ai/jev.js';
 
 const corpus = JSON.parse(readFileSync('scripts/corpus/corpus.json', 'utf8')) as Array<{ texte: string; intention: Intention }>;
@@ -41,3 +41,11 @@ writeFileSync('data/classifieur/etiquettes.json', JSON.stringify({
   intentions: corpus.map((l) => l.intention),
 }));
 console.log(`Index : ${corpus.length} phrases × ${dimension} → data/classifieur/ (${Math.round(vecteurs.length * 4 / 1024)} Ko)`);
+
+// L'arbitre du double accord : régression logistique sur les mêmes vecteurs.
+const debut = Date.now();
+const parPhrase = corpus.map((_, i) => Float32Array.from(vecteurs.slice(i * dimension, (i + 1) * dimension)));
+const arbitre = entrainerLogistique(parPhrase, corpus.map((l) => l.intention));
+writeFileSync('data/classifieur/logistique.json', JSON.stringify(arbitre));
+const accord = parPhrase.filter((v, i) => predireLogistique(arbitre, v) === corpus[i]!.intention).length;
+console.log(`Arbitre entraîné en ${Math.round((Date.now() - debut) / 1000)} s — ${Math.round((100 * accord) / corpus.length)} % de justesse sur ses propres phrases.`);

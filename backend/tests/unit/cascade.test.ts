@@ -11,7 +11,13 @@ vi.mock('../../src/config/env.js', async (original) => {
   return { ...reel, env: { ...reel.env, CLASSIFIEUR_LOCAL: '1', CLASSIFIEUR_SEUIL: 0.8, JEV_SEUIL: 0.8 } };
 });
 
-import { creerClassifieur, installerClassifieur } from '../../src/ai/classifieur.js';
+import {
+  creerClassifieur,
+  entrainerLogistique,
+  installerClassifieur,
+  predireLogistique,
+  type Logistique,
+} from '../../src/ai/classifieur.js';
 import { aiguiller } from '../../src/ai/cascade.js';
 
 afterEach(() => { installerClassifieur(null); jev.decision = null; jev.appels = 0; });
@@ -46,6 +52,34 @@ describe('classifieur local — le vote des plus proches voisins', () => {
     const d = await classifieur.classer('le livreur');
     expect(d.confiance).toBeLessThan(0.8);
     expect(Object.keys(d.probabilites)).toEqual(expect.arrayContaining(['livreur', 'suivi']));
+  });
+});
+
+describe('double accord', () => {
+  it('l’arbitre n’est pas d’accord : confiance nulle, le classifieur ne tranche pas seul', async () => {
+    // Un arbitre qui voit « suivi » partout, quelle que soit la phrase.
+    const arbitre: Logistique = {
+      echelle: 1,
+      classes: ['livreur', 'suivi'],
+      poids: [[0, 0, 0, 0], [0, 0, 0, 1]],
+    };
+    const avecArbitre = creerClassifieur(
+      vectoriser,
+      new Float32Array(index.flatMap(([v]) => [...normer(v)])),
+      index.map(([, i]) => i),
+      3,
+      arbitre,
+    );
+    const d = await avecArbitre.classer('il me faut une moto');
+    expect(d.choix).toBe('livreur');
+    expect(d.confiance).toBe(0);
+  });
+
+  it('l’arbitre apprend et reconnaît ses classes', () => {
+    const vecteurs = index.map(([v]) => normer(v));
+    const arbitre = entrainerLogistique(vecteurs, index.map(([, i]) => i), { tours: 300 });
+    expect(predireLogistique(arbitre, normer([1, 0.05, 0]))).toBe('livreur');
+    expect(predireLogistique(arbitre, normer([0.05, 1, 0]))).toBe('suivi');
   });
 });
 

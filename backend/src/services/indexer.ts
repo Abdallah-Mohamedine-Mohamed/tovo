@@ -127,10 +127,37 @@ async function indexerChacun(produits: ProduitAIndexer[]): Promise<IndexOutcome>
     ]),
   );
 
+  // Le texte DÉJÀ indexé de chaque produit. Tout changement d'une fiche la
+  // rend éligible (updated_at), même un prix, une disponibilité ou des
+  // variantes d'écriture — qui n'entrent pas dans l'embedding. Écrire les
+  // variantes de 949 noms a ainsi relancé un millier d'embeddings pour rien,
+  // jusqu'à épuiser le quota Google (429, 23/09).
+  const { data: deja } = await db
+    .from('products')
+    .select('id, embedding_source')
+    .in('id', produits.map((p) => p.id))
+    .not('embedding', 'is', null);
+  const sourceIndexee = new Map(
+    ((deja ?? []) as Array<{ id: string; embedding_source: string | null }>).map((p) => [p.id, p.embedding_source]),
+  );
+
   for (const produit of produits) {
     const texte = texteIndexable(produit);
 
     try {
+      // Texte identique à celui déjà indexé : l'embedding est à jour, on ne
+      // fait que le constater. (Au-delà de 500 caractères, la source gardée
+      // est tronquée : on ne peut pas conclure, on recalcule.)
+      if (texte.length <= 500 && sourceIndexee.get(produit.id) === texte) {
+        const { error: erreurDate } = await db
+          .from('products')
+          .update({ embedded_at: new Date().toISOString() })
+          .eq('id', produit.id);
+        if (erreurDate) throw erreurDate;
+        indexed++;
+        continue;
+      }
+
       const vecteur = await embed(texte, 'document');
 
       const { error: erreurEcriture } = await db

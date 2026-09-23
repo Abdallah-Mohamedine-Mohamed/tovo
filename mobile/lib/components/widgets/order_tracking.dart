@@ -7,24 +7,28 @@ import '../../core/theme.dart';
 import '../registry.dart';
 
 const List<String> _etapesCommandeVisibles = [
-  'Acceptée',
+  'Confirmée',
+  'En préparation',
   'Prête',
-  'En livraison',
+  'Récupérée',
+  'En route',
   'Livrée',
 ];
 
 const List<String> _etapesColisVisibles = [
+  'Recherche du livreur',
   'Livreur trouvé',
   'Colis récupéré',
-  'En livraison',
+  'En route',
   'Livré',
 ];
 
 int _etapeColisVisible(String statut) => switch (statut) {
-  'assigned' => 0,
-  'picked_up' => 1,
-  'delivering' => 2,
-  'delivered' => 3,
+  'pending' || 'confirmed' || 'ready' => 0,
+  'assigned' => 1,
+  'picked_up' => 2,
+  'delivering' => 3,
+  'delivered' => 4,
   _ => -1,
 };
 
@@ -35,14 +39,16 @@ int _etapeCommandeVisible(String statut) {
     case 'confirmed':
       return 0;
     case 'preparing':
+      return 1;
     case 'ready':
     case 'assigned':
-    case 'picked_up':
-      return 1;
-    case 'delivering':
       return 2;
-    case 'delivered':
+    case 'picked_up':
       return 3;
+    case 'delivering':
+      return 4;
+    case 'delivered':
+      return 5;
     default:
       return -1;
   }
@@ -202,6 +208,7 @@ class _OrderTrackingState extends State<OrderTracking>
   }
 
   void _desabonner() {
+    if (_canalCommande == null && _canalLivreur == null) return;
     final client = Supabase.instance.client;
     if (_canalCommande != null) client.removeChannel(_canalCommande!);
     if (_canalLivreur != null) client.removeChannel(_canalLivreur!);
@@ -221,6 +228,32 @@ class _OrderTrackingState extends State<OrderTracking>
     'cancelled': 'Annulée',
   };
 
+  String _description(bool colis) {
+    if (_statut == 'cancelled') return 'Cette commande ne sera pas livrée.';
+    if (colis) {
+      return switch (_statut) {
+        'pending' || 'confirmed' || 'ready' =>
+          'Nous cherchons un livreur pour prendre en charge votre colis.',
+        'assigned' => 'Votre livreur va récupérer le colis.',
+        'picked_up' => 'Le colis a été récupéré par votre livreur.',
+        'delivering' => 'Votre colis est en chemin vers sa destination.',
+        'delivered' => 'Votre colis est arrivé à destination.',
+        _ => 'Suivez votre livraison ici.',
+      };
+    }
+    return switch (_statut) {
+      'pending' => 'La boutique doit encore confirmer votre commande.',
+      'confirmed' => 'La boutique a accepté votre commande.',
+      'preparing' => 'La boutique prépare votre commande.',
+      'ready' => 'Votre commande attend qu’un livreur la récupère.',
+      'assigned' => 'Un livreur se rend à la boutique.',
+      'picked_up' => 'Le livreur a récupéré votre commande.',
+      'delivering' => 'Votre commande est en chemin vers vous.',
+      'delivered' => 'Votre commande vous a été remise.',
+      _ => 'Suivez votre commande ici.',
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final colis = widget.component.str('type', '') == 'courier';
@@ -235,133 +268,82 @@ class _OrderTrackingState extends State<OrderTracking>
     final annulable =
         _livreur == null &&
         const {'pending', 'confirmed', 'preparing', 'ready'}.contains(_statut);
-    final libelle = colis && (_statut == 'pending' || _statut == 'ready')
-        ? 'On vous trouve un livreur'
+    final libelle = colis
+        ? switch (_statut) {
+            'pending' || 'confirmed' || 'ready' => 'Recherche d’un livreur',
+            'assigned' => 'Livreur trouvé',
+            'picked_up' => 'Colis récupéré',
+            'delivering' => 'Colis en route',
+            'delivered' => 'Colis livré',
+            'cancelled' => 'Livraison annulée',
+            _ => _statut,
+          }
         : _libelles[_statut] ?? _statut;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-        boxShadow: TovoTheme.ombreFlottante,
-      ),
+    final details = [
+      if (widget.component.str('merchant_name').isNotEmpty)
+        widget.component.str('merchant_name'),
+      if (((widget.component.map('dropoff')['hint'] as String?) ?? '')
+          .isNotEmpty)
+        widget.component.map('dropoff')['hint'] as String,
+      if (widget.component.money('total') > 0)
+        Money.format(widget.component.money('total')),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 14),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 0),
-            child: Row(
+          Text(
+            colis ? 'Votre livraison' : 'Votre commande',
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: TovoTheme.inkDoux,
+            ),
+          ),
+          const SizedBox(height: 10),
+          AnimatedSwitcher(
+            duration: TovoTheme.normal,
+            child: Column(
+              key: ValueKey(_statut),
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'VOTRE COMMANDE',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.2,
-                          color: TovoTheme.inkDoux,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        libelle,
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
-                          color: annulee ? TovoTheme.danger : TovoTheme.ink,
-                        ),
-                      ),
-                    ],
+                Text(
+                  libelle,
+                  style: TextStyle(
+                    fontSize: 24,
+                    height: 1.2,
+                    fontWeight: FontWeight.w700,
+                    color: annulee ? TovoTheme.danger : TovoTheme.ink,
                   ),
                 ),
+                const SizedBox(height: 8),
                 Text(
-                  Money.format(widget.component.money('total')),
+                  _description(colis),
                   style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: TovoTheme.teal,
+                    fontSize: 15,
+                    height: 1.45,
+                    color: TovoTheme.inkDoux,
                   ),
                 ),
               ],
             ),
           ),
-          if (!annulee)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 22, 18, 4),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (var i = 0; i < etapes.length; i++)
-                    Expanded(
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              if (i > 0)
-                                Expanded(
-                                  child: AnimatedContainer(
-                                    duration: TovoTheme.normal,
-                                    height: 2,
-                                    color: i <= courante
-                                        ? TovoTheme.teal
-                                        : TovoTheme.line,
-                                  ),
-                                ),
-                              AnimatedContainer(
-                                duration: TovoTheme.normal,
-                                width: i == courante ? 22 : 18,
-                                height: i == courante ? 22 : 18,
-                                decoration: BoxDecoration(
-                                  color: i <= courante
-                                      ? TovoTheme.teal
-                                      : TovoTheme.line,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: i <= courante
-                                    ? const Icon(
-                                        Icons.check,
-                                        size: 12,
-                                        color: Colors.white,
-                                      )
-                                    : null,
-                              ),
-                              if (i < etapes.length - 1)
-                                Expanded(
-                                  child: AnimatedContainer(
-                                    duration: TovoTheme.normal,
-                                    height: 2,
-                                    color: i < courante
-                                        ? TovoTheme.teal
-                                        : TovoTheme.line,
-                                  ),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            etapes[i],
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: i == courante
-                                  ? FontWeight.w800
-                                  : FontWeight.w600,
-                              color: i <= courante
-                                  ? TovoTheme.teal
-                                  : TovoTheme.inkDoux,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
+          if (!annulee) ...[
+            const SizedBox(height: 28),
+            for (var index = 0; index < etapes.length; index++)
+              _EtapeSuivi(
+                libelle: etapes[index],
+                terminee: index < courante,
+                active: index == courante,
+                ligneTerminee: index < courante,
+                derniere: index == etapes.length - 1,
               ),
-            ),
-          if (_livreur != null)
+          ],
+          if (_livreur != null && !annulee) ...[
+            const SizedBox(height: 18),
             _BlocLivreur(
               livreur: _livreur!,
               positionRecue: _dernierePosition != null,
@@ -371,27 +353,33 @@ class _OrderTrackingState extends State<OrderTracking>
                 }),
               ),
             ),
-          if (annulable)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton(
-                  onPressed: () => widget.onInteraction(
-                    TovoInteraction('cancel_order', {'order_id': _orderId}),
-                  ),
-                  style: TextButton.styleFrom(
-                    foregroundColor: TovoTheme.inkDoux,
-                  ),
-                  child: const Text('Annuler'),
-                ),
+          ],
+          if (details.isNotEmpty) ...[
+            const SizedBox(height: 22),
+            Text(
+              details.join(' · '),
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.45,
+                color: TovoTheme.inkDoux,
               ),
             ),
-          // La notation apparaît au moment où elle a du sens, dans la carte
-          // que le client regarde déjà. Un écran séparé qu'il faudrait aller
-          // ouvrir ne serait jamais visité, et les boutiques resteraient
-          // toutes à 5,0 sans que personne ne l'ait décidé.
-          if (_statut == 'delivered')
+          ],
+          if (annulable) ...[
+            const SizedBox(height: 10),
+            TextButton(
+              onPressed: () => widget.onInteraction(
+                TovoInteraction('cancel_order', {'order_id': _orderId}),
+              ),
+              style: TextButton.styleFrom(
+                foregroundColor: TovoTheme.inkDoux,
+                padding: EdgeInsets.zero,
+              ),
+              child: const Text('Annuler la commande'),
+            ),
+          ],
+          if (_statut == 'delivered') ...[
+            const SizedBox(height: 22),
             _BlocNotation(
               noteDeposee: _note,
               onNoter: (note) {
@@ -404,25 +392,100 @@ class _OrderTrackingState extends State<OrderTracking>
                 );
               },
             ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _EtapeSuivi extends StatelessWidget {
+  const _EtapeSuivi({
+    required this.libelle,
+    required this.terminee,
+    required this.active,
+    required this.ligneTerminee,
+    required this.derniere,
+  });
+
+  final String libelle;
+  final bool terminee;
+  final bool active;
+  final bool ligneTerminee;
+  final bool derniere;
+
+  @override
+  Widget build(BuildContext context) {
+    final couleur = active
+        ? TovoTheme.teal
+        : terminee
+        ? TovoTheme.inkDoux
+        : TovoTheme.muted;
+
+    return SizedBox(
+      height: derniere ? 30 : 46,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 22,
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  widget.component.str('merchant_name'),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: TovoTheme.ink,
+                AnimatedContainer(
+                  duration: TovoTheme.normal,
+                  width: active ? 20 : 18,
+                  height: active ? 20 : 18,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: active ? TovoTheme.teal : Colors.transparent,
+                    border: Border.all(
+                      color: active || terminee
+                          ? TovoTheme.teal
+                          : TovoTheme.line,
+                      width: active ? 0 : 1.5,
+                    ),
                   ),
+                  child: terminee
+                      ? const Icon(Icons.check, size: 12, color: TovoTheme.teal)
+                      : active
+                      ? const Center(
+                          child: SizedBox(
+                            width: 5,
+                            height: 5,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        )
+                      : null,
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  (widget.component.map('dropoff')['hint'] as String?) ?? '',
-                  style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
-                ),
+                if (!derniere)
+                  Expanded(
+                    child: AnimatedContainer(
+                      duration: TovoTheme.normal,
+                      width: 1.5,
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      color: ligneTerminee ? TovoTheme.teal : TovoTheme.line,
+                    ),
+                  ),
               ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Text(
+                libelle,
+                style: TextStyle(
+                  fontSize: active ? 15 : 14,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                  color: couleur,
+                ),
+              ),
             ),
           ),
         ],
@@ -445,60 +508,52 @@ class _BlocNotation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: TovoTheme.surface,
-        borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
-      ),
-      child: noteDeposee != null
-          ? Row(
-              children: [
-                const Icon(
-                  Icons.favorite_rounded,
-                  size: 16,
-                  color: TovoTheme.teal,
+    return noteDeposee != null
+        ? Row(
+            children: [
+              const Icon(
+                Icons.favorite_outline,
+                size: 18,
+                color: TovoTheme.teal,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Merci, votre note est enregistrée.',
+                  style: const TextStyle(fontSize: 14, color: TovoTheme.ink),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Merci, votre note est enregistrée.',
-                    style: const TextStyle(fontSize: 12, color: TovoTheme.ink),
-                  ),
-                ),
-              ],
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Comment s’est passée cette commande ?',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    for (var etoile = 1; etoile <= 5; etoile++)
-                      IconButton(
-                        onPressed: () => onNoter(etoile),
-                        visualDensity: VisualDensity.compact,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 40,
-                          minHeight: 40,
-                        ),
-                        icon: const Icon(
-                          Icons.star_rounded,
-                          size: 26,
-                          color: TovoTheme.line,
-                        ),
+              ),
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Comment s’est passée cette commande ?',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  for (var etoile = 1; etoile <= 5; etoile++)
+                    IconButton(
+                      onPressed: () => onNoter(etoile),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 40,
+                        minHeight: 40,
                       ),
-                  ],
-                ),
-              ],
-            ),
-    );
+                      icon: const Icon(
+                        Icons.star_border_rounded,
+                        size: 25,
+                        color: TovoTheme.inkDoux,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          );
   }
 }
 
@@ -515,50 +570,39 @@ class _BlocLivreur extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: TovoTheme.surface,
-        borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
-      ),
-      child: Row(
-        children: [
-          const CircleAvatar(
-            radius: 18,
-            backgroundColor: TovoTheme.teal,
-            child: Icon(Icons.two_wheeler, size: 18, color: Colors.white),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  (livreur['name'] as String?) ?? 'Votre livreur',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
+    return Row(
+      children: [
+        const Icon(Icons.two_wheeler_outlined, size: 23, color: TovoTheme.ink),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                (livreur['name'] as String?) ?? 'Votre livreur',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
                 ),
-                Text(
-                  // La carte viendra avec l'intégration cartographique. En
-                  // attendant, dire simplement si la position arrive vaut
-                  // mieux qu'un cadre vide.
-                  positionRecue
-                      ? 'Position mise à jour'
-                      : 'En attente de position',
-                  style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
-                ),
-              ],
-            ),
+              ),
+              Text(
+                // La carte viendra avec l'intégration cartographique. En
+                // attendant, dire simplement si la position arrive vaut
+                // mieux qu'un cadre vide.
+                positionRecue
+                    ? 'Position mise à jour'
+                    : 'En attente de position',
+                style: const TextStyle(fontSize: 12, color: TovoTheme.inkDoux),
+              ),
+            ],
           ),
-          IconButton(
-            onPressed: onAppeler,
-            icon: const Icon(Icons.phone, color: TovoTheme.teal, size: 20),
-          ),
-        ],
-      ),
+        ),
+        IconButton(
+          onPressed: onAppeler,
+          tooltip: 'Appeler le livreur',
+          icon: const Icon(Icons.call_outlined, color: TovoTheme.ink, size: 21),
+        ),
+      ],
     );
   }
 }

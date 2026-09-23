@@ -28,6 +28,65 @@ const VOISINS = 7;
 
 export type Vectoriser = (texte: string) => Promise<Float32Array>;
 
+/**
+ * Seconde méthode, qui sert d'ARBITRE : une régression logistique entraînée
+ * sur les mêmes vecteurs. Seule, elle est trop sûre d'elle (3 à 8 % d'erreurs
+ * même à 0,99). Mais quand on exige qu'elle soit d'ACCORD avec le vote des
+ * voisins, leurs erreurs se compensent : au seuil 0,7, le classifieur décide
+ * seul 57 % des messages avec 1 % d'erreur, contre 45 % sans elle
+ * (scripts/classifieur/banc.ts --logistique --accord).
+ */
+export interface Logistique {
+  /** Amplification des vecteurs normés, sans laquelle le softmax n'ose pas trancher. */
+  echelle: number;
+  classes: Intention[];
+  /** Une ligne par classe : `dimension` poids, puis le biais. */
+  poids: number[][];
+}
+
+export function predireLogistique(l: Logistique, v: Float32Array): Intention {
+  let meilleur = 0;
+  let meilleurScore = -Infinity;
+  l.poids.forEach((w, k) => {
+    let s = w[w.length - 1]!;
+    for (let d = 0; d < w.length - 1; d++) s += w[d]! * v[d]! * l.echelle;
+    if (s > meilleurScore) { meilleurScore = s; meilleur = k; }
+  });
+  return l.classes[meilleur]!;
+}
+
+/** Entraînement (descente de gradient, softmax, régularisation L2). Hors ligne : indexer.ts. */
+export function entrainerLogistique(
+  vecteurs: Float32Array[],
+  intentions: Intention[],
+  options: { echelle?: number; l2?: number; pas?: number; tours?: number } = {},
+): Logistique {
+  const echelle = options.echelle ?? 20;
+  const l2 = options.l2 ?? 3e-3;
+  const pas = options.pas ?? 1;
+  const tours = options.tours ?? 1500;
+  const classes = [...new Set(intentions)];
+  const dim = vecteurs[0]?.length ?? 0;
+  const W = classes.map(() => new Float64Array(dim + 1));
+  const y = intentions.map((i) => classes.indexOf(i));
+  for (let t = 0; t < tours; t++) {
+    const grad = classes.map(() => new Float64Array(dim + 1));
+    vecteurs.forEach((x, i) => {
+      const z = W.map((w) => { let s = w[dim]!; for (let d = 0; d < dim; d++) s += w[d]! * x[d]! * echelle; return s; });
+      const m = Math.max(...z);
+      const e = z.map((v) => Math.exp(v - m));
+      const tot = e.reduce((a, b) => a + b, 0);
+      e.forEach((ek, k) => {
+        const g = ek / tot - (k === y[i] ? 1 : 0);
+        for (let d = 0; d < dim; d++) grad[k]![d]! += g * x[d]! * echelle;
+        grad[k]![dim]! += g;
+      });
+    });
+    W.forEach((w, k) => { for (let d = 0; d <= dim; d++) w[d]! -= pas * (grad[k]![d]! / vecteurs.length + (d < dim ? l2 * w[d]! : 0)); });
+  }
+  return { echelle, classes, poids: W.map((w) => [...w]) };
+}
+
 export interface Classifieur {
   classer(message: string): Promise<DecisionJev>;
 }
@@ -44,11 +103,24 @@ export function creerClassifieur(
   vecteurs: Float32Array,
   intentions: Intention[],
   dimension: number,
+  arbitre?: Logistique,
 ): Classifieur {
   return {
     async classer(message) {
       const debut = performance.now();
       const q = await vectoriser(message);
+      const decision = voter(q);
+      decision.ms = performance.now() - debut;
+      // Désaccord de l'arbitre : confiance nulle. Le classifieur ne tranche
+      // pas seul ; ses probabilités restent, pour proposer des tuiles.
+      if (arbitre && decision.choix && predireLogistique(arbitre, q) !== decision.choix) {
+        return { ...decision, confiance: 0 };
+      }
+      return decision;
+    },
+  };
+
+  function voter(q: Float32Array): DecisionJev {
       const meilleurs: Array<{ i: number; s: number }> = [];
       for (let i = 0; i < intentions.length; i++) {
         let s = 0;
@@ -70,11 +142,10 @@ export function creerClassifieur(
         choix: classes[0]?.[0] ?? null,
         confiance: (classes[0]?.[1] ?? 0) / total,
         probabilites: Object.fromEntries(classes.map(([k, v]) => [k, v / total])) as Partial<Record<Intention, number>>,
-        ms: performance.now() - debut,
+        ms: 0,
         cout: 0,
       };
-    },
-  };
+  }
 }
 
 // --- Chargement ------------------------------------------------------------
@@ -112,8 +183,16 @@ export function chargerClassifieur(journal?: (message: string, erreur?: unknown)
         return t.data as Float32Array;
       };
       await vectoriser('bonjour'); // échauffement : le premier passage est lent
-      etat = { etat: 'pret', classifieur: creerClassifieur(vectoriser, vecteurs, intentions, meta.dimension) };
-      journal?.(`classifieur local prêt en ${Math.round((Date.now() - debut) / 1000)} s (${intentions.length} phrases)`);
+      // L'arbitre est facultatif : un index construit avant lui fonctionne
+      // encore, simplement sans le double accord.
+      let arbitre: Logistique | undefined;
+      try {
+        arbitre = JSON.parse(readFileSync(join(dossier, 'logistique.json'), 'utf8')) as Logistique;
+      } catch {
+        arbitre = undefined;
+      }
+      etat = { etat: 'pret', classifieur: creerClassifieur(vectoriser, vecteurs, intentions, meta.dimension, arbitre) };
+      journal?.(`classifieur local prêt en ${Math.round((Date.now() - debut) / 1000)} s (${intentions.length} phrases${arbitre ? ', double accord' : ''})`);
     } catch (cause) {
       etat = { etat: 'echec', raison: cause instanceof Error ? cause.message : String(cause) };
       journal?.('classifieur local indisponible — la cascade continue sans lui', cause);

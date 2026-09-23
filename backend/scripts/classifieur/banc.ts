@@ -15,7 +15,11 @@ import { readFileSync } from 'node:fs';
 import { pipeline } from '@huggingface/transformers';
 import type { Intention } from '../../src/ai/jev.js';
 
-const MODELE = process.argv[2] ?? 'Xenova/multilingual-e5-small';
+// `--distille` : apprendre sur scripts/corpus/distille.json (corpus relu par
+// Jev + phrases qu'il a étiquetées) au lieu des 80 % du corpus. Le TEST reste
+// le même : les 20 % du corpus, absents de distille.json par construction.
+const avecDistille = process.argv.includes('--distille');
+const MODELE = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? 'Xenova/multilingual-e5-small';
 // Chaque famille a été entraînée avec sa propre forme d'entrée : e5 attend
 // « query: », Qwen3 une consigne suivie de « Query: » et la sortie du DERNIER
 // jeton (pas la moyenne).
@@ -37,6 +41,11 @@ for (const l of corpus) {
   const n = (vus.get(l.intention) ?? 0) + 1;
   vus.set(l.intention, n);
   (n % 5 === 0 ? test : entrainement).push(l);
+}
+if (avecDistille) {
+  entrainement.length = 0;
+  const distille = JSON.parse(readFileSync('scripts/corpus/distille.json', 'utf8')) as Array<{ texte: string; intention: Intention }>;
+  entrainement.push(...distille.map((d) => ({ texte: d.texte, intention: d.intention, registre: 'distille' })));
 }
 
 const memoireAvant = process.memoryUsage().rss;
@@ -61,7 +70,51 @@ const indexation = performance.now() - debut;
 
 const produit = (a: Float32Array, b: Float32Array) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i]! * b[i]!; return s; };
 
+// `--logistique` : au lieu du vote des voisins, une régression logistique
+// (softmax) entraînée sur les vecteurs d'apprentissage. Même coût à l'usage :
+// un produit matrice-vecteur.
+const avecLogistique = process.argv.includes('--logistique');
+const CLASSES = [...new Set(entrainement.map((l) => l.intention))];
+const DIM = base[0]?.length ?? 0;
+// Amplification : des vecteurs normés donnent des scores trop plats pour
+// que le softmax ose trancher.
+const ECHELLE = 20;
+const W = CLASSES.map(() => new Float32Array(DIM + 1));
+if (avecLogistique) {
+  const y = entrainement.map((l) => CLASSES.indexOf(l.intention));
+  const pas = 1, l2 = Number(process.env.L2 ?? 1e-4), tours = 1500;
+  for (let t = 0; t < tours; t++) {
+    const grad = CLASSES.map(() => new Float64Array(DIM + 1));
+    base.forEach((x, i) => {
+      const z = W.map((w) => { let s = w[DIM]!; for (let d = 0; d < DIM; d++) s += w[d]! * x[d]! * ECHELLE; return s; });
+      const m = Math.max(...z); const e = z.map((v) => Math.exp(v - m)); const tot = e.reduce((a, b) => a + b, 0);
+      e.forEach((ek, k) => { const g = ek / tot - (k === y[i] ? 1 : 0); for (let d = 0; d < DIM; d++) grad[k]![d]! += g * x[d]! * ECHELLE; grad[k]![DIM]! += g; });
+    });
+    W.forEach((w, k) => { for (let d = 0; d <= DIM; d++) w[d]! -= pas * (grad[k]![d]! / base.length + (d < DIM ? l2 * w[d]! : 0)); });
+  }
+}
+
+function classerLogistique(v: Float32Array): { choix: Intention; confiance: number } {
+  const z = W.map((w) => { let s = w[DIM]!; for (let d = 0; d < DIM; d++) s += w[d]! * v[d]! * ECHELLE; return s; });
+  const m = Math.max(...z); const e = z.map((x) => Math.exp(x - m)); const tot = e.reduce((a, b) => a + b, 0);
+  const k = e.indexOf(Math.max(...e));
+  return { choix: CLASSES[k]!, confiance: e[k]! / tot };
+}
+
+// `--accord` (avec --logistique) : la confiance des voisins, mais mise à zéro
+// quand la régression logistique n'est pas d'accord sur l'intention.
+const avecAccord = process.argv.includes('--accord');
+
 function classer(v: Float32Array): { choix: Intention; confiance: number } {
+  if (avecAccord) {
+    const voisins = classerVoisins(v);
+    return classerLogistique(v).choix === voisins.choix ? voisins : { ...voisins, confiance: 0 };
+  }
+  if (avecLogistique) return classerLogistique(v);
+  return classerVoisins(v);
+}
+
+function classerVoisins(v: Float32Array): { choix: Intention; confiance: number } {
   const voisins = base.map((b, i) => ({ i, s: produit(v, b) })).sort((a, b) => b.s - a.s).slice(0, K);
   const votes = new Map<Intention, number>();
   for (const { i, s } of voisins) votes.set(entrainement[i]!.intention, (votes.get(entrainement[i]!.intention) ?? 0) + Math.max(s, 0) ** 4);
@@ -87,7 +140,7 @@ const pct = (a: number, b: number) => (b ? `${Math.round((100 * a) / b)} %` : '�
 const justes = resultats.filter((r) => r.choix === r.intention).length;
 console.log(`\n=== ${MODELE} — ${entrainement.length} phrases apprises, ${test.length} testées (jamais vues) ===`);
 console.log(`Précision brute : ${pct(justes, test.length)}`);
-for (const seuil of [0.6, 0.7, 0.8, 0.9]) {
+for (const seuil of [0.6, 0.7, 0.8, 0.9, 0.95, 0.98, 0.99]) {
   const surs = resultats.filter((r) => r.confiance >= seuil);
   const faux = surs.filter((r) => r.choix !== r.intention).length;
   console.log(`Confiance ≥ ${seuil} : décide seul ${pct(surs.length, test.length).padStart(5)} · justes ${pct(surs.length - faux, test.length).padStart(5)} · MAUVAISES servies ${pct(faux, test.length).padStart(5)}`);

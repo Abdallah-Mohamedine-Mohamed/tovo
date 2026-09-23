@@ -80,8 +80,10 @@ const schema = z.object({
   // la cascade, ~20 ms, sans réseau. Charge ~120 Mo de modèle au démarrage
   // (en arrière-plan) et ~300 Mo de mémoire.
   CLASSIFIEUR_LOCAL: z.enum(['0', '1']).default('0'),
-  // Au-dessus : il décide seul. Mesuré : ≥ 0,8 → 1 % d'erreur.
-  CLASSIFIEUR_SEUIL: z.coerce.number().min(0).max(1).default(0.8),
+  // Au-dessus : il décide seul. Mesuré avec le double accord (voisins +
+  // régression logistique d'accord) : ≥ 0,7 → 57 % des messages, 1 %
+  // d'erreur. Sans l'arbitre (index ancien), préférer 0,8.
+  CLASSIFIEUR_SEUIL: z.coerce.number().min(0).max(1).default(0.7),
 
   REDIS_URL: z.string().optional(),
   SENTRY_DSN: z.string().optional(),
