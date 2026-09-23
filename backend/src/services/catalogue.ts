@@ -160,7 +160,28 @@ function retrouver(trouvees: MerchantRow[], catalogue: MerchantRow[]): MerchantR
   return ids.flatMap((id) => catalogue.filter((m) => m.id === id).slice(0, 1));
 }
 
-export async function resolveCatalogueIntent(db: SupabaseClient, message: string, pending?: PendingMerchantChoice): Promise<CatalogueIntent> {
+/**
+ * Les enseignes approuvées, gardées en mémoire quelques instants.
+ *
+ * Elles étaient relues en entier depuis la base à CHAQUE message — un aller-
+ * retour réseau sur le chemin de toutes les réponses, pour une liste qui
+ * change quelques fois par jour. Données publiques (identiques pour tous les
+ * clients) : les partager entre requêtes ne révèle rien.
+ *
+ * 30 s de fraîcheur : une enseigne qui ouvre ou ferme le voit au plus tard
+ * trente secondes après ; `is_open` n'y décide de toute façon rien seul
+ * (merchant_open_now fait foi au moment de chercher).
+ */
+const ENSEIGNES_TTL_MS = 30_000;
+let enseignesEnCache: { quand: number; liste: Array<MerchantRow & { search_aliases?: string | null }> } | null = null;
+
+/** Réservé aux tests : oublie la liste gardée en mémoire. */
+export function oublierEnseignes(): void {
+  enseignesEnCache = null;
+}
+
+async function enseignesApprouvees(db: SupabaseClient): Promise<Array<MerchantRow & { search_aliases?: string | null }>> {
+  if (enseignesEnCache && Date.now() - enseignesEnCache.quand < ENSEIGNES_TTL_MS) return enseignesEnCache.liste;
   const catalogue: Array<MerchantRow & { search_aliases?: string | null }> = [];
   // Avec les variantes si la migration 0056 est passée, sans sinon : la
   // reconnaissance des enseignes ne doit jamais tomber pour une colonne.
@@ -174,6 +195,12 @@ export async function resolveCatalogueIntent(db: SupabaseClient, message: string
     catalogue.push(...(data ?? []) as unknown as MerchantRow[]);
     if ((data?.length ?? 0) < 500) break;
   }
+  enseignesEnCache = { quand: Date.now(), liste: catalogue };
+  return catalogue;
+}
+
+export async function resolveCatalogueIntent(db: SupabaseClient, message: string, pending?: PendingMerchantChoice): Promise<CatalogueIntent> {
+  const catalogue = await enseignesApprouvees(db);
   const variantes = avecVariantes(catalogue);
   const marker = nomBoutiqueApresMarqueur(message);
   const openOnly = demandeBoutiqueOuverte(message);

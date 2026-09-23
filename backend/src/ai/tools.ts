@@ -391,14 +391,42 @@ const rechercherParImage: Executor = async (args, ctx) => {
     return { summary: { erreur: 'image introuvable' }, components: [] };
   }
 
+  const octets = Buffer.from(await fichier.arrayBuffer());
+  return (await chercherParPhoto(octets, fichier.type || 'image/jpeg', indication, ctx, pos)).resultat;
+};
+
+/** Durées de chaque étape d'une recherche par photo, en ms. */
+export interface EtapesPhoto { vision_ms: number; empreinte_ms: number; recherche_ms: number; voie: 'visuel' | 'mots-cles' | 'echec' }
+
+/**
+ * Le cœur de la recherche par photo, séparé du téléchargement : le banc
+ * (scripts/images/banc.ts) l'appelle avec des photos locales et en mesure
+ * chaque étape.
+ */
+export async function chercherParPhoto(
+  octets: Buffer,
+  mime: string,
+  indication: string,
+  ctx: ToolContext,
+  pos?: { lat: number; lng: number } | null,
+): Promise<{ resultat: Awaited<ReturnType<Executor>>; etapes: EtapesPhoto }> {
+  const etapes: EtapesPhoto = { vision_ms: 0, empreinte_ms: 0, recherche_ms: 0, voie: 'echec' };
+  const chrono = (cle: 'vision_ms' | 'empreinte_ms') => <T>(p: Promise<T>) => {
+    const debut = performance.now();
+    return p.finally(() => { etapes[cle] = Math.round(performance.now() - debut); });
+  };
   let motsCles = '';
   let erreurVision: string | undefined;
-  const octets = Buffer.from(await fichier.arrayBuffer());
-  const mime = fichier.type || 'image/jpeg';
   const [description, embedding] = await Promise.allSettled([
-    decrireImageDepuisOctets(octets, mime, indication),
-    embedImage(octets, mime),
+    chrono('vision_ms')(decrireImageDepuisOctets(octets, mime, indication)),
+    chrono('empreinte_ms')(embedImage(octets, mime)),
   ]);
+  const debutRecherche = performance.now();
+  const fin = (resultat: Awaited<ReturnType<Executor>>, voie: EtapesPhoto['voie']) => {
+    etapes.recherche_ms = Math.round(performance.now() - debutRecherche);
+    etapes.voie = voie;
+    return { resultat, etapes };
+  };
 
   if (description.status === 'fulfilled') {
     motsCles = description.value.trim();
@@ -426,7 +454,7 @@ const rechercherParImage: Executor = async (args, ctx) => {
 
       if (produits.length > 0) {
         const meilleur = Number((data as Record<string, unknown>[])[0]?.['score'] ?? 0);
-        return {
+        return fin({
           content: 'Voici les articles qui correspondent à votre photo.',
           summary: {
             recherche: 'par ressemblance visuelle',
@@ -440,7 +468,7 @@ const rechercherParImage: Executor = async (args, ctx) => {
             produits: produits.map(resumeProduit),
           },
           components: [productCarousel(produits, 'Ce qui ressemble à votre photo')],
-        };
+        }, 'visuel');
       }
     } catch {
       // Le visuel a échoué — image illisible, API indisponible. On ne
@@ -450,20 +478,16 @@ const rechercherParImage: Executor = async (args, ctx) => {
   }
 
   if (!motsCles) {
-    return {
+    return fin({
       content: "Je n'arrive pas à identifier clairement ce produit sur la photo.",
       summary: { erreur: erreurVision ?? 'image illisible' },
       components: [],
-    };
-  }
-
-  if (motsCles === '') {
-    return { summary: { recherche: 'par image', resultats: 0 }, components: [] };
+    }, 'echec');
   }
 
   const produits = await chercherEnRaccourcissant(ctx, motsCles);
 
-  return {
+  return fin({
     content: produits.length > 0
       ? 'Voici les articles qui correspondent à votre photo.'
       : `Je reconnais **${motsCles}**, mais aucun article correspondant n'est disponible sur Tovo.`,
@@ -478,8 +502,8 @@ const rechercherParImage: Executor = async (args, ctx) => {
     },
     components:
       produits.length > 0 ? [productCarousel(produits, motsCles)] : [],
-  };
-};
+  }, produits.length > 0 ? 'mots-cles' : 'echec');
+}
 
 /**
  * Cherche, puis retire un mot et recommence.

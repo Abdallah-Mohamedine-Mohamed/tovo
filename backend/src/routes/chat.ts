@@ -5,14 +5,23 @@ import { envelope } from '../components/builders.js';
 import { ChatUnavailableError, orchestrate } from '../ai/orchestrator.js';
 import { LlmUnavailableError, llmEnabled } from '../ai/llmClient.js';
 import { EXECUTORS } from '../ai/tools.js';
-import { demandeGeneraleDeRepas, demandeUnColis, demandeUnLivreur } from '../ai/intents.js';
+import {
+  demandeDeCommandePassee,
+  demandeGeneraleDeRepas,
+  demandeUnColis,
+  demandeUnLivreur,
+  referenceAuxResultats,
+  requeteProduitUtilisateur,
+} from '../ai/intents.js';
 import { signaler } from '../lib/observability.js';
 import { transcribe } from '../services/transcription.js';
 import { chatStream } from '../lib/chatStream.js';
 import { consommer, messageLimite } from '../services/rateLimit.js';
 import { commanderUnLivreur } from '../services/livreur.js';
 import { ombreJev, type Intention } from '../ai/jev.js';
-import { consulterJev, decider, indication, intentionChoisie } from '../ai/aiguillage.js';
+import { aiguillageActif, consulterJev, decider, indication, intentionChoisie } from '../ai/aiguillage.js';
+import { rechercheProduitRapide } from '../ai/orchestrator.js';
+import { cataloguePage, type CataloguePage } from '../services/catalogue.js';
 
 /**
  * POST /chat — le fil conversationnel.
@@ -302,6 +311,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // au temps de réponse. Attendu plus bas ; `null` s'il est éteint ou lent.
     const decisionJev = body.data.text ? consulterJev(body.data.text) : Promise.resolve(null);
 
+    // Et la recherche catalogue EN MÊME TEMPS. « du riz », « coca » : si elle
+    // trouve exactement, on répond sans attendre Jev — c'est le cas le plus
+    // courant, et Jev y ajoutait près d'une seconde. Seulement pour une
+    // recherche évidente (pas « annule », « le deuxième », « comme d'habitude »).
+    const textePourRecherche = body.data.text ?? '';
+    const recherchePrealable = aiguillageActif() && textePourRecherche
+      && !referenceAuxResultats(textePourRecherche) && !demandeDeCommandePassee(textePourRecherche)
+      && rechercheProduitRapide(textePourRecherche, requeteProduitUtilisateur(textePourRecherche))
+      ? cataloguePage(db, { q: requeteProduitUtilisateur(textePourRecherche), limit: 8 }, false).catch(() => null)
+      : Promise.resolve(null);
+
     const output = chatStream(reply, streaming);
     const started = performance.now();
     let firstResultMs: number | undefined;
@@ -403,8 +423,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       ?? (body.data.interaction ? libelleLisible(body.data.interaction.action, body.data.interaction.payload) : null)
       ?? message;
     let intention: Intention | 'modele' | undefined = choisie?.intention;
+    let pageInitiale: CataloguePage | undefined;
 
-    if (!choisie && body.data.text) {
+    // Produit trouvé exactement : la route est évidente, Jev n'est pas attendu.
+    const prealable = choisie ? null : await recherchePrealable;
+    if (prealable && prealable.match_type === 'exact' && prealable.total > 0) {
+      intention = 'recherche';
+      pageInitiale = prealable;
+      request.log.info({ ref: body.data.client_message_id }, 'recherche exacte : réponse sans attendre Jev');
+    }
+
+    if (!choisie && !pageInitiale && body.data.text) {
       const route = decider(await decisionJev, body.data.text);
       if (route.decision) {
         request.log.info({
@@ -603,6 +632,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         conversationId,
         message: messageModele,
         ...(intention ? { intention } : {}),
+        ...(pageInitiale ? { pageInitiale } : {}),
         ...(messagePublic ? { messagePublic } : {}),
         clientMessageId: body.data.client_message_id,
         ...(body.data.audio ? { audio: body.data.audio } : {}),

@@ -12,10 +12,12 @@ vi.mock('../../src/ai/llmClient.js', () => ({
 vi.mock('../../src/services/dispatch.js', () => ({ queueDispatch: vi.fn(async () => undefined) }));
 
 // Jev simulé : la décision est fixée par chaque test.
-const jev = vi.hoisted(() => ({ decision: null as DecisionJev | null }));
+const jev = vi.hoisted(() => ({ decision: null as DecisionJev | null, actif: false, muet: false }));
 vi.mock('../../src/ai/aiguillage.js', async (original) => ({
   ...(await original<typeof import('../../src/ai/aiguillage.js')>()),
-  consulterJev: vi.fn(async () => jev.decision),
+  aiguillageActif: vi.fn(() => jev.actif),
+  // `muet` : Jev ne répond jamais — la réponse ne doit pas l'attendre.
+  consulterJev: vi.fn(() => (jev.muet ? new Promise(() => undefined) : Promise.resolve(jev.decision))),
 }));
 
 import { decider, intentionChoisie } from '../../src/ai/aiguillage.js';
@@ -26,7 +28,7 @@ const NIAMEY = { lat: 13.5137, lng: 2.1098 };
 const d = (choix: DecisionJev['choix'], confiance: number, probabilites: DecisionJev['probabilites'] = {}): DecisionJev =>
   ({ choix, confiance, probabilites, ms: 300, cout: 0 });
 
-afterEach(() => { vi.clearAllMocks(); jev.decision = null; });
+afterEach(() => { vi.clearAllMocks(); jev.decision = null; jev.actif = false; jev.muet = false; });
 
 describe('decider — la route selon la confiance de Jev', () => {
   it('sûr : Jev décide', () => {
@@ -73,6 +75,15 @@ function fausseBase() {
     if (nom === 'place_courier_order') return { data: COMMANDE, error: null };
     if (nom === 'order_tracking') return { data: { order_id: COMMANDE, type: 'courier', status: 'ready' }, error: null };
     if (nom === 'courier_city_offer') return { data: { price: 1000, callback_minutes: 7 }, error: null };
+    if (nom === 'catalog_products_page') {
+      return {
+        data: {
+          items: [{ id: '55555555-5555-4555-8555-555555555555', name: 'Riz parfumé 5 kg', price: 4500, merchant_name: 'Épicerie', is_available: true }],
+          total: 1, offset: 0, next_offset: null, match_type: 'exact',
+        },
+        error: null,
+      };
+    }
     return { data: null, error: null };
   });
   const chaine = (table: string): unknown => new Proxy(() => undefined, {
@@ -141,6 +152,19 @@ describe('POST /chat — aiguillage réel', () => {
     expect(db.rpc).not.toHaveBeenCalledWith('place_courier_order', expect.anything());
     const historique = JSON.stringify(generate.mock.calls[0]?.[0]);
     expect(historique).toContain('[Aiguillage : le client demande où en est sa commande');
+    await app.close();
+  });
+
+  it('produit trouvé exactement : réponse SANS attendre Jev (ici, muet)', async () => {
+    jev.actif = true;
+    jev.muet = true;
+    const db = fausseBase();
+    const app = await appAvec(db);
+    const res = await envoyer(app, { text: 'du riz' });
+    expect(res.json().components[0].type).toBe('product_carousel');
+    expect(generate).not.toHaveBeenCalled();
+    // Une seule recherche : celle faite en parallèle est réutilisée.
+    expect(db.rpc.mock.calls.filter(([nom]) => nom === 'catalog_products_page')).toHaveLength(1);
     await app.close();
   });
 

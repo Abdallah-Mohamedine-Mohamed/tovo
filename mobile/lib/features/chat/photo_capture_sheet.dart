@@ -5,8 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../../core/theme.dart';
-
 class PhotoCaptureSheet extends StatefulWidget {
   const PhotoCaptureSheet({super.key});
 
@@ -20,6 +18,8 @@ class _PhotoCaptureSheetState extends State<PhotoCaptureSheet>
   List<CameraDescription> _cameras = const [];
   int _generation = 0;
   bool _capturing = false;
+  bool _openingGallery = false;
+  CameraLensDirection _lens = CameraLensDirection.back;
   String? _error;
 
   @override
@@ -37,7 +37,7 @@ class _PhotoCaptureSheetState extends State<PhotoCaptureSheet>
       _controller = null;
       if (controller != null) unawaited(controller.dispose());
     } else if (state == AppLifecycleState.resumed && _controller == null) {
-      unawaited(_ouvrirCamera());
+      unawaited(_ouvrirCamera(_lens));
     }
   }
 
@@ -72,6 +72,7 @@ class _PhotoCaptureSheetState extends State<PhotoCaptureSheet>
       setState(() {
         _cameras = cameras;
         _controller = next;
+        _lens = camera.lensDirection;
       });
     } on CameraException catch (error) {
       if (next != null) await next.dispose();
@@ -110,6 +111,8 @@ class _PhotoCaptureSheetState extends State<PhotoCaptureSheet>
   }
 
   Future<void> _ouvrirGalerie() async {
+    if (_openingGallery) return;
+    setState(() => _openingGallery = true);
     try {
       final photo = await ImagePicker().pickImage(
         source: ImageSource.gallery,
@@ -119,6 +122,8 @@ class _PhotoCaptureSheetState extends State<PhotoCaptureSheet>
       if (mounted && photo != null) Navigator.of(context).pop(photo);
     } on Exception {
       if (mounted) setState(() => _error = 'Impossible d’ouvrir les photos.');
+    } finally {
+      if (mounted) setState(() => _openingGallery = false);
     }
   }
 
@@ -135,6 +140,7 @@ class _PhotoCaptureSheetState extends State<PhotoCaptureSheet>
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final controller = _controller;
+    final ready = controller != null && controller.value.isInitialized;
     final hasFront = _cameras.any(
       (camera) => camera.lensDirection == CameraLensDirection.front,
     );
@@ -142,163 +148,200 @@ class _PhotoCaptureSheetState extends State<PhotoCaptureSheet>
       (camera) => camera.lensDirection == CameraLensDirection.back,
     );
 
-    return Container(
-      height: size.height * 0.62,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: Column(
-            children: [
-              Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: TovoTheme.line,
-                  borderRadius: BorderRadius.circular(4),
-                ),
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: Container(
+          height: size.height * 0.78,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x33000000),
+                blurRadius: 28,
+                offset: Offset(0, 8),
               ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Rechercher par photo',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(28),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ColoredBox(
+                  color: const Color(0xFF191919),
+                  child: ready
+                      ? CameraPreview(controller)
+                      : const SizedBox.expand(),
+                ),
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Color(0x66000000),
+                        Colors.transparent,
+                        Colors.transparent,
+                        Color(0xB3000000),
+                      ],
+                      stops: [0, 0.22, 0.55, 1],
+                    ),
+                  ),
+                ),
+                if (!ready)
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 28),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _error ?? 'Ouverture de la caméra…',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          if (_error != null)
+                            TextButton(
+                              onPressed: () => unawaited(_ouvrirCamera(_lens)),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.white,
+                              ),
+                              child: const Text('Réessayer'),
+                            ),
+                        ],
                       ),
                     ),
                   ),
-                  IconButton(
+                if (_capturing) const ColoredBox(color: Color(0x44FFFFFF)),
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  child: IconButton(
                     tooltip: 'Fermer',
                     onPressed: () => Navigator.of(context).pop(),
+                    style: IconButton.styleFrom(
+                      backgroundColor: const Color(0x55000000),
+                      foregroundColor: Colors.white,
+                    ),
                     icon: const Icon(Icons.close_rounded),
                   ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(22),
-                  child: Stack(
-                    fit: StackFit.expand,
+                ),
+                if (_error != null && ready)
+                  Positioned(
+                    top: 66,
+                    left: 24,
+                    right: 24,
+                    child: Text(
+                      _error!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ),
+                Positioned(
+                  left: 8,
+                  right: 8,
+                  bottom: 104,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      ColoredBox(
-                        color: TovoTheme.ink,
-                        child:
-                            controller == null ||
-                                !controller.value.isInitialized
-                            ? Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(28),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        _error ?? 'Ouverture de la caméra…',
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                      if (_error != null)
-                                        TextButton(
-                                          onPressed: () =>
-                                              unawaited(_ouvrirCamera()),
-                                          child: const Text('Réessayer'),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              )
-                            : CameraPreview(controller),
+                      _mode(
+                        'Objet',
+                        selected: _lens == CameraLensDirection.back,
+                        enabled: ready && hasBack && !_capturing,
+                        onPressed: () {
+                          if (_lens != CameraLensDirection.back) {
+                            unawaited(_ouvrirCamera(CameraLensDirection.back));
+                          }
+                        },
                       ),
-                      if (controller != null && controller.value.isInitialized)
-                        const PhotoScanOverlay(),
-                      if (_capturing)
-                        const ColoredBox(color: Color(0x66FFFFFF)),
+                      _mode(
+                        'Selfie',
+                        selected: _lens == CameraLensDirection.front,
+                        enabled: ready && hasFront && !_capturing,
+                        onPressed: () {
+                          if (_lens != CameraLensDirection.front) {
+                            unawaited(_ouvrirCamera(CameraLensDirection.front));
+                          }
+                        },
+                      ),
+                      _mode(
+                        'Images',
+                        enabled: !_capturing && !_openingGallery,
+                        onPressed: _ouvrirGalerie,
+                      ),
                     ],
                   ),
                 ),
-              ),
-              if (_error != null && controller != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    _error!,
-                    style: const TextStyle(color: TovoTheme.danger),
-                  ),
-                ),
-              const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  IconButton.filledTonal(
-                    tooltip: 'Choisir une photo',
-                    onPressed: _capturing ? null : _ouvrirGalerie,
-                    icon: const Icon(Icons.photo_library_outlined),
-                  ),
-                  Semantics(
-                    label: 'Prendre une photo',
-                    button: true,
-                    child: GestureDetector(
-                      onTap: controller == null || _capturing
-                          ? null
-                          : _prendrePhoto,
-                      child: Container(
-                        width: 68,
-                        height: 68,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: controller == null
-                              ? TovoTheme.line
-                              : TovoTheme.teal,
-                          border: Border.all(color: Colors.white, width: 4),
-                          boxShadow: TovoTheme.ombreFlottante,
-                        ),
-                        child: const Icon(
-                          Icons.camera_alt_rounded,
-                          color: Colors.white,
+                Positioned(
+                  bottom: 20,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: Semantics(
+                      label: 'Prendre une photo',
+                      button: true,
+                      enabled: ready && !_capturing,
+                      child: GestureDetector(
+                        onTap: ready && !_capturing ? _prendrePhoto : null,
+                        child: Container(
+                          width: 70,
+                          height: 70,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: ready ? Colors.white : Colors.white54,
+                              width: 3,
+                            ),
+                          ),
+                          child: Container(
+                            width: 56,
+                            height: 56,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: ready ? Colors.white : Colors.white54,
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  IconButton.filledTonal(
-                    tooltip: 'Changer de caméra',
-                    onPressed:
-                        _capturing ||
-                            !hasFront ||
-                            !hasBack ||
-                            controller == null
-                        ? null
-                        : () => unawaited(
-                            _ouvrirCamera(
-                              controller.description.lensDirection ==
-                                      CameraLensDirection.back
-                                  ? CameraLensDirection.front
-                                  : CameraLensDirection.back,
-                            ),
-                          ),
-                    icon: const Icon(Icons.cameraswitch_outlined),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Cadrez l’objet. La photo rejoindra votre message.',
-                style: TextStyle(fontSize: 12, color: TovoTheme.muted),
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+
+  Widget _mode(
+    String label, {
+    bool selected = false,
+    required bool enabled,
+    required VoidCallback onPressed,
+  }) => Expanded(
+    child: TextButton(
+      onPressed: enabled ? onPressed : null,
+      style: TextButton.styleFrom(
+        foregroundColor: Colors.white,
+        disabledForegroundColor: Colors.white54,
+        minimumSize: Size.zero,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          decoration: selected ? TextDecoration.underline : null,
+          decorationColor: Colors.white,
+        ),
+      ),
+    ),
+  );
 }
 
 class PhotoScanOverlay extends StatefulWidget {

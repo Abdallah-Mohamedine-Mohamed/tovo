@@ -1,0 +1,100 @@
+/**
+ * Classifieur d'intentions LOCAL : un petit modèle d'embeddings multilingue
+ * qui tourne dans le processus Node, sans appel réseau, plus un vote des plus
+ * proches voisins parmi les phrases étiquetées du corpus.
+ *
+ *   npm run classifieur:banc                       → modèle par défaut
+ *   npm run classifieur:banc -- Xenova/paraphrase-multilingual-MiniLM-L12-v2
+ *
+ * Mesure honnête : apprentissage sur 80 % du corpus, test sur les 20 % jamais
+ * vus (répartition fixe par intention). Rapporte la précision, ce qui serait
+ * servi faux au-dessus d'un seuil de confiance, la vitesse d'un message et la
+ * mémoire consommée. Ne touche ni à la base ni à l'application.
+ */
+import { readFileSync } from 'node:fs';
+import { pipeline } from '@huggingface/transformers';
+import type { Intention } from '../../src/ai/jev.js';
+
+const MODELE = process.argv[2] ?? 'Xenova/multilingual-e5-small';
+// Les modèles e5 ont été entraînés avec ce préfixe ; les autres non.
+const PREFIXE = /e5/i.test(MODELE) ? 'query: ' : '';
+const K = 7;
+
+interface Ligne { texte: string; intention: Intention; registre: string }
+const corpus = JSON.parse(readFileSync('scripts/corpus/corpus.json', 'utf8')) as Ligne[];
+
+// Répartition fixe et stratifiée : 1 phrase sur 5 de chaque intention en test.
+const vus = new Map<string, number>();
+const entrainement: Ligne[] = [];
+const test: Ligne[] = [];
+for (const l of corpus) {
+  const n = (vus.get(l.intention) ?? 0) + 1;
+  vus.set(l.intention, n);
+  (n % 5 === 0 ? test : entrainement).push(l);
+}
+
+const memoireAvant = process.memoryUsage().rss;
+let debut = performance.now();
+const extracteur = await pipeline('feature-extraction', MODELE, { dtype: 'q8' });
+const chargement = performance.now() - debut;
+
+async function vecteurs(textes: string[]): Promise<Float32Array[]> {
+  const sortie: Float32Array[] = [];
+  for (let i = 0; i < textes.length; i += 32) {
+    const lot = textes.slice(i, i + 32).map((t) => PREFIXE + t);
+    const t = await extracteur(lot, { pooling: 'mean', normalize: true });
+    const [n, d] = t.dims as [number, number];
+    for (let j = 0; j < n; j++) sortie.push((t.data as Float32Array).slice(j * d, (j + 1) * d));
+  }
+  return sortie;
+}
+
+debut = performance.now();
+const base = await vecteurs(entrainement.map((l) => l.texte));
+const indexation = performance.now() - debut;
+
+const produit = (a: Float32Array, b: Float32Array) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i]! * b[i]!; return s; };
+
+function classer(v: Float32Array): { choix: Intention; confiance: number } {
+  const voisins = base.map((b, i) => ({ i, s: produit(v, b) })).sort((a, b) => b.s - a.s).slice(0, K);
+  const votes = new Map<Intention, number>();
+  for (const { i, s } of voisins) votes.set(entrainement[i]!.intention, (votes.get(entrainement[i]!.intention) ?? 0) + Math.max(s, 0) ** 4);
+  const total = [...votes.values()].reduce((a, b) => a + b, 0) || 1;
+  const [choix, poids] = [...votes.entries()].sort((a, b) => b[1] - a[1])[0]!;
+  return { choix, confiance: poids / total };
+}
+
+const vt = await vecteurs(test.map((l) => l.texte));
+const resultats = test.map((l, i) => ({ ...l, ...classer(vt[i]!) }));
+
+// Vitesse d'UN message, comme en production (après échauffement).
+const durees: number[] = [];
+for (const l of test.slice(0, 60)) {
+  const t = performance.now();
+  const [v] = await vecteurs([l.texte]);
+  classer(v!);
+  durees.push(performance.now() - t);
+}
+durees.sort((a, b) => a - b);
+
+const pct = (a: number, b: number) => (b ? `${Math.round((100 * a) / b)} %` : '—');
+const justes = resultats.filter((r) => r.choix === r.intention).length;
+console.log(`\n=== ${MODELE} — ${entrainement.length} phrases apprises, ${test.length} testées (jamais vues) ===`);
+console.log(`Précision brute : ${pct(justes, test.length)}`);
+for (const seuil of [0.6, 0.7, 0.8, 0.9]) {
+  const surs = resultats.filter((r) => r.confiance >= seuil);
+  const faux = surs.filter((r) => r.choix !== r.intention).length;
+  console.log(`Confiance ≥ ${seuil} : décide seul ${pct(surs.length, test.length).padStart(5)} · justes ${pct(surs.length - faux, test.length).padStart(5)} · MAUVAISES servies ${pct(faux, test.length).padStart(5)}`);
+}
+const registres = [...new Set(test.map((l) => l.registre))];
+console.log('Par registre (précision brute) :');
+for (const r of registres) {
+  const du = resultats.filter((x) => x.registre === r);
+  console.log(`   ${r.padEnd(9)} ${pct(du.filter((x) => x.choix === x.intention).length, du.length).padStart(5)}  (${du.length})`);
+}
+const erreurs = resultats.filter((r) => r.choix !== r.intention).sort((a, b) => b.confiance - a.confiance).slice(0, 10);
+console.log('Erreurs les plus sûres :');
+for (const e of erreurs) console.log(`   ✗ « ${e.texte} » → ${e.choix} (${e.confiance.toFixed(2)}), attendu : ${e.intention}`);
+console.log(`\nUn message : médiane ${durees[30]!.toFixed(0)} ms, p95 ${durees[56]!.toFixed(0)} ms (processeur de ce poste, aucun réseau)`);
+console.log(`Chargement du modèle : ${(chargement / 1000).toFixed(1)} s · indexation du corpus : ${(indexation / 1000).toFixed(1)} s`);
+console.log(`Mémoire ajoutée : ${Math.round((process.memoryUsage().rss - memoireAvant) / 1024 / 1024)} Mo`);

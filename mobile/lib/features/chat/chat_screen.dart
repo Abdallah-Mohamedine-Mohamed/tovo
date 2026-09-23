@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../components/registry.dart';
 import '../../components/widgets/read_placeholder.dart';
 import '../../core/api.dart';
+import '../../core/catalog_image.dart';
 import '../../core/location.dart';
 import '../../core/push.dart';
 import '../../core/theme.dart';
@@ -572,6 +573,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 .whereType<Map<String, dynamic>>()
                 .map(TovoComponent.fromJson)
                 .toList();
+            _prechargerImages(partialComponents);
           }
           if (partialText.isNotEmpty || partialComponents.isNotEmpty) {
             _reponseCommencee = true;
@@ -1096,6 +1098,7 @@ class _ChatScreenState extends State<ChatScreen> {
           ? await showModalBottomSheet<XFile>(
               context: context,
               isScrollControlled: true,
+              useSafeArea: true,
               backgroundColor: Colors.transparent,
               builder: (_) => const PhotoCaptureSheet(),
             )
@@ -1253,6 +1256,41 @@ class _ChatScreenState extends State<ChatScreen> {
     });
 
     _idCommandeEnCours = null;
+  }
+
+  /// Lance le téléchargement des photos dès que les résultats arrivent.
+  ///
+  /// Chaque photo met environ une seconde à venir du stockage, quelle que
+  /// soit sa taille : c'est la distance qui coûte, pas le poids. Attendre
+  /// que la carte soit dessinée — ou pire, que le client fasse défiler le
+  /// carrousel — ajoutait cette seconde à chaque produit. Ici, tout part en
+  /// même temps, pendant que le texte de la réponse s'écrit encore. Même
+  /// décodage que CatalogImage (600 px) : c'est la même entrée du cache.
+  void _prechargerImages(List<TovoComponent> composants) {
+    final urls = <String>{};
+    void ajouter(Object? url) {
+      if (url is String && url.startsWith('http')) urls.add(url);
+    }
+
+    for (final c in composants) {
+      ajouter(c.data['image_url']);
+      ajouter(c.data['logo_url']);
+      for (final item in (c.data['items'] as List?) ?? const []) {
+        if (item is Map) {
+          ajouter(item['image_url']);
+          ajouter(item['logo_url']);
+        }
+      }
+    }
+    for (final url in urls.take(12)) {
+      unawaited(
+        precacheImage(
+          ResizeImage.resizeIfNeeded(600, null, CatalogImage.provider(url)),
+          context,
+          onError: (_, __) {},
+        ),
+      );
+    }
   }
 
   void _erreurLocalisation() {

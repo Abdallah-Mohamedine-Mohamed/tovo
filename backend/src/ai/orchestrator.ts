@@ -4,7 +4,7 @@ import { SYSTEM_PROMPT, contexteUtilisateur } from './systemPrompt.js';
 import { EXECUTORS, TOOL_DEFINITIONS, type ToolContext } from './tools.js';
 import { collectIds, sanitizeToolResult, validateComponents } from './validate.js';
 import { envelope, type ChatEnvelope, type Component } from '../components/builders.js';
-import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type PendingMerchantChoice } from '../services/catalogue.js';
+import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type CataloguePage, type PendingMerchantChoice } from '../services/catalogue.js';
 import {
   demandeBoutiqueOuverte,
   demandeDeCommandePassee,
@@ -76,6 +76,11 @@ export interface OrchestrateInput {
    * recherche de produit. `modele` : le modèle décide seul.
    */
   intention?: Intention | 'modele' | undefined;
+  /**
+   * Recherche lexicale déjà faite par la route, en parallèle de Jev, sur le
+   * MÊME message : on ne la refait pas.
+   */
+  pageInitiale?: CataloguePage | undefined;
 }
 
 export interface OrchestrateOutput extends ChatEnvelope {
@@ -92,7 +97,7 @@ export class ChatUnavailableError extends Error {
   }
 }
 
-function rechercheProduitRapide(message: string, query: string): boolean {
+export function rechercheProduitRapide(message: string, query: string): boolean {
   const mots = query.split(/\s+/).filter(Boolean);
   const questionCourte = /^(avez vous|as tu|il y a|y a t il|un|une|du|de la|des)\b/
     .test(normaliserIntention(message));
@@ -117,7 +122,9 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // Recherche ou boutique : le catalogue a son mot à dire. Toute autre route
   // connue va droit au modèle.
   const catalogueAutorise = !input.intention || input.intention === 'recherche' || input.intention === 'boutique';
-  const rechercheInitiale = !input.audio && !reference && !commandePassee && catalogueAutorise
+  const rechercheInitiale = input.pageInitiale
+    ? Promise.resolve(input.pageInitiale)
+    : !input.audio && !reference && !commandePassee && catalogueAutorise
     && rechercheProduitRapide(input.message, requeteInitiale)
     // Premier passage lexical uniquement : il doit rester plus rapide qu'un
     // appel modèle. Les fautes et rapprochements sémantiques restent pris en
