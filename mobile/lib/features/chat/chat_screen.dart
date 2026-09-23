@@ -14,6 +14,7 @@ import '../../components/registry.dart';
 import '../../components/widgets/read_placeholder.dart';
 import '../../core/api.dart';
 import '../../core/location.dart';
+import '../../core/push.dart';
 import '../../core/theme.dart';
 import '../../core/viewport_reveal.dart';
 import '../../core/voix.dart';
@@ -244,6 +245,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     if (enCours != null && mounted) {
+      unawaited(TovoPush.enregistrer('client'));
       await _appeler(() => widget.api.get('/orders/${enCours!['id']}'));
     }
   }
@@ -1233,8 +1235,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
     // Le paiement est choisi sur la carte (espèces par défaut) : plus de
     // fenêtre à part entre le geste et la commande.
-    await _appeler(
-      () => widget.api.post('/orders', {
+    await _appeler(() async {
+      final response = await widget.api.post('/orders', {
         'type': 'courier',
         'client_order_id': _idCommandeEnCours,
         'pickup_hint': depart!['hint'],
@@ -1245,8 +1247,10 @@ class _ChatScreenState extends State<ChatScreen> {
         'dropoff_contact': p['dropoff_contact'],
         'parcel': p['parcel'] ?? 'small',
         'payment_method': p['payment_method'] ?? 'cash',
-      }),
-    );
+      });
+      if (response.ok) unawaited(TovoPush.enregistrer('client'));
+      return response;
+    });
 
     _idCommandeEnCours = null;
   }
@@ -1632,6 +1636,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                     }
                                   },
                                   onSuggestion: _envoyerSuggestion,
+                                  onBrowseShops: () =>
+                                      _ouvrirCatalogue(directory: true),
                                   lastOrder: _derniereCommande,
                                   onReorder: (commande) {
                                     _ajouterTourUtilisateur(

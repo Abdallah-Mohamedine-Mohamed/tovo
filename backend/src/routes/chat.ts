@@ -5,12 +5,14 @@ import { envelope } from '../components/builders.js';
 import { ChatUnavailableError, orchestrate } from '../ai/orchestrator.js';
 import { LlmUnavailableError, llmEnabled } from '../ai/llmClient.js';
 import { EXECUTORS } from '../ai/tools.js';
-import { demandeGeneraleDeRepas } from '../ai/intents.js';
+import { demandeGeneraleDeRepas, demandeUnColis, demandeUnLivreur } from '../ai/intents.js';
 import { signaler } from '../lib/observability.js';
 import { transcribe } from '../services/transcription.js';
 import { chatStream } from '../lib/chatStream.js';
 import { consommer, messageLimite } from '../services/rateLimit.js';
-import { commanderUnLivreur, demandeUnLivreur } from '../services/livreur.js';
+import { commanderUnLivreur } from '../services/livreur.js';
+import { ombreJev, type Intention } from '../ai/jev.js';
+import { consulterJev, decider, indication, intentionChoisie } from '../ai/aiguillage.js';
 
 /**
  * POST /chat — le fil conversationnel.
@@ -152,17 +154,6 @@ function libelleLisible(action: string, payload: Record<string, unknown>): strin
   }
 }
 
-function demandeUnColis(texte: string): boolean {
-  const reduit = texte
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-
-  const objet = /\b(colis|paquet|document|documents|courrier)\b/.test(reduit);
-  const action = /\b(envoyer|livrer|expedier|deposer|remettre|transporter)\b/.test(reduit);
-  return objet && action;
-}
-
 export async function chatRoutes(app: FastifyInstance): Promise<void> {
   app.post('/transcriptions', { preHandler: app.requireAuth }, async (request, reply) => {
     const body = z.object({ audio: audioSchema }).safeParse(request.body);
@@ -302,6 +293,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         .send({ error: messageLimite(limite.reessayerDans) });
     }
 
+    // Mode ombre : Jev classe le message en arrière-plan, sans rien retarder
+    // ni influencer (voir ai/jev.ts). Inactif sans JEV_OMBRE=1.
+    if (body.data.text) ombreJev(body.data.text, request.log, body.data.client_message_id);
+
+    // Aiguillage (JEV_AIGUILLAGE=1) : lancé MAINTENANT, en parallèle de la
+    // conversation et du contrôle d'idempotence, pour ne presque rien ajouter
+    // au temps de réponse. Attendu plus bas ; `null` s'il est éteint ou lent.
+    const decisionJev = body.data.text ? consulterJev(body.data.text) : Promise.resolve(null);
+
     const output = chatStream(reply, streaming);
     const started = performance.now();
     let firstResultMs: number | undefined;
@@ -393,11 +393,63 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
+    // --- Aiguillage -------------------------------------------------------
+    // Une tuile touchée porte l'intention CHOISIE et la phrase d'origine ;
+    // sinon Jev propose une route, ou des tuiles s'il hésite sur une action.
+    const choisie = intentionChoisie(body.data.interaction);
+    const texteClient = choisie?.message ?? body.data.text;
+    // Ce que le client relit : sa phrase, ou le libellé de la tuile touchée.
+    const contenuClient = body.data.text
+      ?? (body.data.interaction ? libelleLisible(body.data.interaction.action, body.data.interaction.payload) : null)
+      ?? message;
+    let intention: Intention | 'modele' | undefined = choisie?.intention;
+
+    if (!choisie && body.data.text) {
+      const route = decider(await decisionJev, body.data.text);
+      if (route.decision) {
+        request.log.info({
+          ref: body.data.client_message_id,
+          jev: {
+            choix: route.decision.choix,
+            confiance: Number(route.decision.confiance.toFixed(2)),
+            ms: Math.round(route.decision.ms),
+          },
+          route: route.type,
+          ...(route.decision.erreur ? { erreur: route.decision.erreur } : {}),
+        }, 'aiguillage jev');
+      }
+      if (route.type === 'intention') intention = route.intention;
+
+      if (route.type === 'clarifier') {
+        // Proposer ce qu'on a compris plutôt que deviner : une action mal
+        // devinée fait déplacer un livreur ou annule une commande.
+        emit({ type: 'conversation', conversation_id: conversationId });
+        emit({ type: 'results', components: route.components });
+        emit({ type: 'text', text: route.contenu });
+        await db.from('messages').insert({
+          conversation_id: conversationId,
+          role: 'user',
+          content: body.data.text,
+          client_message_id: body.data.client_message_id,
+        });
+        await db.from('messages').insert({
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: route.contenu,
+          components: route.components,
+        });
+        return output.finish({ conversation_id: conversationId, ...envelope(route.contenu, route.components) });
+      }
+    }
+    // Route connue : les détecteurs à mots ne décident plus.
+    const parJev = intention !== undefined;
+
     // « Je veux un livreur » : la commande part, sans carte ni question. La
     // position vient du téléphone, le numéro du compte ; le livreur appelle
     // pour le reste. Sans position connue, on retombe sur la carte, qui
     // sait la demander.
-    if (body.data.text && body.data.context && demandeUnLivreur(body.data.text)) {
+    if (texteClient && body.data.context
+      && (parJev ? intention === 'livreur' : demandeUnLivreur(texteClient))) {
       const resultat = await commanderUnLivreur(db, {
         clientOrderId: body.data.client_message_id,
         position: body.data.context,
@@ -411,7 +463,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       await db.from('messages').insert({
         conversation_id: conversationId,
         role: 'user',
-        content: body.data.text,
+        content: contenuClient,
         client_message_id: body.data.client_message_id,
       });
       await db.from('messages').insert({
@@ -429,7 +481,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // carte. Le laisser au modèle lui faisait parfois appeler
     // `mes_adresses`, puis traiter le choix comme une livraison de panier.
     // C'est ainsi que « Livrer à Harobanda » finissait par « panier vide ».
-    if (body.data.text && (demandeUnColis(body.data.text) || demandeUnLivreur(body.data.text))) {
+    // Avec des détails (« à Moussa, 90 12 34 56, Harobanda »), c'est le modèle
+    // qui ouvre la carte : lui seul sait la pré-remplir. La voie rapide
+    // l'ouvrait vide et le client retapait ce qu'il venait de dire.
+    const detailsDeColis = texteClient ? /\d{2}\s?\d{2}\s?\d{2}|\b(à|a|chez|pour)\s+\p{Lu}/u.test(texteClient) : false;
+    if (texteClient && !detailsDeColis && (parJev
+      ? intention === 'colis' || intention === 'livreur'
+      : demandeUnColis(texteClient) || demandeUnLivreur(texteClient))) {
       const executer = EXECUTORS['preparer_course'];
       if (!executer) throw new Error('outil preparer_course absent');
 
@@ -452,7 +510,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       await db.from('messages').insert({
         conversation_id: conversationId,
         role: 'user',
-        content: body.data.text,
+        content: contenuClient,
         client_message_id: body.data.client_message_id,
       });
       await db.from('messages').insert({
@@ -473,7 +531,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // recherche du produit nommé « manger ». On ouvre directement la porte
     // Restaurants, classée par ouverture et qualité, sans mélanger marché,
     // électronique, beauté ou pharmacie.
-    if (body.data.text && demandeGeneraleDeRepas(body.data.text)) {
+    if (texteClient && demandeGeneraleDeRepas(texteClient) && (!parJev || intention === 'envie')) {
       const executer = EXECUTORS['lister_restaurants'];
       if (!executer) throw new Error('outil lister_restaurants absent');
 
@@ -482,7 +540,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         {
           db,
           userId,
-          currentMessage: body.data.text,
+          currentMessage: texteClient,
           position: body.data.context,
         },
       );
@@ -496,7 +554,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       await db.from('messages').insert({
         conversation_id: conversationId,
         role: 'user',
-        content: body.data.text,
+        content: contenuClient,
         client_message_id: body.data.client_message_id,
       });
       await db.from('messages').insert({
@@ -528,14 +586,23 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         ? '🎤 Message vocal'
         : body.data.interaction
           ? libelleLisible(body.data.interaction.action, body.data.interaction.payload)
-          : null;
+          // Texte aiguillé : l'indication donnée au modèle ne doit pas
+          // apparaître dans la bulle du client.
+          : intention && intention !== 'modele' ? body.data.text ?? null : null;
+
+      // La phrase d'origine (celle d'avant la tuile), plus la route connue.
+      const note = intention && intention !== 'modele' ? indication(intention) : null;
+      const messageModele = texteClient && intention
+        ? note ? `${texteClient}\n${note}` : texteClient
+        : message;
 
       output.emit({ type: 'conversation', conversation_id: conversationId });
       const resultat = await orchestrate({
         db,
         userId,
         conversationId,
-        message,
+        message: messageModele,
+        ...(intention ? { intention } : {}),
         ...(messagePublic ? { messagePublic } : {}),
         clientMessageId: body.data.client_message_id,
         ...(body.data.audio ? { audio: body.data.audio } : {}),

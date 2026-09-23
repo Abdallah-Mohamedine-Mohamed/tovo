@@ -15,6 +15,7 @@ import {
   requeteProduitUtilisateur,
 } from './intents.js';
 import { resumeAffichage } from './memoire.js';
+import type { Intention } from './jev.js';
 
 /**
  * Boucle d'orchestration.
@@ -68,6 +69,13 @@ export interface OrchestrateInput {
   audio?: { mime: string; data: string } | undefined;
   position?: { lat: number; lng: number } | undefined;
   onEvent?: ((event: Record<string, unknown>) => void) | undefined;
+  /**
+   * Route déjà connue (Jev, ou tuile touchée par le client). Hors catalogue
+   * (suivi, annulation, habitude…), les voies rapides par mots ne tournent
+   * pas : elles transformaient « ça fait une heure que j'attends » en
+   * recherche de produit. `modele` : le modèle décide seul.
+   */
+  intention?: Intention | 'modele' | undefined;
 }
 
 export interface OrchestrateOutput extends ChatEnvelope {
@@ -106,7 +114,10 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // relire l'historique des commandes. Toujours au modèle, affichage ou pas.
   const commandePassee = !input.audio && demandeDeCommandePassee(input.message);
   const requeteInitiale = input.audio ? '' : requeteProduitUtilisateur(input.message);
-  const rechercheInitiale = !input.audio && !reference && !commandePassee
+  // Recherche ou boutique : le catalogue a son mot à dire. Toute autre route
+  // connue va droit au modèle.
+  const catalogueAutorise = !input.intention || input.intention === 'recherche' || input.intention === 'boutique';
+  const rechercheInitiale = !input.audio && !reference && !commandePassee && catalogueAutorise
     && rechercheProduitRapide(input.message, requeteInitiale)
     // Premier passage lexical uniquement : il doit rester plus rapide qu'un
     // appel modèle. Les fautes et rapprochements sémantiques restent pris en
@@ -123,7 +134,10 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // Nouveau Marché ?). « Le premier » y est déjà résolu sans modèle par
   // resolveCatalogueIntent, instantanément et sans risque d'erreur : on lui
   // laisse la main.
-  const versModele = commandePassee || (reference && previous.affichage && !previous.pending);
+  const versModele = commandePassee || (reference && previous.affichage && !previous.pending)
+    // Route hors catalogue connue. Exception : un choix d'agence en attente
+    // (« le premier ») reste résolu sans modèle, comme plus haut.
+    || (!catalogueAutorise && !(input.intention === 'designe' && previous.pending));
 
   const photoRecente = previous.history.slice(-4).some((turn) =>
     turn.role === 'user' && /photo envoyee/i.test(normaliserIntention(turn.content)));

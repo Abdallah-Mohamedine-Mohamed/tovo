@@ -316,6 +316,7 @@ class ConversationHome extends StatelessWidget {
     required this.recent,
     required this.onResume,
     required this.onSuggestion,
+    required this.onBrowseShops,
     this.lastOrder,
     this.onReorder,
   });
@@ -323,6 +324,7 @@ class ConversationHome extends StatelessWidget {
   final List<Map<String, dynamic>> recent;
   final ValueChanged<String> onResume;
   final ValueChanged<String> onSuggestion;
+  final VoidCallback onBrowseShops;
 
   /// Dernière commande livrée (GET /orders), ou nulle.
   final Map<String, dynamic>? lastOrder;
@@ -465,6 +467,15 @@ class ConversationHome extends StatelessWidget {
                       entre(
                         4,
                         _HomePromptCard(
+                          title: 'Explorer les boutiques',
+                          asset: 'assets/branding/suggestion-shops.svg',
+                          onTap: onBrowseShops,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      entre(
+                        5,
+                        _HomePromptCard(
                           title: 'Trouve-moi un bon repas à Niamey',
                           asset: 'assets/branding/suggestion-meal.svg',
                           onTap: () => onSuggestion(
@@ -474,7 +485,7 @@ class ConversationHome extends StatelessWidget {
                       ),
                       const SizedBox(width: 10),
                       entre(
-                        5,
+                        6,
                         _HomePromptCard(
                           title: 'Aide-moi à préparer mes courses',
                           asset: 'assets/branding/suggestion-grocery.svg',
@@ -484,7 +495,7 @@ class ConversationHome extends StatelessWidget {
                       ),
                       const SizedBox(width: 10),
                       entre(
-                        6,
+                        7,
                         _HomePromptCard(
                           title: 'Je voudrais envoyer un colis',
                           asset: 'assets/branding/suggestion-parcel.svg',

@@ -82,4 +82,31 @@ void main() {
     expect(controller.resume['courses'], 2);
     controller.dispose();
   });
+
+  test(
+    'un échec de chargement ne se fait pas passer pour aucune course',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final api = TovoApi(
+        tokenProvider: () => null,
+        client: MockClient(
+          (request) async => request.url.path == '/orders'
+              ? http.Response('{"error":"service indisponible"}', 503)
+              : http.Response('{}', 200),
+        ),
+      );
+      final queue = SyncQueue(
+        api: api,
+        prefs: await SharedPreferences.getInstance(),
+      );
+      await queue.load();
+      final controller = DriverController(api: api, queue: queue);
+
+      await controller.refresh();
+
+      expect(controller.erreur, contains('Impossible de vérifier les courses'));
+      expect(controller.pool, isEmpty);
+      controller.dispose();
+    },
+  );
 }

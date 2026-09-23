@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../../components/registry.dart';
 import '../../core/api.dart';
 import '../../core/location.dart';
+import '../../core/push.dart';
 import '../../core/theme.dart';
 import '../../core/catalog_image.dart';
 
@@ -180,6 +181,7 @@ class _CartScreenState extends State<CartScreen> {
     if (!mounted) return;
     if (response.ok) {
       unawaited(HapticFeedback.mediumImpact());
+      unawaited(TovoPush.enregistrer('client'));
       Navigator.of(context).pop(response);
       return;
     }

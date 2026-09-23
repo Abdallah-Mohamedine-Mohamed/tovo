@@ -135,9 +135,9 @@ class _AuthGateState extends State<AuthGate> {
         _verificationEnCours = false;
       });
 
-      // Après la connexion, jamais avant : un jeton sans utilisateur n'a
-      // personne à qui être rattaché.
-      unawaited(TovoPush.enregistrer(widget.appPush));
+      if (widget.appPush != 'client') {
+        unawaited(TovoPush.enregistrer(widget.appPush));
+      }
     } on Exception {
       if (!mounted || _session?.user.id != userId) return;
       setState(() {
@@ -167,7 +167,10 @@ class _AuthGateState extends State<AuthGate> {
     }
 
     if (_verificationEnCours) {
-      return const Scaffold(body: SafeArea(child: ReadPlaceholder()));
+      return Scaffold(
+        backgroundColor: widget.appPush == 'client' ? TovoTheme.canvas : null,
+        body: const SafeArea(child: ReadPlaceholder()),
+      );
     }
 
     if (_echecRole) {

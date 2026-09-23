@@ -460,13 +460,18 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       merchant_name: (produit.merchants as { name?: string } | null)?.name ?? null,
     };
 
-    const { data: options } = await db(request)
+    const { data: options, error: optionsError } = await db(request)
       .from('product_options')
       .select(
         'id, name, is_required, min_select, max_select, sort_order, product_option_values(id, name, price_delta, is_available, sort_order)',
       )
       .eq('product_id', product.id)
       .order('sort_order');
+
+    if (optionsError) {
+      const failure = toHttpFailure(optionsError);
+      return reply.code(failure.status).send(failure.body);
+    }
 
     const rows: OptionRow[] = (options ?? []).map((o) => ({
       id: o.id as string,

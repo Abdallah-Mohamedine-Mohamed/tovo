@@ -56,10 +56,40 @@ export function demandeOuverte(requete: string): boolean {
     .test(normaliserIntention(requete));
 }
 
+/**
+ * Le client demande-t-il un livreur, tout court ?
+ *
+ * « Je veux un livreur », « envoie-moi un coursier », « un livreur svp ».
+ * Pas « où est mon livreur » ni « appelle le livreur » (celui d'une commande
+ * en cours), ni « je veux devenir livreur ». L'article « un » fait la
+ * différence : on demande UN livreur, on parle DU sien.
+ */
+export function demandeUnLivreur(texte: string): boolean {
+  const n = normaliserIntention(texte);
+  if (!/\b(un|une|des) (livreur|livreurs|coursier|coursiers|livreuse)\b/.test(n)) return false;
+  if (/\b(devenir|travailler|travail|emploi|recrute|recrutez|recrutement|inscrire|inscription|postuler)\b/.test(n)) {
+    return false;
+  }
+  const demande = /\b(veux|voudrais|voulais|besoin|faut|envoie|envoyez|envoyer|trouve|trouvez|appelle|appelez|cherche|cherchez|commande|commander|donne|donnez|svp|stp|vite|urgent)\b/.test(n);
+  // « Un livreur » seul, ou presque, est une demande aussi.
+  return demande || n.split(' ').length <= 3;
+}
+
+/** Envoyer un colis, un paquet, un document. */
+export function demandeUnColis(texte: string): boolean {
+  const reduit = normaliserIntention(texte);
+  const objet = /\b(colis|paquet|document|documents|courrier)\b/.test(reduit);
+  const action = /\b(envoyer|livrer|expedier|deposer|remettre|transporter)\b/.test(reduit);
+  return objet && action;
+}
+
 /** Une phrase sociale ou émotionnelle ne doit jamais devenir un produit. */
 export function messageConversationnel(texte: string): boolean {
   const normalise = normaliserIntention(texte);
-  return /^(bonjour|bonsoir|salut|merci|ca va|comment vas tu|comment allez vous)\b/.test(normalise)
+  return /^(bonjour|bonsoir|salut|merci|ca va|comment vas tu|comment allez vous|coucou|hello|salam|salamalekoum|assalamou)\b/.test(normalise)
+    // Les abréviations et acquiescements, seuls : « cc » devenait la
+    // recherche du produit « cc » (« Je ne trouve pas de cc »).
+    || /^(cc|slt|bjr|bsr|hey|hi|ok|okay|d accord|dac|top|super|parfait|cool)$/.test(normalise)
     || /^(tu es|vous etes|t es)\b/.test(normalise)
     || /\b(stupide|bete|idiot|nulle?|mauvais)\b/.test(normalise);
 }

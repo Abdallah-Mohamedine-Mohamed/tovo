@@ -21,7 +21,17 @@
     "migrate:index": "tsx --env-file=.env scripts/etl/indexAll.ts",
     "migrate:verify": "tsx --env-file=.env scripts/etl/verify.ts",
     "otp:test": "tsx --env-file=.env scripts/sendTestOtp.ts",
-    "hook:test": "tsx --env-file=.env scripts/testAuthHook.ts"
+    "hook:test": "tsx --env-file=.env scripts/testAuthHook.ts",
+    "banc:jev": "tsx --env-file=.env scripts/jev/banc.ts",
+    "staging:sql": "tsx scripts/scenarios/assembler.ts",
+    "staging:semer": "tsx --env-file=.env.staging scripts/scenarios/semer.ts",
+    "dev:staging": "tsx watch --env-file=.env.staging src/index.ts",
+    "scenarios": "tsx --env-file=.env.staging scripts/scenarios/lancer.ts",
+    "corpus:generer": "tsx --env-file=.env scripts/corpus/generer.ts",
+    "recherche:generer": "tsx --env-file=.env scripts/recherche/generer.ts",
+    "recherche:banc": "tsx --env-file=.env scripts/recherche/banc.ts",
+    "recherche:variantes": "tsx --env-file=.env scripts/recherche/variantes.ts",
+    "staging:nettoyer": "tsx --env-file=.env.staging scripts/scenarios/nettoyer.ts"
   },
   "dependencies": {
     "@sentry/node": "^10.69.0",

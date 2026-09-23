@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/marque.dart';
 import '../../core/theme.dart';
 
 /// Le nom, demandé une fois et une seule.
@@ -81,43 +80,36 @@ class _DemandeDeNomState extends State<DemandeDeNom> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 72,
-                  height: 72,
-                  alignment: Alignment.center,
-                  decoration: const BoxDecoration(
-                    color: TovoTheme.teal,
-                    shape: BoxShape.circle,
-                    boxShadow: TovoTheme.ombreFlottante,
-                  ),
-                  child: const MarqueTovo(taille: 42, couleur: Colors.white),
-                ),
-                const SizedBox(height: 28),
                 const Text(
-                  'Encore une chose',
+                  'Votre nom',
                   style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -1.2,
-                    color: TovoTheme.tealDeep,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.7,
+                    color: TovoTheme.ink,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 10),
                 const Text(
-                  'Comment vous appelez-vous ?',
-                  style: TextStyle(fontSize: 13, color: TovoTheme.muted),
+                  'Pour personnaliser votre espace et permettre au livreur de vous retrouver.',
+                  style: TextStyle(
+                    fontSize: 15,
+                    height: 1.5,
+                    color: TovoTheme.inkDoux,
+                  ),
                 ),
-                const SizedBox(height: 40),
+                const SizedBox(height: 32),
+                const Text('Prénom et nom'),
+                const SizedBox(height: 10),
                 TextField(
                   controller: _nom,
-                  autofocus: true,
+                  autofocus: false,
+                  autofillHints: const [AutofillHints.name],
                   textCapitalization: TextCapitalization.words,
                   textInputAction: TextInputAction.done,
                   onSubmitted: (_) => _enregistrer(),
                   decoration: InputDecoration(
                     hintText: 'Prénom et nom',
-                    // Dire à quoi sert l'information fait qu'on la donne.
-                    helperText: 'Votre livreur le verra pour vous trouver.',
                     filled: true,
                     fillColor: TovoTheme.tealMist,
                     contentPadding: const EdgeInsets.symmetric(
@@ -130,11 +122,12 @@ class _DemandeDeNomState extends State<DemandeDeNom> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
                 FilledButton(
                   style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
+                    minimumSize: const Size.fromHeight(50),
                     backgroundColor: TovoTheme.teal,
+                    shape: const StadiumBorder(),
                   ),
                   onPressed: _occupe ? null : _enregistrer,
                   child: Text(

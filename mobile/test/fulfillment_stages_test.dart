@@ -10,7 +10,8 @@ void main() {
   });
 
   test('le livreur part en livraison puis confirme la remise', () {
-    expect(DriverController.etapeSuivante('assigned'), 'delivering');
+    expect(DriverController.etapeSuivante('assigned'), 'picked_up');
+    expect(DriverController.etapeSuivante('picked_up'), 'delivering');
     expect(DriverController.etapeSuivante('delivering'), 'delivered');
     expect(DriverController.etapeSuivante('delivered'), isNull);
   });

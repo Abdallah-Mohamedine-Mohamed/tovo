@@ -47,7 +47,9 @@ class _DriverHomeState extends State<DriverHome> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) unawaited(_c.refresh(silencieux: true));
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_c.refresh(silencieux: true));
+    }
   }
 
   void _maj() {
@@ -119,6 +121,12 @@ class _DriverHomeState extends State<DriverHome> with WidgetsBindingObserver {
               _CourseEnCours(controller: _c)
             else if (!_c.online)
               const _Repos()
+            else if (_c.erreur != null)
+              const _Message(
+                icone: Icons.cloud_off_outlined,
+                titre: 'Courses non vérifiées',
+                detail: 'Réessayez en tirant vers le bas.',
+              )
             else if (_c.pool.isEmpty)
               const _AucuneCourse()
             else
@@ -167,7 +175,8 @@ class _BandeauSync extends StatelessWidget {
 
         return _Bandeau(
           couleur: const Color(0xFFFFF4E5),
-          texte: '$enAttente action${enAttente > 1 ? 's' : ''} en attente de réseau',
+          texte:
+              '$enAttente action${enAttente > 1 ? 's' : ''} en attente de réseau',
           icone: Icons.cloud_off,
           teinte: const Color(0xFFB26A00),
         );
@@ -207,7 +216,11 @@ class _Bandeau extends StatelessWidget {
           Expanded(
             child: Text(
               texte,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: teinte),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: teinte,
+              ),
             ),
           ),
           if (action != null) action!,
@@ -281,7 +294,10 @@ class _Chiffre extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 2),
-          Text(libelle, style: const TextStyle(fontSize: 11, color: TovoTheme.muted)),
+          Text(
+            libelle,
+            style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
+          ),
         ],
       ),
     );
@@ -329,7 +345,9 @@ class _CarteCourse extends StatelessWidget {
           Row(
             children: [
               Icon(
-                coursier ? Icons.inventory_2_outlined : Icons.restaurant_outlined,
+                coursier
+                    ? Icons.inventory_2_outlined
+                    : Icons.restaurant_outlined,
                 size: 18,
                 color: TovoTheme.teal,
               ),
@@ -337,7 +355,10 @@ class _CarteCourse extends StatelessWidget {
               Expanded(
                 child: Text(
                   coursier ? 'Colis' : 'Livraison',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               // Le gain du livreur en premier et en gros : c'est l'information
@@ -357,8 +378,11 @@ class _CarteCourse extends StatelessWidget {
           if ((ordre['merchant_name'] as String?)?.isNotEmpty == true)
             Text(
               'À récupérer chez ${ordre['merchant_name']}',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-                  color: TovoTheme.ink),
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: TovoTheme.ink,
+              ),
             ),
           if ((ordre['merchant_name'] as String?)?.isNotEmpty == true)
             const SizedBox(height: 5),
@@ -399,14 +423,21 @@ class _CarteCourse extends StatelessWidget {
           ],
           const SizedBox(height: 12),
           FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-            onPressed: !peutAccepter || controller.acceptationEnCours(ordre['id'] as String)
-                ? null : () => controller.accepter(ordre),
-            child: Text(!peutAccepter
-                ? 'Disponible dès qu’elle est prête'
-                : controller.acceptationEnCours(ordre['id'] as String)
-                    ? 'Acceptation en cours'
-                    : 'Accepter'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+            ),
+            onPressed:
+                !peutAccepter ||
+                    controller.acceptationEnCours(ordre['id'] as String)
+                ? null
+                : () => controller.accepter(ordre),
+            child: Text(
+              !peutAccepter
+                  ? 'Disponible dès qu’elle est prête'
+                  : controller.acceptationEnCours(ordre['id'] as String)
+                  ? 'Acceptation en cours'
+                  : 'Accepter',
+            ),
           ),
         ],
       ),
@@ -448,7 +479,9 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
   @override
   Widget build(BuildContext context) {
     final course = controller.course!;
-    final dropoff = (course['dropoff'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final coursier = course['type'] == 'courier';
+    final dropoff =
+        (course['dropoff'] as Map?)?.cast<String, dynamic>() ?? const {};
     final pickup = (course['pickup'] as Map?)?.cast<String, dynamic>();
     final boutique = (course['merchant'] as Map?)?.cast<String, dynamic>();
     final client = (course['client'] as Map?)?.cast<String, dynamic>();
@@ -460,7 +493,8 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
     final enRouteVersClient = controller.statut == 'delivering';
     final etape = controller.prochaineEtape;
     final dejaPaye =
-        course['payment_method'] == 'mobile_money' && course['payment_status'] == 'paid';
+        course['payment_method'] == 'mobile_money' &&
+        course['payment_status'] == 'paid';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -476,7 +510,14 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                _libelles[controller.statut] ?? controller.statut,
+                coursier
+                    ? switch (controller.statut) {
+                        'assigned' => 'Récupérez le colis',
+                        'picked_up' => 'Colis récupéré',
+                        'delivering' => 'En route vers le destinataire',
+                        _ => controller.statut,
+                      }
+                    : _libelles[controller.statut] ?? controller.statut,
                 style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
@@ -490,13 +531,17 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
               // choisir entre deux itinéraires.
               _EtapeCourse(
                 couleur: TovoTheme.teal,
-                titre: 'Récupérer',
-                nom: (boutique?['name'] as String?) ??
+                titre: coursier ? 'Récupérer le colis' : 'Récupérer le repas',
+                nom:
+                    (boutique?['name'] as String?) ??
                     (course['merchant_name'] as String?),
-                repere: (pickup?['hint'] as String?) ?? (boutique?['hint'] as String?),
+                repere:
+                    (pickup?['hint'] as String?) ??
+                    (boutique?['hint'] as String?),
                 // Sur une course coursier il n'y a pas de boutique : le
                 // contact du point de retrait est celui qui remet le colis.
-                telephone: (pickup?['contact'] as String?) ??
+                telephone:
+                    (pickup?['contact'] as String?) ??
                     boutique?['phone'] as String?,
                 lat: _nombre(pickup?['lat'] ?? boutique?['lat']),
                 lng: _nombre(pickup?['lng'] ?? boutique?['lng']),
@@ -505,12 +550,13 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
               const SizedBox(height: 12),
               _EtapeCourse(
                 couleur: TovoTheme.danger,
-                titre: 'Livrer',
+                titre: coursier ? 'Livrer le colis' : 'Livrer le repas',
                 nom: client?['name'] as String?,
                 repere: dropoff['hint'] as String?,
                 // Pour un colis, celui qui commande n'est presque jamais
                 // celui qui reçoit : le contact de destination prime.
-                telephone: (dropoff['contact'] as String?) ??
+                telephone:
+                    (dropoff['contact'] as String?) ??
                     client?['phone'] as String?,
                 lat: _nombre(dropoff['lat']),
                 lng: _nombre(dropoff['lng']),
@@ -559,7 +605,10 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
                 children: [
                   Text(
                     dejaPaye ? 'Déjà payé' : 'À encaisser',
-                    style: const TextStyle(fontSize: 13, color: TovoTheme.muted),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: TovoTheme.muted,
+                    ),
                   ),
                   Text(
                     Money.format((course['total'] as num?)?.toInt() ?? 0),
@@ -613,11 +662,13 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
           FilledButton(
             style: FilledButton.styleFrom(
               minimumSize: const Size.fromHeight(56),
-              backgroundColor:
-                  etape == 'delivered' ? TovoTheme.success : TovoTheme.teal,
+              backgroundColor: etape == 'delivered'
+                  ? TovoTheme.success
+                  : TovoTheme.teal,
             ),
             onPressed: controller.queue.hasPendingOrderChange
-                ? null : () => controller.avancer(etape, preuveLocale: _preuve?.path),
+                ? null
+                : () => controller.avancer(etape, preuveLocale: _preuve?.path),
             child: Text(
               controller.libelleProchaineEtape,
               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
@@ -645,7 +696,9 @@ class _BoutonPreuve extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
           border: Border.all(
-            color: fichier != null ? TovoTheme.success : const Color(0x14000000),
+            color: fichier != null
+                ? TovoTheme.success
+                : const Color(0x14000000),
           ),
         ),
         child: Row(
@@ -653,14 +706,21 @@ class _BoutonPreuve extends StatelessWidget {
             if (fichier != null)
               ClipRRect(
                 borderRadius: BorderRadius.circular(6),
-                child: Image.file(fichier!, width: 40, height: 40, fit: BoxFit.cover),
+                child: Image.file(
+                  fichier!,
+                  width: 40,
+                  height: 40,
+                  fit: BoxFit.cover,
+                ),
               )
             else
               const Icon(Icons.photo_camera_outlined, color: TovoTheme.muted),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                fichier != null ? 'Photo prise' : 'Photo de livraison (facultatif)',
+                fichier != null
+                    ? 'Photo prise'
+                    : 'Photo de livraison (facultatif)',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
@@ -669,7 +729,11 @@ class _BoutonPreuve extends StatelessWidget {
               ),
             ),
             if (fichier != null)
-              const Icon(Icons.check_circle, size: 18, color: TovoTheme.success),
+              const Icon(
+                Icons.check_circle,
+                size: 18,
+                color: TovoTheme.success,
+              ),
           ],
         ),
       ),
@@ -681,10 +745,10 @@ class _BoutonPreuve extends StatelessWidget {
 /// lequel la commande a transité. Un `as double?` sec renvoyait `null` sur un
 /// entier — et le bouton d'itinéraire disparaissait sans explication.
 double? _nombre(dynamic valeur) => switch (valeur) {
-      num n => n.toDouble(),
-      String s => double.tryParse(s),
-      _ => null,
-    };
+  num n => n.toDouble(),
+  String s => double.tryParse(s),
+  _ => null,
+};
 
 /// Ouvre l'itinéraire dans l'application de cartes du téléphone.
 ///
@@ -742,7 +806,9 @@ class _EtapeCourse extends StatelessWidget {
           color: actif ? couleur.withValues(alpha: 0.06) : Colors.transparent,
           borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
           border: Border.all(
-            color: actif ? couleur.withValues(alpha: 0.35) : const Color(0x14000000),
+            color: actif
+                ? couleur.withValues(alpha: 0.35)
+                : const Color(0x14000000),
           ),
         ),
         child: Column(
@@ -753,7 +819,10 @@ class _EtapeCourse extends StatelessWidget {
                 Container(
                   width: 9,
                   height: 9,
-                  decoration: BoxDecoration(color: couleur, shape: BoxShape.circle),
+                  decoration: BoxDecoration(
+                    color: couleur,
+                    shape: BoxShape.circle,
+                  ),
                 ),
                 const SizedBox(width: 8),
                 Text(
@@ -771,7 +840,10 @@ class _EtapeCourse extends StatelessWidget {
             if ((nom ?? '').trim().isNotEmpty)
               Text(
                 nom!,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             if ((repere ?? '').trim().isNotEmpty)
               Padding(
@@ -803,7 +875,10 @@ class _EtapeCourse extends StatelessWidget {
                         icon: const Icon(Icons.directions, size: 18),
                         label: const Text(
                           'Itinéraire',
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ),
@@ -819,7 +894,10 @@ class _EtapeCourse extends StatelessWidget {
                         icon: const Icon(Icons.call, size: 18),
                         label: const Text(
                           'Appeler',
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ),
@@ -865,7 +943,10 @@ class _LigneArticle extends StatelessWidget {
                 if (options.isNotEmpty)
                   Text(
                     options,
-                    style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: TovoTheme.muted,
+                    ),
                   ),
               ],
             ),
@@ -881,10 +962,10 @@ class _Repos extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const _Message(
-        icone: Icons.nightlight_outlined,
-        titre: 'Vous êtes hors ligne',
-        detail: 'Passez en ligne pour recevoir des courses.',
-      );
+    icone: Icons.nightlight_outlined,
+    titre: 'Vous êtes hors ligne',
+    detail: 'Passez en ligne pour recevoir des courses.',
+  );
 }
 
 class _AucuneCourse extends StatelessWidget {
@@ -892,14 +973,18 @@ class _AucuneCourse extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const _Message(
-        icone: Icons.check_circle_outline,
-        titre: 'Aucune course pour le moment',
-        detail: 'Vous serez prévenu dès qu’une course est disponible.',
-      );
+    icone: Icons.check_circle_outline,
+    titre: 'Aucune course pour le moment',
+    detail: 'Vous serez prévenu dès qu’une course est disponible.',
+  );
 }
 
 class _Message extends StatelessWidget {
-  const _Message({required this.icone, required this.titre, required this.detail});
+  const _Message({
+    required this.icone,
+    required this.titre,
+    required this.detail,
+  });
 
   final IconData icone;
   final String titre;

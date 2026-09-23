@@ -38,7 +38,10 @@ function ligneProduit(rang: number, item: Brut): string | null {
     prix(item.price ?? item.base_price),
     nettoyer(item.merchant_name, 40),
     item.is_available === false ? 'indisponible' : '',
-    item.requires_options === true ? 'options à choisir' : '',
+    // Pas de mention d'options ici : `requires_options` veut dire « trouvé
+    // par le nom d'une option », pas « a des options ». Le lire comme tel a
+    // fait ajouter un tacos bowl sans ses choix. ajouter_au_panier vérifie
+    // lui-même en base.
   ].filter(Boolean);
   return `${rang}. ${nom}${details.length ? ` — ${details.join(' — ')}` : ''} — product_id=${id}`;
 }

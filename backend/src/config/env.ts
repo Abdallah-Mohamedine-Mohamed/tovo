@@ -58,6 +58,24 @@ const schema = z.object({
   // doivent pas payer la latence du modèle conversationnel principal.
   GEMINI_FAST_MODEL: z.string().default('gemini-3.5-flash-lite'),
 
+  // Jev (TypeSafe) via OpenRouter, en mode ombre : consulté en arrière-plan
+  // sur chaque message, sa décision est JOURNALISÉE mais jamais utilisée.
+  // Sert à mesurer, depuis Railway, sa justesse et sa latence réelles.
+  OPENROUTER_API_KEY: z.string().optional(),
+  JEV_OMBRE: z.enum(['0', '1']).default('0'),
+  JEV_MODEL: z.string().default('typesafe/jev-1.13'),
+  // Aiguillage RÉEL : Jev choisit la route de chaque message écrit, et fait
+  // proposer des tuiles quand il hésite (ai/aiguillage.ts). « 0 » = retour
+  // immédiat aux détecteurs à mots, sans redéploiement de code.
+  JEV_AIGUILLAGE: z.enum(['0', '1']).default('0'),
+  // Au-dessus : Jev décide. En dessous : tuiles, ou chemin habituel.
+  JEV_SEUIL: z.coerce.number().min(0).max(1).default(0.8),
+  // Au-delà, on n'attend plus Jev : le message suit le chemin habituel.
+  // 2 500 ms : Jev tourne en parallèle de la préparation de la conversation,
+  // l'attente réelle ajoutée est bien moindre. À 1 500 ms, un appel sur
+  // quatre était abandonné depuis Niamey (scénarios du 23/09).
+  JEV_DELAI_MS: z.coerce.number().int().positive().default(2500),
+
   REDIS_URL: z.string().optional(),
   SENTRY_DSN: z.string().optional(),
   FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),

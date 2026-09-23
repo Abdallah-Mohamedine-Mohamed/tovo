@@ -21,7 +21,11 @@ describe('mémoire de ce que le client a vu', () => {
       },
     ]);
     expect(resume).toContain(`1. Poulet braisé — 2500 F — GARBA D'OR — product_id=${P1}`);
-    expect(resume).toContain(`2. Poulet frit — 2000 F — Otakoss — options à choisir — product_id=${P2}`);
+    // `requires_options` (« trouvé par une option ») n'est plus présenté au
+    // modèle comme « a des options » : c'est ce qui a fait partir un tacos
+    // bowl sans ses choix. ajouter_au_panier vérifie en base.
+    expect(resume).toContain(`2. Poulet frit — 2000 F — Otakoss — product_id=${P2}`);
+    expect(resume).not.toContain('options à choisir');
   });
 
   it('continue la numérotation d’un composant à l’autre et liste les boutiques à part', () => {

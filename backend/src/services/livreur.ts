@@ -1,5 +1,4 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { normaliserIntention } from '../ai/intents.js';
 import { envelope, orderTracking } from '../components/builders.js';
 import { queueDispatch } from './dispatch.js';
 
@@ -43,24 +42,7 @@ export async function messageLivreurEnRoute(db: SupabaseClient, codeAchat: strin
     : base;
 }
 
-/**
- * Le client demande-t-il un livreur, tout court ?
- *
- * « Je veux un livreur », « envoie-moi un coursier », « un livreur svp ».
- * Pas « où est mon livreur » ni « appelle le livreur » (celui d'une commande
- * en cours), ni « je veux devenir livreur ». L'article « un » fait la
- * différence : on demande UN livreur, on parle DU sien.
- */
-export function demandeUnLivreur(texte: string): boolean {
-  const n = normaliserIntention(texte);
-  if (!/\b(un|une|des) (livreur|livreurs|coursier|coursiers|livreuse)\b/.test(n)) return false;
-  if (/\b(devenir|travailler|travail|emploi|recrute|recrutez|recrutement|inscrire|inscription|postuler)\b/.test(n)) {
-    return false;
-  }
-  const demande = /\b(veux|voudrais|voulais|besoin|faut|envoie|envoyez|envoyer|trouve|trouvez|appelle|appelez|cherche|cherchez|commande|commander|donne|donnez|svp|stp|vite|urgent)\b/.test(n);
-  // « Un livreur » seul, ou presque, est une demande aussi.
-  return demande || n.split(' ').length <= 3;
-}
+export { demandeUnLivreur } from '../ai/intents.js';
 
 interface CommandeLivreur {
   clientOrderId: string;
@@ -103,6 +85,16 @@ export async function commanderUnLivreur(db: SupabaseClient, commande: CommandeL
     p_dropoff_hint: null,
     p_dropoff_lat: null,
     p_dropoff_lng: null,
+    // TOUS les paramètres, explicitement : la base garde une ancienne
+    // version à 11 paramètres de cette fonction, et avec un appel partiel
+    // PostgREST ne sait pas laquelle choisir (PGRST203 → 500). La migration
+    // 0055 supprime l'ancienne ; ceci reste juste avec ou sans elle.
+    p_parcel: 'small',
+    p_payment: 'cash',
+    p_scheduled_for: null,
+    p_parcel_note: null,
+    p_dropoff_contact: null,
+    p_pickup_contact: null,
   });
   if (error) throw error;
 

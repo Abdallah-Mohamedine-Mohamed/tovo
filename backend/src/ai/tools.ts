@@ -595,13 +595,15 @@ const obtenirProduit: Executor = async (args, ctx) => {
     merchant_name: (produit.merchants as { name?: string } | null)?.name ?? null,
   });
 
-  const { data: options } = await ctx.db
+  const { data: options, error: optionsError } = await ctx.db
     .from('product_options')
     .select(
       'id, name, is_required, min_select, max_select, sort_order, product_option_values(id, name, price_delta, is_available, sort_order)',
     )
     .eq('product_id', id)
     .order('sort_order');
+
+  if (optionsError) throw optionsError;
 
   const rows: OptionRow[] = (options ?? []).map((o) => ({
     id: o.id as string,
@@ -720,11 +722,36 @@ async function panierCourant(ctx: ToolContext): Promise<ToolOutcome> {
 const ajouterAuPanier: Executor = async (args, ctx) => {
   const productId = texte(args, 'product_id');
   if (!productId) return vide;
+  const selections = Array.isArray(args.selections) ? args.selections : [];
+
+  // Un produit à options ne s'ajoute JAMAIS sans que le client les ait
+  // choisies — obligatoires ou non. Un tacos bowl est parti sans ses choix :
+  // le modèle se fiait à `requires_options`, qui signifie « trouvé par le nom
+  // d'une option » et non « a des options ». Le filet est ici, dans l'outil,
+  // pour ne dépendre ni du modèle ni d'un drapeau : on montre la carte de
+  // choix, et c'est le client qui ajoute (POST /cart/items, sans modèle).
+  if (selections.length === 0) {
+    const { count } = await ctx.db
+      .from('product_options')
+      .select('id', { count: 'exact', head: true })
+      .eq('product_id', productId);
+    if ((count ?? 0) > 0) {
+      const fiche = await obtenirProduit({ product_id: productId }, ctx);
+      return {
+        ...fiche,
+        summary: {
+          ...(fiche.summary as Record<string, unknown>),
+          ajoute: false,
+          consigne: 'Ce produit a des options : la carte de choix est affichée. Le client choisit puis touche « Ajouter ». N’ajoute rien toi-même et ne dis pas que c’est dans le panier.',
+        },
+      };
+    }
+  }
 
   const { error } = await ctx.db.rpc('cart_add_item', {
     p_product_id: productId,
     p_quantity: nombre(args, 'quantite') ?? 1,
-    p_selections: Array.isArray(args.selections) ? args.selections : [],
+    p_selections: selections,
   });
 
   if (error) {
@@ -1191,7 +1218,7 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
   {
     name: 'obtenir_produit',
     description:
-      "Détaille un produit et ses options. À appeler OBLIGATOIREMENT avant d'ajouter au panier un produit qui a des options à choisir, pour connaître les choix disponibles. Un produit sans options s'ajoute directement.",
+      "Détaille un produit et affiche ses options au client. À appeler quand le client désigne un produit ou veut le personnaliser. Pour ajouter, appelle ajouter_au_panier : si le produit a des options, l'outil affiche lui-même la carte de choix au lieu d'ajouter.",
     parameters: {
       type: 'object',
       properties: { product_id: S.string('Identifiant renvoyé par une recherche') },

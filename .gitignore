@@ -30,3 +30,6 @@ Thumbs.db
 .idea/
 coverage/
 *.log
+
+# Généré par npm run staging:sql
+supabase/staging/

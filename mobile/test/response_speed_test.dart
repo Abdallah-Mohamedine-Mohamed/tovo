@@ -216,6 +216,30 @@ void main() {
     expect(sent, ['Je cherche un bon restaurant à Niamey']);
   });
 
+  testWidgets('explorer les boutiques ouvre le catalogue sans demander à l’IA', (
+    tester,
+  ) async {
+    final sent = <String>[];
+    final api = TovoApi(
+      tokenProvider: () => null,
+      client: MockClient((request) async {
+        if (request.url.path == '/chat') {
+          sent.add(jsonDecode(request.body)['text'] as String);
+        }
+        return jsonResponse(
+          request.url.path == '/categories' ? categoryBody : {},
+        );
+      }),
+    );
+    await open(tester, ChatScreen(api: api));
+
+    await tester.tap(find.text('Explorer les boutiques'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CatalogScreen), findsOneWidget);
+    expect(sent, isEmpty);
+  });
+
   testWidgets(
     'historique local visible sans attendre les commandes, puis nouveau fil protégé',
     (tester) async {

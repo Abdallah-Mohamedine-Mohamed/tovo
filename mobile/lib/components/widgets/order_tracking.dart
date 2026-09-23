@@ -13,6 +13,21 @@ const List<String> _etapesCommandeVisibles = [
   'Livrée',
 ];
 
+const List<String> _etapesColisVisibles = [
+  'Livreur trouvé',
+  'Colis récupéré',
+  'En livraison',
+  'Livré',
+];
+
+int _etapeColisVisible(String statut) => switch (statut) {
+  'assigned' => 0,
+  'picked_up' => 1,
+  'delivering' => 2,
+  'delivered' => 3,
+  _ => -1,
+};
+
 int _etapeCommandeVisible(String statut) {
   switch (statut) {
     case 'pending':
@@ -208,10 +223,12 @@ class _OrderTrackingState extends State<OrderTracking>
 
   @override
   Widget build(BuildContext context) {
-    final etapes = _etapesCommandeVisibles;
-    final courante = _etapeCommandeVisible(_statut);
-    final annulee = _statut == 'cancelled';
     final colis = widget.component.str('type', '') == 'courier';
+    final etapes = colis ? _etapesColisVisibles : _etapesCommandeVisibles;
+    final courante = colis
+        ? _etapeColisVisible(_statut)
+        : _etapeCommandeVisible(_statut);
+    final annulee = _statut == 'cancelled';
     // Même règle que la base (cancel_my_order) : tant qu'aucun livreur
     // n'est parti. La base tranche de toute façon, ce bouton ne fait
     // qu'éviter de le proposer quand c'est perdu d'avance.

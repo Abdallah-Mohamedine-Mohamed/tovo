@@ -22,9 +22,10 @@ Champs optionnels des composants : `product_carousel.data.browse` transporte les
 
 ## Déploiement
 
-1. Appliquer `supabase/migrations/0050_catalogue_pagine.sql` après les migrations précédentes. Elle ne modifie aucun produit et peut être rejouée.
-2. Déployer le backend avec le nouveau code.
-3. Installer l'APK client recompilé avec `SUPABASE_URL`, `SUPABASE_ANON_KEY` et `API_BASE_URL`. Ne jamais embarquer la clé service Supabase ni les clés des fournisseurs IA.
+1. Appliquer les migrations jusqu'à `supabase/migrations/0054_options_obligatoires_produits_configurables.sql` avant de déployer le backend. La migration 0052 rend les commandes en préparation visibles au livreur ; la 0054 bloque les Tacos Bowl sans options obligatoires configurées.
+2. Renseigner les véritables groupes et valeurs d'options obligatoires des Tacos Bowl dans le catalogue. Tovo ne les invente pas : ces produits restent non commandables jusque-là.
+3. Déployer le backend avec le nouveau code.
+4. Installer les APK client et livreur recompilés avec `SUPABASE_URL`, `SUPABASE_ANON_KEY` et `API_BASE_URL`. Ne jamais embarquer la clé service Supabase ni les clés des fournisseurs IA.
 
 Ne pas installer uniquement le nouveau mobile contre un ancien backend : la route du catalogue n'y existe pas encore.
 

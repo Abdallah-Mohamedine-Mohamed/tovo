@@ -213,8 +213,9 @@ class _ProductScreenState extends State<ProductScreen> {
             physics: widget.embedded
                 ? const NeverScrollableScrollPhysics()
                 : null,
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+            padding: EdgeInsets.fromLTRB(20, 8, 20, widget.embedded ? 32 : 108),
             children: [
+              if (!widget.embedded && photo.isEmpty) const SizedBox(height: 56),
               if (_loading)
                 const Padding(
                   padding: EdgeInsets.only(bottom: 16),
@@ -260,9 +261,20 @@ class _ProductScreenState extends State<ProductScreen> {
                   fontWeight: FontWeight.w700,
                 ),
               ),
+              if ((product['merchant_name'] as String?)?.isNotEmpty ==
+                  true) ...[
+                const SizedBox(height: 6),
+                Text(
+                  product['merchant_name'] as String,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: TovoTheme.inkDoux,
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               Text(
-                Money.format((product['price'] as num?)?.toInt() ?? 0),
+                Money.format(_unitPrice * _quantity),
                 style: const TextStyle(
                   fontSize: 19,
                   fontWeight: FontWeight.w600,
@@ -285,6 +297,7 @@ class _ProductScreenState extends State<ProductScreen> {
                 const SizedBox(height: 28),
                 for (final option in _options) _optionGroup(option),
               ],
+              if (_component != null) _quantityControl(),
             ],
           );
     if (widget.embedded) {
@@ -324,16 +337,29 @@ class _ProductScreenState extends State<ProductScreen> {
       canPop: !_adding,
       child: Scaffold(
         backgroundColor: Colors.white,
-        appBar: AppBar(
-          leading: IconButton(
-            tooltip: 'Retour à la carte',
-            onPressed: _adding ? null : () => Navigator.pop(context),
-            icon: const Icon(Icons.arrow_back_rounded, color: TovoTheme.ink),
+        floatingActionButton: _component == null ? null : _footer(),
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+        body: SafeArea(
+          child: Stack(
+            children: [
+              body,
+              Positioned(
+                top: 12,
+                left: 20,
+                child: Material(
+                  color: Colors.white,
+                  shape: const CircleBorder(),
+                  elevation: 1,
+                  child: IconButton(
+                    tooltip: 'Retour à la carte',
+                    onPressed: _adding ? null : () => Navigator.pop(context),
+                    icon: const Icon(Icons.arrow_back_rounded),
+                  ),
+                ),
+              ),
+            ],
           ),
-          title: Text(product['merchant_name'] as String? ?? 'Le produit'),
         ),
-        bottomNavigationBar: _component == null ? null : _footer(),
-        body: body,
       ),
     );
   }
@@ -474,116 +500,92 @@ class _ProductScreenState extends State<ProductScreen> {
     );
   }
 
-  Widget _footer() => SafeArea(
-    top: false,
-    bottom: !widget.embedded,
-    child: Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: widget.embedded
-            ? null
-            : const Border(top: BorderSide(color: Color(0xFFEEF0F0))),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                _error!,
-                style: const TextStyle(fontSize: 12, color: TovoTheme.danger),
-              ),
+  Widget _quantityControl() => Padding(
+    padding: const EdgeInsets.only(top: 10),
+    child: Row(
+      children: [
+        const Expanded(
+          child: Text(
+            'Quantité',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Diminuer la quantité',
+          onPressed: !_adding && _quantity > 1
+              ? () => setState(() => _quantity--)
+              : null,
+          icon: const Icon(Icons.remove_rounded, size: 20),
+        ),
+        Semantics(
+          liveRegion: true,
+          label: 'Quantité $_quantity',
+          child: SizedBox(
+            width: 32,
+            child: Text(
+              '$_quantity',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
-          Row(
+          ),
+        ),
+        IconButton(
+          tooltip: 'Augmenter la quantité',
+          onPressed: !_adding && _quantity < 50
+              ? () => setState(() => _quantity++)
+              : null,
+          icon: const Icon(Icons.add_rounded, size: 20),
+        ),
+      ],
+    ),
+  );
+
+  Widget _footer() => Padding(
+    padding: EdgeInsets.fromLTRB(20, 8, 20, widget.embedded ? 16 : 0),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        if (_error != null)
+          Text(_error!, style: const TextStyle(color: TovoTheme.danger)),
+        if (!_complete)
+          const Text(
+            'Choisissez les options obligatoires.',
+            style: TextStyle(fontSize: 12, color: TovoTheme.inkDoux),
+          ),
+        const SizedBox(height: 8),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: TovoTheme.teal,
+            foregroundColor: Colors.white,
+            minimumSize: const Size(0, 46),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            shape: const StadiumBorder(),
+          ),
+          onPressed: !_adding && _complete && _available ? _add : null,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              const Expanded(
+              if (_adding)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                const Icon(Icons.add_rounded, size: 20),
+              const SizedBox(width: 8),
+              Flexible(
                 child: Text(
-                  'Quantité',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                  _available ? 'Ajouter au panier' : 'Indisponible',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-              IconButton(
-                tooltip: 'Diminuer la quantité',
-                onPressed: !_adding && _quantity > 1
-                    ? () => setState(() => _quantity--)
-                    : null,
-                icon: const Icon(Icons.remove_rounded, size: 20),
-              ),
-              Semantics(
-                liveRegion: true,
-                label: 'Quantité $_quantity',
-                child: SizedBox(
-                  width: 32,
-                  child: Text(
-                    '$_quantity',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: 'Augmenter la quantité',
-                onPressed: !_adding && _quantity < 50
-                    ? () => setState(() => _quantity++)
-                    : null,
-                icon: const Icon(Icons.add_rounded, size: 20),
               ),
             ],
           ),
-          if (!_complete)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 8),
-              child: Text(
-                'Choisissez les options obligatoires pour continuer.',
-                style: TextStyle(fontSize: 12, color: TovoTheme.inkDoux),
-              ),
-            ),
-          const SizedBox(height: 4),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: TovoTheme.teal,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: !_adding && _complete && _available ? _add : null,
-            child: _adding
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            _available ? 'Ajouter au panier' : 'Indisponible',
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          Money.format(_unitPrice * _quantity),
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-          ),
-        ],
-      ),
+        ),
+      ],
     ),
   );
 }

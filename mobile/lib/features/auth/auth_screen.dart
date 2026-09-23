@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/marque.dart';
 import '../../core/theme.dart';
 
 /// Connexion par téléphone.
@@ -42,6 +41,7 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _occupe = false;
   String? _erreur;
   int _secondesAvantRenvoi = 0;
+  Timer? _resendTimer;
 
   /// Le Niger est en +227. On le préremplit plutôt que d'obliger chacun à le
   /// taper, tout en le laissant modifiable pour les numéros étrangers.
@@ -55,6 +55,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   void dispose() {
+    _resendTimer?.cancel();
     _numero.dispose();
     _code.dispose();
     super.dispose();
@@ -65,7 +66,13 @@ class _AuthScreenState extends State<AuthScreen> {
     return brut.startsWith('+') ? brut : '$_indicatifParDefaut$brut';
   }
 
-  bool get _numeroValide => _numeroComplet.length >= 11;
+  bool get _numeroValide {
+    final numero = _numeroComplet;
+    if (numero.startsWith('+227')) {
+      return RegExp(r'^\+227\d{8}$').hasMatch(numero);
+    }
+    return RegExp(r'^\+[1-9]\d{7,14}$').hasMatch(numero);
+  }
 
   Future<void> _envoyerCode() async {
     if (!_numeroValide) {
@@ -98,7 +105,7 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _verifierCode() async {
-    if (_code.text.trim().length < 4) {
+    if (_code.text.trim().length != 6) {
       setState(() => _erreur = 'Code incomplet.');
       return;
     }
@@ -147,92 +154,56 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   void _decompte() {
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!mounted || _secondesAvantRenvoi == 0) return;
+    _resendTimer?.cancel();
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || _secondesAvantRenvoi == 0) {
+        timer.cancel();
+        return;
+      }
       setState(() => _secondesAvantRenvoi--);
-      _decompte();
+      if (_secondesAvantRenvoi == 0) timer.cancel();
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // Le clavier mange la moitié de l'écran : on rétrécit le fond au lieu de
-    // pousser le formulaire hors champ. Sans ça, le champ disparaît sous le
-    // clavier au moment précis où l'on tape dedans.
-    final clavier = MediaQuery.of(context).viewInsets.bottom > 0;
-
     return Scaffold(
-      // Le fond se prolonge derrière le formulaire : la carte blanche glisse
-      // par-dessus, elle ne le découpe pas.
-      resizeToAvoidBottomInset: true,
-      body: Column(
-        children: [
-          Expanded(
-            flex: clavier ? 2 : 5,
-            child: FondAnime(
-              child: SafeArea(
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const MarqueTovo(taille: 64, couleur: Colors.white),
-                      const SizedBox(height: 18),
-                      Text(
-                        widget.titre,
-                        style: const TextStyle(
-                          fontSize: 38,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                          letterSpacing: -1.5,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 40),
-                        child: Text(
-                          widget.sousTitre,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 13,
-                            height: 1.5,
-                            color: Colors.white.withValues(alpha: 0.85),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Container(
-            width: double.infinity,
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(36)),
-              boxShadow: TovoTheme.ombreFlottante,
-            ),
-            child: SafeArea(
-              top: false,
+      backgroundColor: TovoTheme.canvas,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Center(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+                padding: const EdgeInsets.fromLTRB(28, 72, 28, 40),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 420),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Center(
-                        child: Container(
-                          width: 42,
-                          height: 5,
-                          margin: const EdgeInsets.only(bottom: 24),
-                          decoration: BoxDecoration(
-                            color: TovoTheme.line,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
+                      Text(
+                        _etape == _Etape.numero
+                            ? 'Bienvenue sur ${widget.titre}'
+                            : 'Vérifiez votre numéro',
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: -0.7,
+                          color: TovoTheme.ink,
                         ),
                       ),
+                      const SizedBox(height: 10),
+                      Text(
+                        _etape == _Etape.numero
+                            ? widget.sousTitre
+                            : 'Saisissez le code reçu pour continuer.',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          height: 1.5,
+                          color: TovoTheme.inkDoux,
+                        ),
+                      ),
+                      const SizedBox(height: 32),
                       if (_etape == _Etape.numero)
                         ..._etapeNumero()
                       else
@@ -241,11 +212,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         const SizedBox(height: 14),
                         Text(
                           _erreur!,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: TovoTheme.danger,
-                          ),
+                          style: const TextStyle(color: TovoTheme.danger),
                         ),
                       ],
                     ],
@@ -253,31 +220,31 @@ class _AuthScreenState extends State<AuthScreen> {
                 ),
               ),
             ),
-          ),
-        ],
+            if (Navigator.of(context).canPop())
+              Positioned(
+                left: 16,
+                top: 8,
+                child: IconButton(
+                  tooltip: 'Retour',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back_rounded),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 
   List<Widget> _etapeNumero() => [
-    const Text(
-      'Bienvenue',
-      style: TextStyle(
-        fontSize: 26,
-        fontWeight: FontWeight.w800,
-        letterSpacing: -0.5,
-      ),
-    ),
-    const SizedBox(height: 4),
-    const Text(
-      'Commençons par votre numéro de téléphone.',
-      style: TextStyle(fontSize: 13, color: TovoTheme.muted),
-    ),
-    const SizedBox(height: 22),
+    const Text('Votre numéro de téléphone'),
+    const SizedBox(height: 10),
     TextField(
+      key: const ValueKey('auth-phone'),
       controller: _numero,
       keyboardType: TextInputType.phone,
-      autofocus: true,
+      autofillHints: const [AutofillHints.telephoneNumber],
+      autofocus: false,
       textInputAction: TextInputAction.done,
       onSubmitted: (_) => _envoyerCode(),
       // Chiffres, « + » et espaces. Le « \d » compte : sans lui, la
@@ -293,14 +260,18 @@ class _AuthScreenState extends State<AuthScreen> {
         fontWeight: FontWeight.w600,
       ),
     ),
-    const SizedBox(height: 20),
+    const SizedBox(height: 16),
     FilledButton(
-      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(54)),
+      style: FilledButton.styleFrom(
+        minimumSize: const Size.fromHeight(50),
+        backgroundColor: TovoTheme.teal,
+        shape: const StadiumBorder(),
+      ),
       onPressed: _occupe ? null : _envoyerCode,
       child: _occupe
           ? const _Attente()
           : const Text(
-              'Commencer',
+              'Recevoir un code',
               style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
             ),
     ),
@@ -313,8 +284,10 @@ class _AuthScreenState extends State<AuthScreen> {
     ),
     const SizedBox(height: 8),
     TextField(
+      key: const ValueKey('auth-code'),
       controller: _code,
       keyboardType: TextInputType.number,
+      autofillHints: const [AutofillHints.oneTimeCode],
       autofocus: true,
       maxLength: 6,
       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
@@ -333,6 +306,11 @@ class _AuthScreenState extends State<AuthScreen> {
     ),
     const SizedBox(height: 20),
     FilledButton(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size.fromHeight(50),
+        backgroundColor: TovoTheme.teal,
+        shape: const StadiumBorder(),
+      ),
       onPressed: _occupe ? null : _verifierCode,
       child: _occupe ? const _Attente() : const Text('Valider'),
     ),

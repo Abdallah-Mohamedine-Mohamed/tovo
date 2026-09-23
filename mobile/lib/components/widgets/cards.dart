@@ -57,25 +57,15 @@ class ProductCard extends StatelessWidget {
               ),
               child: const Text('Comparer', style: TextStyle(fontSize: 12)),
             ),
-          if (actions.contains('add_to_cart'))
-            FilledButton(
-              style: FilledButton.styleFrom(
-                minimumSize: const Size(0, 42),
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-              ),
-              // Un produit indisponible garde son bouton, désactivé : le
-              // faire disparaître laisserait croire à un défaut d'affichage.
-              onPressed: disponible && id.isNotEmpty
-                  ? () => onInteraction(
-                      TovoInteraction('add_to_cart', {
-                        'product_id': id,
-                        'quantity': 1,
-                        'selections': const [],
-                      }),
-                    )
-                  : null,
-              child: Text(disponible ? 'Ajouter' : 'Indisponible'),
-            ),
+          TextButton.icon(
+            onPressed: disponible && id.isNotEmpty
+                ? () => onInteraction(
+                    TovoInteraction('select_product', {'product_id': id}),
+                  )
+                : null,
+            icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+            label: Text(disponible ? 'Voir' : 'Indisponible'),
+          ),
         ],
       ),
     );

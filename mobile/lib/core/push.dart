@@ -18,6 +18,7 @@ class TovoPush {
 
   static bool _initialise = false;
   static Future<void>? _initialisation;
+  static final Set<String> _enregistres = {};
 
   static Future<void> initialiser() {
     if (_initialise) return Future.value();
@@ -41,7 +42,10 @@ class TovoPush {
   static Future<void> enregistrer(String app) async {
     await initialiser();
     if (!_initialise) return;
-    if (Supabase.instance.client.auth.currentUser == null) return;
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    final key = '$app:$userId';
+    if (_enregistres.contains(key)) return;
 
     try {
       final messaging = FirebaseMessaging.instance;
@@ -58,7 +62,7 @@ class TovoPush {
       final jeton = await messaging.getToken();
       if (jeton == null) return;
 
-      await _envoyer(jeton, app);
+      if (await _envoyer(jeton, app)) _enregistres.add(key);
 
       // FCM régénère le jeton après une réinstallation ou un effacement des
       // données. Sans cette écoute, l'utilisateur cesserait silencieusement
@@ -77,6 +81,7 @@ class TovoPush {
   /// n'autorise à supprimer que ses propres jetons : d'où l'ordre, session
   /// encore ouverte.
   static Future<void> oublier() async {
+    _enregistres.clear();
     await initialiser();
     if (!_initialise) return;
     try {
@@ -94,7 +99,7 @@ class TovoPush {
     }
   }
 
-  static Future<void> _envoyer(String jeton, String app) async {
+  static Future<bool> _envoyer(String jeton, String app) async {
     try {
       await Supabase.instance.client.rpc(
         'register_push_token',
@@ -104,8 +109,10 @@ class TovoPush {
           'p_app': app,
         },
       );
+      return true;
     } on Exception catch (cause) {
       debugPrint('[push] jeton non enregistré : $cause');
+      return false;
     }
   }
 

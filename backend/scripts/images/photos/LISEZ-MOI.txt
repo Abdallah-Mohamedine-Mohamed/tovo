@@ -1,0 +1,24 @@
+PHOTOS POUR LE BANC DE RECHERCHE PAR IMAGE
+==========================================
+
+Déposez ici des photos prises AU TÉLÉPHONE, comme le ferait un client :
+emballages, plats, bouteilles, en main, sur une table, un peu de travers.
+Ne prenez PAS les photos du catalogue : le test n'aurait aucun sens.
+
+NOM DU FICHIER = le produit que la photo doit trouver, tel qu'il est
+écrit dans le catalogue Tovo (majuscules et accents sans importance).
+
+  coca-cola 33 cl.jpg
+  attieke poulet.jpg
+  doukounou.jpg
+
+Plusieurs photos du même produit : ajoutez un numéro.
+
+  coca-cola 33 cl 2.jpg
+
+Produit ABSENT du catalogue (pour vérifier qu'on n'invente rien) :
+commencez le nom par « absent - ».
+
+  absent - perceuse.jpg
+
+Formats : .jpg, .jpeg, .png, .webp. 40 à 50 photos suffisent pour commencer.

@@ -141,24 +141,48 @@ export async function cataloguePage(db: SupabaseClient, filter: CatalogueFilter,
   return page;
 }
 
+const COLONNES_ENSEIGNE = 'id, name, description, logo_url, address_hint, is_open, rating, prep_time_min';
+
+/**
+ * Chaque enseigne, plus une entrée par variante connue (« otacos » pour
+ * O'Takoss, migration 0056) : le rapprochement de noms les essaie toutes.
+ * `retrouver` ramène ensuite chaque entrée à la vraie fiche, sans doublon.
+ */
+function avecVariantes(catalogue: Array<MerchantRow & { search_aliases?: string | null }>): MerchantRow[] {
+  return catalogue.flatMap((m) => [
+    m,
+    ...String(m.search_aliases ?? '').split(/[;,\n]/).map((v) => v.trim()).filter((v) => v.length >= 3)
+      .map((name) => ({ ...m, name })),
+  ]);
+}
+function retrouver(trouvees: MerchantRow[], catalogue: MerchantRow[]): MerchantRow[] {
+  const ids = [...new Set(trouvees.map((m) => m.id))];
+  return ids.flatMap((id) => catalogue.filter((m) => m.id === id).slice(0, 1));
+}
+
 export async function resolveCatalogueIntent(db: SupabaseClient, message: string, pending?: PendingMerchantChoice): Promise<CatalogueIntent> {
-  const catalogue: MerchantRow[] = [];
+  const catalogue: Array<MerchantRow & { search_aliases?: string | null }> = [];
+  // Avec les variantes si la migration 0056 est passée, sans sinon : la
+  // reconnaissance des enseignes ne doit jamais tomber pour une colonne.
+  let colonnes = `${COLONNES_ENSEIGNE}, search_aliases`;
   for (let offset = 0; ; offset += 500) {
     const { data, error } = await db.from('merchants')
-      .select('id, name, description, logo_url, address_hint, is_open, rating, prep_time_min')
+      .select(colonnes)
       .eq('is_approved', true).order('id').range(offset, offset + 499);
+    if (error?.code === '42703' && colonnes !== COLONNES_ENSEIGNE) { colonnes = COLONNES_ENSEIGNE; offset -= 500; continue; }
     if (error) throw error;
-    catalogue.push(...(data ?? []) as MerchantRow[]);
+    catalogue.push(...(data ?? []) as unknown as MerchantRow[]);
     if ((data?.length ?? 0) < 500) break;
   }
+  const variantes = avecVariantes(catalogue);
   const marker = nomBoutiqueApresMarqueur(message);
   const openOnly = demandeBoutiqueOuverte(message);
   const productQuery = normaliserIntention(message).split(' ').filter((word) => !MENU_WORDS.has(word)).join(' ');
-  let candidates = marker
-    ? boutiquesCorrespondantes(marker, catalogue)
-    : boutiquesMentionnees(message, catalogue);
+  let candidates = retrouver(marker
+    ? boutiquesCorrespondantes(marker, variantes)
+    : boutiquesMentionnees(message, variantes), catalogue);
   if (!marker && candidates.length === 0 && productQuery) {
-    candidates = boutiquesCorrespondantes(productQuery, catalogue);
+    candidates = retrouver(boutiquesCorrespondantes(productQuery, variantes), catalogue);
   }
   if (!marker && pending && normaliserIntention(message).split(' ').length <= 4) {
     const offered = pending.merchant_ids.flatMap((id) => catalogue.filter((merchant) => merchant.id === id));

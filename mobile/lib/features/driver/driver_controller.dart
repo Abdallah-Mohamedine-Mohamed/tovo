@@ -247,12 +247,21 @@ class DriverController extends ChangeNotifier {
         : null;
     final courses = await ordersRequest;
     if (_disposed) return;
+    if (!courses.ok) {
+      erreur = 'Impossible de vérifier les courses. Réessayez.';
+      pool = const [];
+      chargement = false;
+      notifyListeners();
+      return;
+    }
     final enCours = _trouverCourseActive(courses);
 
     if (enCours != null) {
       final suivi = await _api.get('/orders/$enCours');
       if (suivi.ok && suivi.components.isNotEmpty) {
         course = suivi.components.first.data;
+      } else {
+        erreur = 'Impossible de charger la course en cours. Réessayez.';
       }
       pool = const [];
     } else if (courses.ok && !queue.hasPendingOrderChange) {
@@ -260,7 +269,12 @@ class DriverController extends ChangeNotifier {
       if (_online) {
         final reponse = await (poolRequest ?? _api.get('/driver/pool'));
         if (_disposed) return;
-        if (reponse.ok) pool = _extraireOrdres(reponse);
+        if (reponse.ok) {
+          pool = _extraireOrdres(reponse);
+        } else {
+          pool = const [];
+          erreur = 'Impossible de vérifier les courses. Réessayez.';
+        }
       } else {
         pool = const [];
       }
@@ -402,16 +416,18 @@ class DriverController extends ChangeNotifier {
   String? get prochaineEtape => etapeSuivante(statut);
 
   static String? etapeSuivante(String statut) => switch (statut) {
-    'assigned' => 'delivering',
+    'assigned' => 'picked_up',
     'picked_up' => 'delivering',
     'delivering' => 'delivered',
     _ => null,
   };
 
   String get libelleProchaineEtape => switch (statut) {
-    'assigned' => 'Je pars livrer',
+    'assigned' =>
+      course?['type'] == 'courier' ? 'Colis récupéré' : 'Repas récupéré',
     'picked_up' => 'Je pars livrer',
-    'delivering' => 'Commande livrée',
+    'delivering' =>
+      course?['type'] == 'courier' ? 'Colis livré' : 'Commande livrée',
     _ => '',
   };
 }
