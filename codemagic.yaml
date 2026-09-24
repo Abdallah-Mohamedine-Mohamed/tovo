@@ -12,9 +12,10 @@
 #
 # DEUX IDENTIFIANTS À SIGNER : com.tovoapp.UserApp, l'app publiée, et
 # com.tovoapp.UserApp.TovoOrderWidget, son extension (Live Activity du suivi
-# de commande). Chacun a besoin de son profil App Store. Le second doit
-# être enregistré une fois sur developer.apple.com > Identifiers : Codemagic
-# crée les profils, jamais les identifiants.
+# de commande). Chacun a besoin de son profil App Store, créé à la main sur
+# developer.apple.com : Codemagic récupère les profils existants (build du
+# 24/09/2026 : « Tovo App Store » trouvé, rien pour le widget), il ne crée
+# ni les identifiants ni ces profils-là.
 #
 # UNE SEULE APP côté iOS, en revanche. Contrairement à Android où trois flavors cohabitent
 # (client / livreur / boutique), le projet iOS n'a qu'un schéma. Livreur et
@@ -184,8 +185,8 @@ workflows:
           xcode-project use-profiles --project ios/Runner.xcodeproj
 
           echo "===== profils trouvés ====="
-          ls -1 ~/Library/MobileDevice/Provisioning Profiles/ 2>/dev/null
-          ls -1 ~/Library/Developer/Xcode/UserData/Provisioning Profiles/ 2>/dev/null
+          ls -1 ~/Library/MobileDevice/"Provisioning Profiles"/ 2>/dev/null
+          ls -1 ~/Library/Developer/Xcode/UserData/"Provisioning Profiles"/ 2>/dev/null
 
           echo "===== identités de signature ====="
           security find-identity -v -p codesigning || true
@@ -207,10 +208,14 @@ workflows:
           # tard, noyé dans le journal d'archive.
           WIDGET_ID="$BUNDLE_ID.TovoOrderWidget"
           if ! grep -q "$WIDGET_ID" /Users/builder/export_options.plist; then
+            # Codemagic RÉCUPÈRE les profils existants, il ne les crée pas :
+            # « Tovo App Store » a été fait à la main, celui du widget aussi.
             echo "Aucun profil pour $WIDGET_ID (le widget Live Activity)." >&2
-            echo "À faire une fois : developer.apple.com > Certificates, IDs & Profiles >" >&2
-            echo "Identifiers > « + » > App IDs > App, Bundle ID explicite $WIDGET_ID," >&2
-            echo "aucune capacité à cocher. Puis relancer le build : Codemagic créera le profil." >&2
+            echo "À faire une fois sur developer.apple.com > Certificates, IDs & Profiles :" >&2
+            echo " 1. Identifiers : l'App ID $WIDGET_ID doit exister (aucune capacité)." >&2
+            echo " 2. Profiles > « + » > App Store Connect > App ID $WIDGET_ID >" >&2
+            echo "    certificat « Apple Distribution » (Tayp LTD) > nom « Tovo Widget App Store »." >&2
+            echo "Puis relancer le build." >&2
             exit 1
           fi
 
