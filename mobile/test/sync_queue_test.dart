@@ -29,7 +29,10 @@ void main() {
       return reponse;
     });
 
-    return (api: TovoApi(client: client, tokenProvider: () => 'jeton'), appels: appels);
+    return (
+      api: TovoApi(client: client, tokenProvider: () => 'jeton'),
+      appels: appels,
+    );
   }
 
   http.Response ok() =>
@@ -39,7 +42,8 @@ void main() {
       http.Response(jsonEncode({'error': message}), 409);
 
   /// Une coupure réseau se manifeste par une exception, pas par un code HTTP.
-  MockClient clientHorsLigne(List<String> appels) => MockClient((requete) async {
+  MockClient clientHorsLigne(List<String> appels) =>
+      MockClient((requete) async {
         appels.add('${requete.method} ${requete.url.path}');
         throw http.ClientException('réseau indisponible');
       });
@@ -78,7 +82,10 @@ void main() {
 
   test("hors ligne, l'action reste en file et rien n'est perdu", () async {
     final appels = <String>[];
-    final api = TovoApi(client: clientHorsLigne(appels), tokenProvider: () => 'jeton');
+    final api = TovoApi(
+      client: clientHorsLigne(appels),
+      tokenProvider: () => 'jeton',
+    );
     final file = SyncQueue(api: api);
     await file.load();
 
@@ -89,30 +96,37 @@ void main() {
     expect(file.rejets, isEmpty);
   });
 
-  test("l'ordre est préservé : la file s'arrête à la première coupure", () async {
-    var appelsFaits = 0;
-    final client = MockClient((requete) async {
-      appelsFaits++;
-      // La première passe, la seconde tombe : la troisième ne doit JAMAIS
-      // partir, sans quoi on confirmerait une livraison avant la
-      // récupération.
-      if (appelsFaits == 1) return ok();
-      throw http.ClientException('coupure');
-    });
+  test(
+    "l'ordre est préservé : la file s'arrête à la première coupure",
+    () async {
+      var appelsFaits = 0;
+      final client = MockClient((requete) async {
+        appelsFaits++;
+        // La première passe, la seconde tombe : la troisième ne doit JAMAIS
+        // partir, sans quoi on confirmerait une livraison avant la
+        // récupération.
+        if (appelsFaits == 1) return ok();
+        throw http.ClientException('coupure');
+      });
 
-    final file = SyncQueue(
-      api: TovoApi(client: client, tokenProvider: () => 'jeton'),
-    );
-    await file.load();
+      final file = SyncQueue(
+        api: TovoApi(client: client, tokenProvider: () => 'jeton'),
+      );
+      await file.load();
 
-    await file.submit(SyncAction.accept('cmd-1'));
-    await file.submit(SyncAction.status('cmd-1', 'picked_up'));
-    await file.submit(SyncAction.status('cmd-1', 'delivering'));
-    await file.flush();
+      await file.submit(SyncAction.accept('cmd-1'));
+      await file.submit(SyncAction.status('cmd-1', 'picked_up'));
+      await file.submit(SyncAction.status('cmd-1', 'delivering'));
+      await file.flush();
 
-    expect(file.pending.value, 2, reason: 'les deux dernières restent en attente');
-    expect(appelsFaits, lessThanOrEqualTo(4));
-  });
+      expect(
+        file.pending.value,
+        2,
+        reason: 'les deux dernières restent en attente',
+      );
+      expect(appelsFaits, lessThanOrEqualTo(4));
+    },
+  );
 
   test('un refus du serveur retire l’action et l’explique', () async {
     final ctx = faireApi([refus('course déjà prise')]);
@@ -157,14 +171,21 @@ void main() {
 
   test('une entrée corrompue ne bloque pas la file entière', () async {
     SharedPreferences.setMockInitialValues({
-      'tovo.driver.sync_queue.v1': ['{ceci n\'est pas du json', SyncAction.accept('cmd-9').encode()],
+      'tovo.driver.sync_queue.v1': [
+        '{ceci n\'est pas du json',
+        SyncAction.accept('cmd-9').encode(),
+      ],
     });
 
     final ctx = faireApi([ok()]);
     final file = SyncQueue(api: ctx.api);
     await file.load();
 
-    expect(file.pending.value, 1, reason: 'seule l’entrée valide est conservée');
+    expect(
+      file.pending.value,
+      1,
+      reason: 'seule l’entrée valide est conservée',
+    );
 
     await file.flush();
     expect(file.pending.value, 0);

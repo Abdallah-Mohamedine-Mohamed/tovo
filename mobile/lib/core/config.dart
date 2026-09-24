@@ -14,7 +14,9 @@ class TovoConfig {
   const TovoConfig._();
 
   static const String supabaseUrl = String.fromEnvironment('SUPABASE_URL');
-  static const String supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+  static const String supabaseAnonKey = String.fromEnvironment(
+    'SUPABASE_ANON_KEY',
+  );
 
   /// Backend Tovo. En développement sur émulateur Android, `localhost`
   /// désigne l'émulateur lui-même : utiliser 10.0.2.2 pour joindre la
@@ -28,7 +30,8 @@ class TovoConfig {
   /// n'émet que des composants supportés par cette version.
   static const int contractVersion = 1;
 
-  static bool get isConfigured => supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
+  static bool get isConfigured =>
+      supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
 
   /// Message d'erreur explicite plutôt qu'un écran blanc au démarrage.
   static String get configurationError =>

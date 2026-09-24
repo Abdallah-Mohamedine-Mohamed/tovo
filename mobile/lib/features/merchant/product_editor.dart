@@ -113,10 +113,15 @@ class _ProductEditorState extends State<ProductEditor> {
     // l'identifiant de la boutique. Sans elle, l'écriture est refusée.
     final chemin = '${widget.merchantId}/$productId.jpg';
 
-    await _db.storage.from('products').upload(
+    await _db.storage
+        .from('products')
+        .upload(
           chemin,
           image,
-          fileOptions: const FileOptions(upsert: true, contentType: 'image/jpeg'),
+          fileOptions: const FileOptions(
+            upsert: true,
+            contentType: 'image/jpeg',
+          ),
         );
 
     return _db.storage.from('products').getPublicUrl(chemin);
@@ -143,7 +148,9 @@ class _ProductEditorState extends State<ProductEditor> {
       final valeurs = {
         'merchant_id': widget.merchantId,
         'name': _nom.text.trim(),
-        'description': _description.text.trim().isEmpty ? null : _description.text.trim(),
+        'description': _description.text.trim().isEmpty
+            ? null
+            : _description.text.trim(),
         'price': prix,
         'category_id': _categorieId,
         'is_available': _disponible,
@@ -151,7 +158,11 @@ class _ProductEditorState extends State<ProductEditor> {
 
       final String productId;
       if (_creation) {
-        final res = await _db.from('products').insert(valeurs).select('id').single();
+        final res = await _db
+            .from('products')
+            .insert(valeurs)
+            .select('id')
+            .single();
         productId = res['id'] as String;
       } else {
         productId = widget.produit!['id'] as String;
@@ -198,11 +209,7 @@ class _ProductEditorState extends State<ProductEditor> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _Photo(
-            url: _imageUrl,
-            fichier: _nouvelleImage,
-            onTap: _choisirPhoto,
-          ),
+          _Photo(url: _imageUrl, fichier: _nouvelleImage, onTap: _choisirPhoto),
           const SizedBox(height: 8),
           const Text(
             'Une photo suffit souvent : Tovo la décrit automatiquement pour que vos clients vous trouvent.',
@@ -234,7 +241,10 @@ class _ProductEditorState extends State<ProductEditor> {
           ),
           const SizedBox(height: 16),
 
-          const Text('Catégorie', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+          const Text(
+            'Catégorie',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
           const SizedBox(height: 6),
           DropdownButtonFormField<String>(
             initialValue: _categorieId,
@@ -248,7 +258,9 @@ class _ProductEditorState extends State<ProductEditor> {
                     // Une sous-catégorie est décalée : « Repas » puis
                     // « — Plats locaux », pour qu'on voie la hiérarchie sans
                     // avoir à naviguer.
-                    c['parent_id'] == null ? '${c['name']}' : '   — ${c['name']}',
+                    c['parent_id'] == null
+                        ? '${c['name']}'
+                        : '   — ${c['name']}',
                     style: const TextStyle(fontSize: 13),
                   ),
                 ),
@@ -268,7 +280,6 @@ class _ProductEditorState extends State<ProductEditor> {
             activeThumbColor: TovoTheme.success,
             contentPadding: EdgeInsets.zero,
           ),
-
 
           // Les options exigent un identifiant de produit : on ne peut donc
           // les gérer qu'après la création. Le dire explicitement évite au
@@ -305,7 +316,10 @@ class _ProductEditorState extends State<ProductEditor> {
 
           if (_erreur != null) ...[
             const SizedBox(height: 12),
-            Text(_erreur!, style: const TextStyle(fontSize: 12, color: TovoTheme.danger)),
+            Text(
+              _erreur!,
+              style: const TextStyle(fontSize: 12, color: TovoTheme.danger),
+            ),
           ],
 
           const SizedBox(height: 24),
@@ -315,7 +329,10 @@ class _ProductEditorState extends State<ProductEditor> {
                 ? const SizedBox(
                     height: 18,
                     width: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
                   )
                 : Text(_creation ? 'Créer le produit' : 'Enregistrer'),
           ),
@@ -325,20 +342,20 @@ class _ProductEditorState extends State<ProductEditor> {
   }
 
   InputDecoration _decoration(String hint) => InputDecoration(
-        hintText: hint,
-        hintStyle: const TextStyle(fontSize: 13, color: Color(0xFFAAAAAA)),
-        filled: true,
-        fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
-          borderSide: const BorderSide(color: Color(0x14000000)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
-          borderSide: const BorderSide(color: Color(0x14000000)),
-        ),
-      );
+    hintText: hint,
+    hintStyle: const TextStyle(fontSize: 13, color: Color(0xFFAAAAAA)),
+    filled: true,
+    fillColor: Colors.white,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
+      borderSide: const BorderSide(color: Color(0x14000000)),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
+      borderSide: const BorderSide(color: Color(0x14000000)),
+    ),
+  );
 }
 
 class _Champ extends StatelessWidget {
@@ -363,7 +380,10 @@ class _Champ extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(libelle, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+        Text(
+          libelle,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        ),
         const SizedBox(height: 6),
         TextField(
           controller: controller,
@@ -376,7 +396,10 @@ class _Champ extends StatelessWidget {
             hintStyle: const TextStyle(fontSize: 13, color: Color(0xFFAAAAAA)),
             filled: true,
             fillColor: Colors.white,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 12,
+            ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
               borderSide: const BorderSide(color: Color(0x14000000)),
@@ -415,13 +438,13 @@ class _Photo extends StatelessWidget {
         child: fichier != null
             ? Image.file(fichier!, fit: BoxFit.cover, width: double.infinity)
             : url != null && url!.isNotEmpty
-                ? Image.network(
-                    url!,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    errorBuilder: (_, __, ___) => const _Invite(),
-                  )
-                : const _Invite(),
+            ? Image.network(
+                url!,
+                fit: BoxFit.cover,
+                width: double.infinity,
+                errorBuilder: (_, __, ___) => const _Invite(),
+              )
+            : const _Invite(),
       ),
     );
   }
@@ -432,16 +455,16 @@ class _Invite extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.add_a_photo_outlined, size: 30, color: TovoTheme.muted),
-            SizedBox(height: 8),
-            Text(
-              'Ajouter une photo',
-              style: TextStyle(fontSize: 13, color: TovoTheme.muted),
-            ),
-          ],
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.add_a_photo_outlined, size: 30, color: TovoTheme.muted),
+        SizedBox(height: 8),
+        Text(
+          'Ajouter une photo',
+          style: TextStyle(fontSize: 13, color: TovoTheme.muted),
         ),
-      );
+      ],
+    ),
+  );
 }

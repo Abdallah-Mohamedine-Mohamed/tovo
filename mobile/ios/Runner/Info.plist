@@ -2,6 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>NSSupportsLiveActivities</key>
+    <true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
 	<!-- L’appareil photo et la photothèque : la recherche par photo les
 	     utilise tous les deux, le client choisit lequel. Sans ces deux
 	     clés, iOS termine l’application à l’instant où elle demande

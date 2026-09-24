@@ -106,6 +106,13 @@ class MerchantCard extends StatelessWidget {
                   TovoInteraction('select_merchant', {
                     'merchant_id': id,
                     'query': component.str('pending_query'),
+                    // De quoi afficher l'en-tête de la boutique tout de suite.
+                    'apercu': {
+                      'name': component.str('name'),
+                      'logo_url': ?(logo.isEmpty ? null : logo),
+                      'address_hint': ?(adresse.isEmpty ? null : adresse),
+                      'is_open': ouverte,
+                    },
                   }),
                 ),
           child: Padding(
@@ -130,7 +137,8 @@ class MerchantCard extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 15.5,
+                          fontFamily: TovoTheme.policeNoms,
+                          fontSize: 17,
                           fontWeight: FontWeight.w700,
                           color: TovoTheme.ink,
                         ),

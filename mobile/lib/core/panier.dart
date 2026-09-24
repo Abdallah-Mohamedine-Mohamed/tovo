@@ -51,14 +51,20 @@ class PanierEnDirect extends ValueNotifier<ApercuPanier?> {
   static final PanierEnDirect instance = PanierEnDirect._();
 
   /// Appelé par [TovoApi] sur chaque réponse : un panier présent la met à
-  /// jour. Une réponse sans panier ne dit rien du panier : on n'y touche pas.
-  void observer(TovoResponse reponse) {
+  /// jour. Une réponse sans panier ne dit en général rien du panier : on n'y
+  /// touche pas. Sauf sur les routes du panier lui-même : le serveur n'y
+  /// renvoie aucun panier quand il est vide (dernier article retiré,
+  /// « vider »). Avant, la pastille gardait alors l'ancien article.
+  void observer(TovoResponse reponse, {String? chemin}) {
     if (!reponse.ok) return;
     for (final composant in reponse.components) {
       if (composant.type == 'cart_summary') {
         value = ApercuPanier.depuis(composant);
         return;
       }
+    }
+    if (chemin == '/cart' || (chemin?.startsWith('/cart/') ?? false)) {
+      value = null;
     }
   }
 

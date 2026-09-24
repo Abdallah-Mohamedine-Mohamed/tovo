@@ -92,6 +92,11 @@ void main() {
       );
     }
     await previewFont.load();
+    final flame = FontLoader('Flame');
+    for (final g in ['Regular', 'Bold']) {
+      flame.addFont(rootBundle.load('assets/fonts/Flame-$g.otf'));
+    }
+    await flame.load();
     final icons = FontLoader('MaterialIcons');
     icons.addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
     await icons.load();
@@ -419,7 +424,7 @@ void main() {
     await capture(tester, '13-accueil-historique');
     await tester.tap(find.text('Je voudrais du garba'));
     await tester.pumpAndSettle();
-    expect(find.text('Parcourir les 6 produits'), findsOneWidget);
+    expect(find.bySemanticsLabel('Tout voir, 6 produits'), findsOneWidget);
     await capture(tester, '02-conversation');
   });
 
@@ -485,7 +490,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(ProductScreen), findsOneWidget);
+    // Panier déjà commencé : pas de « Commander · prix » qui tairait le total.
     expect(find.text('Ajouter au panier').hitTestable(), findsOneWidget);
+    expect(find.textContaining('Commander ·'), findsNothing);
     await capture(tester, '05-produit');
     // Dans le panneau, la photo est une vignette, toujours agrandissable.
     await tester.tap(

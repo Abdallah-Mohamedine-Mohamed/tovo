@@ -23,8 +23,11 @@ void main() {
 
   test('chaque module affiché a une icône', () {
     for (final slug in slugs) {
-      expect(IconesCategories.pour(slug), isNotNull,
-          reason: '$slug n’a pas d’icône : la grille afficherait un sac gris');
+      expect(
+        IconesCategories.pour(slug),
+        isNotNull,
+        reason: '$slug n’a pas d’icône : la grille afficherait un sac gris',
+      );
     }
   });
 
@@ -53,7 +56,11 @@ void main() {
       // vérifierait l'état vide qui précède le décodage.
       await tester.pumpAndSettle();
 
-      expect(tester.takeException(), isNull, reason: '$chemin ne se dessine pas');
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: '$chemin ne se dessine pas',
+      );
       expect(find.byType(SvgPicture), findsOneWidget);
     }
   });

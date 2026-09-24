@@ -283,9 +283,26 @@ export async function seedOrder(params: {
   return data.id as string;
 }
 
-/** Supprime tous les utilisateurs créés — la cascade emporte le reste. */
+/**
+ * Supprime tous les utilisateurs créés — la cascade emporte le reste.
+ *
+ * Sauf les commandes : `orders.user_id` et `orders.merchant_id` sont en
+ * `on delete restrict`. La suppression de l'utilisateur échouait alors en
+ * silence, et chaque passage laissait ~28 commandes ouvertes dans la base
+ * de dev (57 le 24/09). Au-delà de 30, le pool livreur n'affichait plus les
+ * nouvelles, et le test du pool échouait. On retire donc d'abord les
+ * commandes passées par ces utilisateurs, ou reçues par leurs boutiques.
+ */
 export async function cleanup(): Promise<void> {
-  for (const id of created.splice(0)) {
-    await admin.auth.admin.deleteUser(id).catch(() => undefined);
+  const ids = created.splice(0);
+  if (ids.length > 0) {
+    const { data: boutiques } = await admin.from('merchants').select('id').in('owner_id', ids);
+    const merchantIds = (boutiques ?? []).map((b) => b.id as string);
+    await admin.from('orders').delete().in('user_id', ids);
+    if (merchantIds.length > 0) await admin.from('orders').delete().in('merchant_id', merchantIds);
+  }
+  for (const id of ids) {
+    const { error } = await admin.auth.admin.deleteUser(id);
+    if (error) console.warn(`nettoyage : utilisateur de test ${id} non supprimé — ${error.message}`);
   }
 }

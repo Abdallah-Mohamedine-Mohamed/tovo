@@ -1,5 +1,6 @@
 import { serviceClient } from './supabase.js';
 import { sendPush, type PushMessage } from './notifications.js';
+import { updateLiveActivities } from './liveActivities.js';
 
 /**
  * Notifications liées au cycle d'une commande.
@@ -61,6 +62,7 @@ async function purger(invalides: string[]): Promise<void> {
  * Silencieux si l'étape ne le concerne pas — voir la liste ci-dessus.
  */
 export async function notifierClient(orderId: string, statut: string): Promise<void> {
+  await updateLiveActivities(orderId, statut).catch(() => undefined);
   const modele = MESSAGES_CLIENT[statut];
   if (!modele) return;
 

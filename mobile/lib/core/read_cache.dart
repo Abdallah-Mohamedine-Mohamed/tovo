@@ -38,6 +38,10 @@ class TovoReadCache {
       path == '/addresses' ||
       path.startsWith('/conversations/') ||
       path.startsWith('/products/') ||
+      // La carte d'une boutique : rouverte, elle s'affiche aussitôt.
+      RegExp(r'^/merchants/[^/]+/carte$').hasMatch(path) ||
+      // La page d'une catégorie (boutiques, photos, sous-catégories).
+      RegExp(r'^/categories/[^/]+/boutiques$').hasMatch(path) ||
       RegExp(r'^/categories/[^/]+/merchants$').hasMatch(path);
 
   Future<void> _hydrate() => _hydration ??= () async {

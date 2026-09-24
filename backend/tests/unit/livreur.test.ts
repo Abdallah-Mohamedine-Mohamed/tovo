@@ -13,6 +13,8 @@ vi.mock('../../src/services/dispatch.js', () => ({ queueDispatch }));
 vi.mock('../../src/services/orderNotifications.js', () => ({
   notifierBoutique: vi.fn(async () => undefined),
   notifierLivreursCommandeRecue: vi.fn(async () => undefined),
+  // L'annulation prévient le client (et son Live Activity iOS).
+  notifierClient: vi.fn(async () => undefined),
 }));
 vi.mock('../../src/services/payments.js', () => ({ ouvrirPaiement: vi.fn() }));
 

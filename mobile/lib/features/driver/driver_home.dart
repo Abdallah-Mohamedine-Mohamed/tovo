@@ -18,16 +18,22 @@ import 'driver_controller.dart';
 /// la tête, sous le soleil — chaque écran doit tenir en un coup d'œil et
 /// n'offrir qu'une seule action.
 class DriverHome extends StatefulWidget {
-  const DriverHome({super.key, required this.api});
+  const DriverHome({super.key, required this.api, this.controleur});
 
   final TovoApi api;
+
+  /// Pour les captures de revue : un contrôleur placé dans un état précis
+  /// (en ligne, en course…). L'application ne le fournit jamais.
+  @visibleForTesting
+  final DriverController? controleur;
 
   @override
   State<DriverHome> createState() => _DriverHomeState();
 }
 
 class _DriverHomeState extends State<DriverHome> with WidgetsBindingObserver {
-  late final DriverController _c = DriverController(api: widget.api);
+  late final DriverController _c =
+      widget.controleur ?? DriverController(api: widget.api);
 
   @override
   void initState() {
@@ -310,6 +316,19 @@ class _Separateur extends StatelessWidget {
       Container(width: 1, height: 30, color: TovoTheme.line);
 }
 
+/// Les textes par défaut de la base (« À voir avec le client », « Position
+/// du client ») ne sont pas des adresses : on ne les montre pas comme telles.
+String? _lisible(Object? texte) {
+  final t = (texte as String?)?.trim() ?? '';
+  if (t.isEmpty) return null;
+  const parDefaut = {
+    'À voir avec le client',
+    'Position du client',
+    'À préciser au téléphone',
+  };
+  return parDefaut.contains(t) ? null : t;
+}
+
 /// Une course disponible dans le pool.
 class _CarteCourse extends StatelessWidget {
   const _CarteCourse({required this.ordre, required this.controller});
@@ -322,6 +341,8 @@ class _CarteCourse extends StatelessWidget {
     final gain = (ordre['driver_earning'] as num?)?.toInt() ?? 0;
     final total = (ordre['total'] as num?)?.toInt() ?? 0;
     final coursier = ordre['type'] == 'courier';
+    final recuperer = coursier && ordre['mode'] == 'recuperer';
+    final distance = (ordre['distance_m'] as num?)?.toInt();
     final peutAccepter = ordre['can_accept'] == true;
     final statut = ordre['status'] as String? ?? '';
     final preparation = switch (statut) {
@@ -354,7 +375,16 @@ class _CarteCourse extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  coursier ? 'Colis' : 'Livraison',
+                  // La sorte de course, et la distance jusqu'au départ :
+                  // les deux choses qui décident un livreur, avec le gain.
+                  [
+                    recuperer
+                        ? 'Colis à aller chercher'
+                        : coursier
+                        ? 'Colis chez le client'
+                        : 'Livraison',
+                    if (distance != null) 'à ${Money.distance(distance)}',
+                  ].join(' · '),
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -386,8 +416,25 @@ class _CarteCourse extends StatelessWidget {
             ),
           if ((ordre['merchant_name'] as String?)?.isNotEmpty == true)
             const SizedBox(height: 5),
+          // Un colis : d'où partir. Sans cette ligne, le livreur lisait
+          // « À voir avec le client » et acceptait à l'aveugle.
+          if (coursier)
+            Text(
+              recuperer
+                  ? 'À chercher : ${_lisible(ordre['pickup_hint']) ?? 'à demander au client'}'
+                  : 'Départ : chez le client',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: TovoTheme.ink,
+              ),
+            ),
+          if (coursier) const SizedBox(height: 5),
           Text(
-            (ordre['dropoff_hint'] as String?) ?? '',
+            recuperer
+                ? 'À apporter chez le client'
+                : _lisible(ordre['dropoff_hint']) ??
+                      (coursier ? 'Destination à demander au client' : ''),
             style: const TextStyle(fontSize: 13, color: TovoTheme.ink),
           ),
           const SizedBox(height: 2),
@@ -542,12 +589,15 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
                     : coursier
                     ? 'Récupérer le colis'
                     : 'Récupérer le repas',
-                nom:
-                    (boutique?['name'] as String?) ??
-                    (course['merchant_name'] as String?),
-                repere:
-                    (pickup?['hint'] as String?) ??
-                    (boutique?['hint'] as String?),
+                // Venir chez le client : c'est lui, au départ.
+                nom: coursier && !recuperer
+                    ? (client?['name'] as String?)
+                    : ((boutique?['name'] as String?) ??
+                          (course['merchant_name'] as String?)),
+                repere: coursier && !recuperer
+                    ? _lisible(pickup?['hint']) ?? 'Chez le client'
+                    : ((pickup?['hint'] as String?) ??
+                          (boutique?['hint'] as String?)),
                 // Sur une course coursier il n'y a pas de boutique : le
                 // contact du point de retrait est celui qui remet le colis.
                 // À défaut de contact sur place, le client : c'est chez lui
@@ -570,8 +620,15 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
                     : coursier
                     ? 'Livrer le colis'
                     : 'Livrer le repas',
-                nom: client?['name'] as String?,
-                repere: dropoff['hint'] as String?,
+                // Le client n'est à l'arrivée que pour un repas ou « aller
+                // chercher ». Pour un colis qu'il envoie, le destinataire est
+                // un autre : afficher son nom ici faisait livrer l'expéditeur.
+                nom: coursier && !recuperer
+                    ? null
+                    : (client?['name'] as String?),
+                repere:
+                    _lisible(dropoff['hint']) ??
+                    (coursier ? 'Destination à demander au client' : null),
                 // Pour un colis, celui qui commande n'est presque jamais
                 // celui qui reçoit : le contact de destination prime.
                 telephone:

@@ -51,7 +51,7 @@ function chargerCompteDeService(): Record<string, unknown> | null {
 
 let application: App | null = null;
 
-function firebase(): App | null {
+export function firebaseApp(): App | null {
   if (application) return application;
 
   const compte = chargerCompteDeService();
@@ -94,7 +94,7 @@ export function pushStatus(): { enabled: boolean; projectId?: string; error?: st
 export async function sendPush(messages: PushMessage[]): Promise<PushResult> {
   const valides = messages.filter((m) => m.token.length > 0);
 
-  const app = firebase();
+  const app = firebaseApp();
   if (!app || valides.length === 0) {
     for (const message of valides) {
       // eslint-disable-next-line no-console

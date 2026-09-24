@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:tovo/features/catalog/cart_screen.dart';
 import 'package:tovo/core/panier.dart';
 import 'package:tovo/components/register_all.dart';
 import 'package:tovo/components/registry.dart';
@@ -32,6 +33,11 @@ void main() {
       fonts.addFont(rootBundle.load('assets/fonts/DMSans-$weight.ttf'));
     }
     await fonts.load();
+    final flame = FontLoader('Flame');
+    for (final g in ['Regular', 'Bold']) {
+      flame.addFont(rootBundle.load('assets/fonts/Flame-$g.otf'));
+    }
+    await flame.load();
     final icons = FontLoader('MaterialIcons');
     icons.addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
     await icons.load();
@@ -266,12 +272,24 @@ void main() {
     await tester.tap(find.text('Poulet grillé 0'));
     await tester.pumpAndSettle();
     expect(find.byTooltip('Fermer la fiche'), findsOneWidget);
-    await tester.tap(find.text('Ajouter au panier'));
+    await tester.tap(find.text('Ajouter'));
     await tester.pumpAndSettle();
     expect(find.byTooltip('Fermer la fiche'), findsNothing);
     expect(find.byTooltip('Voir le panier'), findsOneWidget);
     expect(find.text('Voir mon panier'), findsNothing);
     expect(find.text('53 produits'), findsOneWidget);
+  });
+
+  testWidgets('« Commander » ajoute et ouvre directement la commande', (
+    tester,
+  ) async {
+    await open(tester);
+    await tester.tap(find.text('Poulet grillé 0'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Commander ·'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Fermer la fiche'), findsNothing);
+    expect(find.byType(CartScreen), findsOneWidget);
   });
 
   testWidgets('la fiche flottante se ferme sans quitter le catalogue', (
@@ -317,7 +335,8 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('Parcourir les 76 produits'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.bySemanticsLabel('Tout voir, 76 produits'));
     expect(selected?.action, 'browse_catalog');
     expect(selected?.payload['merchant_ids'], ['centre']);
     expect(selected?.payload['query'], 'poulet');

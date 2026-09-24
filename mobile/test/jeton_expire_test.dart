@@ -39,9 +39,13 @@ void main() {
 
     expect(reponse.ok, isTrue, reason: 'le second essai devait aboutir');
     expect(renouvellements, 1);
-    expect(jetonsVus, ['Bearer vieux', 'Bearer neuf'],
-        reason: 'le second essai doit porter le NOUVEAU jeton, '
-            'sinon renouveler ne sert à rien');
+    expect(
+      jetonsVus,
+      ['Bearer vieux', 'Bearer neuf'],
+      reason:
+          'le second essai doit porter le NOUVEAU jeton, '
+          'sinon renouveler ne sert à rien',
+    );
   });
 
   test('un renouvellement impossible ne boucle pas', () async {
@@ -61,7 +65,11 @@ void main() {
     final reponse = await api.get('/orders');
 
     expect(reponse.ok, isFalse);
-    expect(appels, 1, reason: 'un renouvellement refusé ne doit pas être rejoué');
+    expect(
+      appels,
+      1,
+      reason: 'un renouvellement refusé ne doit pas être rejoué',
+    );
   });
 
   test('un 401 persistant s’arrête après un seul second essai', () async {

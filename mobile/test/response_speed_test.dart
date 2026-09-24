@@ -229,29 +229,30 @@ void main() {
     expect(sent, ['Je cherche un bon restaurant à Niamey']);
   });
 
-  testWidgets('explorer les boutiques ouvre le catalogue sans demander à l’IA', (
-    tester,
-  ) async {
-    final sent = <String>[];
-    final api = TovoApi(
-      tokenProvider: () => null,
-      client: MockClient((request) async {
-        if (request.url.path == '/chat') {
-          sent.add(jsonDecode(request.body)['text'] as String);
-        }
-        return jsonResponse(
-          request.url.path == '/categories' ? categoryBody : {},
-        );
-      }),
-    );
-    await open(tester, ChatScreen(api: api));
+  testWidgets(
+    'explorer les boutiques ouvre le catalogue sans demander à l’IA',
+    (tester) async {
+      final sent = <String>[];
+      final api = TovoApi(
+        tokenProvider: () => null,
+        client: MockClient((request) async {
+          if (request.url.path == '/chat') {
+            sent.add(jsonDecode(request.body)['text'] as String);
+          }
+          return jsonResponse(
+            request.url.path == '/categories' ? categoryBody : {},
+          );
+        }),
+      );
+      await open(tester, ChatScreen(api: api));
 
-    await tester.tap(find.text('Explorer les boutiques'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Explorer les boutiques'));
+      await tester.pumpAndSettle();
 
-    expect(find.byType(CatalogScreen), findsOneWidget);
-    expect(sent, isEmpty);
-  });
+      expect(find.byType(CatalogScreen), findsOneWidget);
+      expect(sent, isEmpty);
+    },
+  );
 
   testWidgets(
     'historique local visible sans attendre les commandes, puis nouveau fil protégé',
@@ -578,9 +579,9 @@ void main() {
       expect(find.byType(ProductScreen), findsOneWidget);
       expect(find.byTooltip('Fermer la fiche'), findsOneWidget);
       expect(find.text('Résultats'), findsNothing);
-      await tester.ensureVisible(find.text('Ajouter au panier'));
+      await tester.ensureVisible(find.text('Ajouter'));
       await tester.pump();
-      await tester.tap(find.text('Ajouter au panier'));
+      await tester.tap(find.text('Ajouter'));
       await tester.pumpAndSettle();
       // Ajouté, et le panneau se referme : pas de bandeau « Ajouté au
       // panier » ni de « Voir mon panier », jugés bruyants par le client.
@@ -637,13 +638,23 @@ void main() {
         isTrue,
       );
       expect(find.byTooltip('Arrêter et transcrire'), findsOneWidget);
+      // Attente bornée plutôt qu'un délai fixe : sous la charge de la suite
+      // complète, l'encodage de la note dépassait parfois 500 ms.
       await tester.runAsync(() async {
         await tester.tap(find.byTooltip('Arrêter et transcrire'));
-        await Future<void>.delayed(const Duration(milliseconds: 500));
+        for (var i = 0; i < 50 && transcriptionCount == 0; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
       });
       await tester.pump();
       await tester.pump();
       expect(transcriptionCount, 1);
+      for (var i = 0; i < 20 && sent.isEmpty; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)),
+        );
+        await tester.pump();
+      }
       await tester.pump(const Duration(milliseconds: 300));
       expect(sent.single['text'], 'Je veux du poulet');
       expect(sent.single.containsKey('audio'), isFalse);

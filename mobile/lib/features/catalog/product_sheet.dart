@@ -3,12 +3,22 @@ import 'package:flutter/material.dart';
 import '../../core/api.dart';
 import 'product_screen.dart';
 
-Future<bool?> showProductSheet(
+/// Comment la fiche s'est refermée, quand un article a été ajouté.
+enum IssueFiche {
+  /// « Ajouter » : le client continue ses achats.
+  ajoute,
+
+  /// « Commander » : l'article est au panier, on ouvre tout de suite la
+  /// commande. Un seul article ne doit pas obliger à passer par le panier.
+  commander,
+}
+
+Future<IssueFiche?> showProductSheet(
   BuildContext context, {
   required TovoApi api,
   required String productId,
   Map<String, dynamic> initialProduct = const {},
-}) => showModalBottomSheet<bool>(
+}) => showModalBottomSheet<IssueFiche>(
   context: context,
   isScrollControlled: true,
   useSafeArea: true,
@@ -31,8 +41,9 @@ Future<bool?> showProductSheet(
             productId: productId,
             initialProduct: initialProduct,
             embedded: true,
-            onClose: () => Navigator.pop(sheetContext, false),
-            onAdded: () => Navigator.pop(sheetContext, true),
+            onClose: () => Navigator.pop(sheetContext),
+            onAdded: () => Navigator.pop(sheetContext, IssueFiche.ajoute),
+            onOrder: () => Navigator.pop(sheetContext, IssueFiche.commander),
           ),
         ),
       ),

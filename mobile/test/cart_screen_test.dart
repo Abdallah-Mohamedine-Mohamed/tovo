@@ -197,32 +197,29 @@ void main() {
     },
   );
 
-  testWidgets(
-    'un seul geste : le prix est sur le bouton, la commande part',
-    (tester) async {
-      await open(tester);
-      // Un seul devis : panier ET livraison dans la même requête.
-      expect(
-        requests.where(
-          (r) => r.url.path == '/cart' && r.url.queryParameters['lat'] != null,
-        ),
-        hasLength(1),
-      );
-      expect(find.text(Money.format(600)), findsOneWidget);
-      expect(libelle(tester), 'Commander · ${Money.format(3700)}');
-      expect(requests.where((r) => r.url.path == '/orders'), isEmpty);
+  testWidgets('un seul geste : le prix est sur le bouton, la commande part', (
+    tester,
+  ) async {
+    await open(tester);
+    // Un seul devis : panier ET livraison dans la même requête.
+    expect(
+      requests.where(
+        (r) => r.url.path == '/cart' && r.url.queryParameters['lat'] != null,
+      ),
+      hasLength(1),
+    );
+    expect(find.text(Money.format(600)), findsOneWidget);
+    expect(libelle(tester), 'Commander · ${Money.format(3700)}');
+    expect(requests.where((r) => r.url.path == '/orders'), isEmpty);
 
-      await tester.tap(find.byType(FilledButton));
-      await tester.pumpAndSettle();
-      final commandes = requests
-          .where((r) => r.url.path == '/orders')
-          .toList();
-      expect(commandes, hasLength(1));
-      final corps = jsonDecode(commandes.single.body) as Map<String, dynamic>;
-      expect(corps['dropoff_hint'], 'Yantala, maison bleue');
-      expect(corps['payment_method'], 'cash');
-    },
-  );
+    await tester.tap(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    final commandes = requests.where((r) => r.url.path == '/orders').toList();
+    expect(commandes, hasLength(1));
+    final corps = jsonDecode(commandes.single.body) as Map<String, dynamic>;
+    expect(corps['dropoff_hint'], 'Yantala, maison bleue');
+    expect(corps['payment_method'], 'cash');
+  });
 
   testWidgets('le paiement se choisit d’un geste, sans liste à cocher', (
     tester,
@@ -233,9 +230,7 @@ void main() {
     await tester.tap(find.byType(FilledButton));
     await tester.pumpAndSettle();
     final corps =
-        jsonDecode(
-              requests.singleWhere((r) => r.url.path == '/orders').body,
-            )
+        jsonDecode(requests.singleWhere((r) => r.url.path == '/orders').body)
             as Map<String, dynamic>;
     expect(corps['payment_method'], 'mobile_money');
   });
@@ -289,24 +284,25 @@ void main() {
     expect(bouton(tester).onPressed, isNull);
   });
 
-  testWidgets('échec d’une quantité : on revient au panier connu, sans impasse', (
-    tester,
-  ) async {
-    await open(tester);
-    failure = true;
-    await tester.tap(find.byTooltip('Ajouter un Tacos aux boulettes'));
-    await tester.pumpAndSettle();
-    // L'erreur s'affiche près des articles, et le panier redevient celui
-    // que le serveur connaît : quantité 1, toujours commandable.
-    expect(find.text('Hors ligne'), findsOneWidget);
-    expect(find.text('1'), findsOneWidget);
-    expect(bouton(tester).onPressed, isNotNull);
-    failure = false;
-    await tester.tap(find.byTooltip('Ajouter un Tacos aux boulettes'));
-    await tester.pumpAndSettle();
-    expect(quantity, 2);
-    expect(find.text('Hors ligne'), findsNothing);
-  });
+  testWidgets(
+    'échec d’une quantité : on revient au panier connu, sans impasse',
+    (tester) async {
+      await open(tester);
+      failure = true;
+      await tester.tap(find.byTooltip('Ajouter un Tacos aux boulettes'));
+      await tester.pumpAndSettle();
+      // L'erreur s'affiche près des articles, et le panier redevient celui
+      // que le serveur connaît : quantité 1, toujours commandable.
+      expect(find.text('Hors ligne'), findsOneWidget);
+      expect(find.text('1'), findsOneWidget);
+      expect(bouton(tester).onPressed, isNotNull);
+      failure = false;
+      await tester.tap(find.byTooltip('Ajouter un Tacos aux boulettes'));
+      await tester.pumpAndSettle();
+      expect(quantity, 2);
+      expect(find.text('Hors ligne'), findsNothing);
+    },
+  );
 
   testWidgets('devis impossible : message au-dessus du bouton, qui réessaie', (
     tester,

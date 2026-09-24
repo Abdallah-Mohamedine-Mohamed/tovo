@@ -111,6 +111,17 @@ workflows:
       - name: Paquets Flutter
         script: flutter pub get
 
+      - name: Configuration Firebase iOS
+        script: |
+          : "${GOOGLE_SERVICE_INFO_PLIST_B64:?Ajoutez GOOGLE_SERVICE_INFO_PLIST_B64 au groupe tovo_config dans Codemagic.}"
+          printf '%s' "$GOOGLE_SERVICE_INFO_PLIST_B64" | base64 -D > ios/Runner/GoogleService-Info.plist
+          plutil -lint ios/Runner/GoogleService-Info.plist
+          PLIST_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :BUNDLE_ID' ios/Runner/GoogleService-Info.plist)
+          if [ "$PLIST_BUNDLE_ID" != "$BUNDLE_ID" ]; then
+            echo "Le bundle ID du fichier Firebase ne correspond pas à celui de Tovo." >&2
+            exit 1
+          fi
+
       # LE NUMÉRO DE BUILD EN PREMIER, parce que la préparation du projet
       # l'inscrit dans la configuration Xcode. Calculé après, il arriverait
       # trop tard.

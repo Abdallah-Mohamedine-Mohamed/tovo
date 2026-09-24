@@ -41,12 +41,8 @@ class _CourierFormState extends State<CourierForm> {
 
   /// La position du CLIENT : le départ quand il envoie, l'arrivée quand on
   /// lui apporte.
-  late double? _lat = _num(
-    _recuperer ? _dropoff['lat'] : _pickup['lat'],
-  );
-  late double? _lng = _num(
-    _recuperer ? _dropoff['lng'] : _pickup['lng'],
-  );
+  late double? _lat = _num(_recuperer ? _dropoff['lat'] : _pickup['lat']);
+  late double? _lng = _num(_recuperer ? _dropoff['lng'] : _pickup['lng']);
 
   static double? _num(Object? v) => (v as num?)?.toDouble();
 

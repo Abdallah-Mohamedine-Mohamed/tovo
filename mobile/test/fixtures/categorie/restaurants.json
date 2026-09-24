@@ -1,0 +1,202 @@
+{
+ "category": {
+  "id": "e5366d83-224f-4d18-8668-4e19b1e15864",
+  "name": "Restaurants"
+ },
+ "mode": "merchants",
+ "merchants": [
+  {
+   "id": "d6845284-3a03-45c7-9fc2-a816d0c9a58b",
+   "name": "227 TWO TWO SEVEN ( francophonie )",
+   "logo_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/d6845284-3a03-45c7-9fc2-a816d0c9a58b/logo/2025-02-19-67b5f72e0e293.webp",
+   "cover_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/d6845284-3a03-45c7-9fc2-a816d0c9a58b/cover/2025-02-19-67b5f72e30d98.webp",
+   "address_hint": "Niamey-Niger",
+   "is_open": true,
+   "prep_time_min": 15,
+   "distance_m": null,
+   "rayons": [
+    "BURGERS",
+    "BOISSONS",
+    "SALADE COMPOSEE",
+    "MENU WINGS",
+    "BOX POULET PANE",
+    "CHAWARMA",
+    "TENDERS"
+   ]
+  },
+  {
+   "id": "ac443efa-8e86-418b-be16-0e6015546d95",
+   "name": "Albek Food",
+   "logo_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/ac443efa-8e86-418b-be16-0e6015546d95/logo/2025-02-25-67bdad5820064.webp",
+   "cover_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/ac443efa-8e86-418b-be16-0e6015546d95/cover/2025-02-25-67bdad583aba6.webp",
+   "address_hint": "Complexe en face de la Grande Mosquée",
+   "is_open": true,
+   "prep_time_min": 15,
+   "distance_m": null,
+   "rayons": [
+    "PLATS",
+    "DESSERTS",
+    "GRILLADES",
+    "SANDWICH",
+    "PIZZA SPECIALES",
+    "CHAWARMA",
+    "TACOS",
+    "BURGERS",
+    "PIZZA",
+    "ALLOCO",
+    "CREPES",
+    "POULET",
+    "FRITES"
+   ]
+  },
+  {
+   "id": "4c2d38ac-e45d-487d-a670-25edf9058934",
+   "name": "ATTIEKE IVOIRE",
+   "logo_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/4c2d38ac-e45d-487d-a670-25edf9058934/logo/2025-08-13-689c5b07a6f7f.webp",
+   "cover_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/4c2d38ac-e45d-487d-a670-25edf9058934/cover/2025-08-13-689c5b07ce3fb.webp",
+   "address_hint": "Niamey Pavée Lazaret",
+   "is_open": true,
+   "prep_time_min": 15,
+   "distance_m": null,
+   "rayons": [
+    "PLATS"
+   ]
+  },
+  {
+   "id": "294a436d-f784-45e6-affd-ab28fdff15b2",
+   "name": "BOBA ( Centre Aéré",
+   "logo_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/294a436d-f784-45e6-affd-ab28fdff15b2/logo/2024-11-06-672b90e51a019.webp",
+   "cover_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/294a436d-f784-45e6-affd-ab28fdff15b2/cover/2025-01-07-677d183320c0b.webp",
+   "address_hint": "Niamey-Niger",
+   "is_open": true,
+   "prep_time_min": 15,
+   "distance_m": null,
+   "rayons": [
+    "THE AU LAIT",
+    "COCKTAILS",
+    "SPECIAL BOBA",
+    "MILKSHAKES",
+    "THE GLACE",
+    "SMOOTHIES"
+   ]
+  },
+  {
+   "id": "06d94b57-1255-4f4f-b060-2ffbb0c9fa59",
+   "name": "BOBA ( Nouveau Marché )",
+   "logo_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/06d94b57-1255-4f4f-b060-2ffbb0c9fa59/logo/2024-11-11-6731ebd42f433.webp",
+   "cover_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/06d94b57-1255-4f4f-b060-2ffbb0c9fa59/cover/2025-01-07-677d1ad3152bf.webp",
+   "address_hint": "Niamey-Niger",
+   "is_open": true,
+   "prep_time_min": 15,
+   "distance_m": null,
+   "rayons": [
+    "THE GLACE",
+    "COCKTAILS",
+    "MILKSHAKES",
+    "SPECIAL BOBA",
+    "THE AU LAIT",
+    "SMOOTHIES"
+   ]
+  },
+  {
+   "id": "c7980e6b-6fd2-4b57-a0ff-eeb39badc4f6",
+   "name": "BOBA ( Plateau )",
+   "logo_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/c7980e6b-6fd2-4b57-a0ff-eeb39badc4f6/logo/2024-11-11-6731e09f7cefc.webp",
+   "cover_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/c7980e6b-6fd2-4b57-a0ff-eeb39badc4f6/cover/2025-01-07-677d1bdb314f5.webp",
+   "address_hint": "Niamey-Niger",
+   "is_open": true,
+   "prep_time_min": 15,
+   "distance_m": null,
+   "rayons": [
+    "THE GLACE",
+    "MILKSHAKES",
+    "THE AU LAIT",
+    "SPECIAL BOBA",
+    "SMOOTHIES",
+    "COCKTAILS"
+   ]
+  },
+  {
+   "id": "7be979ab-c4f2-4f6c-9100-8750bb7b3083",
+   "name": "227 TWO TWO SEVEN ( plateau )",
+   "logo_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/7be979ab-c4f2-4f6c-9100-8750bb7b3083/logo/2025-02-19-67b5f87e95fa5.webp",
+   "cover_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/7be979ab-c4f2-4f6c-9100-8750bb7b3083/cover/2025-02-19-67b5f87ec33c4.webp",
+   "address_hint": "Niamey-Niger",
+   "is_open": false,
+   "prep_time_min": 15,
+   "distance_m": null,
+   "rayons": [
+    "BOX POULET PANE",
+    "CHAWARMA",
+    "SALADE COMPOSEE",
+    "BURGERS",
+    "MENU WINGS"
+   ]
+  },
+  {
+   "id": "5ca0bde5-5fff-47a4-928a-53c93ed61b7a",
+   "name": "Complexe GMK",
+   "logo_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/5ca0bde5-5fff-47a4-928a-53c93ed61b7a/logo/2025-09-08-68be38ce87a36.webp",
+   "cover_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/5ca0bde5-5fff-47a4-928a-53c93ed61b7a/cover/2025-09-08-68bed7773a5b3.webp",
+   "address_hint": "Niamey, Complexe en face de la grande mosquée",
+   "is_open": false,
+   "prep_time_min": 15,
+   "distance_m": null,
+   "rayons": [
+    "TACOS"
+   ]
+  }
+ ],
+ "rayons": [
+  {
+   "name": "BURGERS",
+   "boutiques": 13
+  },
+  {
+   "name": "GRILLADES",
+   "boutiques": 13
+  },
+  {
+   "name": "SANDWICH",
+   "boutiques": 11
+  },
+  {
+   "name": "CHAWARMA",
+   "boutiques": 10
+  },
+  {
+   "name": "PIZZA",
+   "boutiques": 9
+  },
+  {
+   "name": "SALADE COMPOSEE",
+   "boutiques": 9
+  },
+  {
+   "name": "BOX POULET PANE",
+   "boutiques": 7
+  },
+  {
+   "name": "CREPES",
+   "boutiques": 7
+  },
+  {
+   "name": "TACOS",
+   "boutiques": 7
+  },
+  {
+   "name": "BOISSONS CHAUDES",
+   "boutiques": 6
+  }
+ ],
+ "images": {
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/d6845284-3a03-45c7-9fc2-a816d0c9a58b/cover/2025-02-19-67b5f72e30d98.webp": "c0.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/ac443efa-8e86-418b-be16-0e6015546d95/cover/2025-02-25-67bdad583aba6.webp": "c1.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/4c2d38ac-e45d-487d-a670-25edf9058934/cover/2025-08-13-689c5b07ce3fb.webp": "c2.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/294a436d-f784-45e6-affd-ab28fdff15b2/cover/2025-01-07-677d183320c0b.webp": "c3.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/06d94b57-1255-4f4f-b060-2ffbb0c9fa59/cover/2025-01-07-677d1ad3152bf.webp": "c4.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/c7980e6b-6fd2-4b57-a0ff-eeb39badc4f6/cover/2025-01-07-677d1bdb314f5.webp": "c5.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/7be979ab-c4f2-4f6c-9100-8750bb7b3083/cover/2025-02-19-67b5f87ec33c4.webp": "c6.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/5ca0bde5-5fff-47a4-928a-53c93ed61b7a/cover/2025-09-08-68bed7773a5b3.webp": "c7.webp"
+ }
+}

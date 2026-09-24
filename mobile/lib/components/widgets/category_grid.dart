@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/catalog_image.dart';
+import '../../core/icones_3d.dart';
 import '../../core/icones_categories.dart';
 import '../../core/theme.dart';
 import '../registry.dart';
@@ -51,7 +52,7 @@ class CategoryGrid extends StatelessWidget {
             crossAxisSpacing: 8,
             mainAxisSpacing: 8,
             mainAxisExtent:
-                102 + (MediaQuery.textScalerOf(context).scale(12) - 12) * 3,
+                110 + (MediaQuery.textScalerOf(context).scale(12) - 12) * 3,
           ),
           itemCount: items.length,
           itemBuilder: (context, index) {
@@ -64,6 +65,11 @@ class CategoryGrid extends StatelessWidget {
               // cas que la précédente ne couvre pas — les rayons de boutique
               // n'ont pas de slug, et les catégories récentes n'ont pas
               // encore d'illustration.
+              // D'abord l'icône 3D, à la Glovo : par slug pour une catégorie,
+              // par le nom pour un rayon de boutique (« Burgers », « Jus »).
+              icone3d:
+                  Icones3d.categorie(item['slug'] as String?) ??
+                  Icones3d.rayon((item['name'] as String?) ?? ''),
               asset: IconesCategories.pour(item['slug'] as String?),
               imageUrl: item['image_url'] as String?,
               emoji: item['icon'] as String?,
@@ -98,6 +104,7 @@ class CategoryGrid extends StatelessWidget {
 /// la tuile s'enfonce et s'assombrit, ce qui se voit toujours.
 class _Tuile extends StatefulWidget {
   const _Tuile({
+    required this.icone3d,
     required this.asset,
     required this.imageUrl,
     required this.emoji,
@@ -105,8 +112,11 @@ class _Tuile extends StatefulWidget {
     required this.onTap,
   });
 
-  /// Dessin embarqué dans l'application. Prioritaire : il s'affiche avant
-  /// le réseau, ce qui compte pour la première grille que voit le client.
+  /// Icône 3D embarquée (Fluent Emoji), posée sur un disque clair.
+  final String? icone3d;
+
+  /// Dessin embarqué dans l'application. Il s'affiche avant le réseau, ce
+  /// qui compte pour la première grille que voit le client.
   final String? asset;
 
   /// Illustration posée en base, pour ce que l'app n'embarque pas.
@@ -137,6 +147,19 @@ class _TuileState extends State<_Tuile> {
   /// obligerait à transporter une couleur par catégorie depuis le serveur,
   /// pour un résultat identique.
   Widget _dessin() {
+    final icone = widget.icone3d;
+    if (icone != null) {
+      return DecoratedBox(
+        decoration: const BoxDecoration(
+          color: Color(0xFFF4F5F5),
+          shape: BoxShape.circle,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(7),
+          child: Image.asset(icone, filterQuality: FilterQuality.medium),
+        ),
+      );
+    }
     final asset = widget.asset;
     if (asset != null) {
       return SvgPicture.asset(asset, width: 44, height: 44);
@@ -196,7 +219,7 @@ class _TuileState extends State<_Tuile> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.start,
               children: [
-                SizedBox(width: 52, height: 52, child: _dessin()),
+                SizedBox(width: 60, height: 60, child: _dessin()),
                 const SizedBox(height: 7),
                 Text(
                   widget.nom,

@@ -353,6 +353,109 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
+   * La page d'une catégorie, à la Glovo : les boutiques avec leur photo, et
+   * des sous-catégories pour filtrer (« Burgers », « Grillades »…).
+   *
+   * Les sous-catégories viennent des RAYONS des boutiques elles-mêmes :
+   * « Burgers » est proposé parce que 13 restaurants ont un rayon Burgers
+   * (base de dev, 24/09). Les rayons que tout le monde a (« Plats »,
+   * « Boissons ») ne filtrent rien : ils sont écartés.
+   *
+   * `mode: 'products'` quand la catégorie se parcourt par produits (Beauté,
+   * Électronique…) ou n'a pas de boutique : l'appli ouvre alors la grille.
+   */
+  app.get('/categories/:categoryId/boutiques', async (request, reply) => {
+    const params = z.object({ categoryId: z.string().uuid() }).safeParse(request.params);
+    const query = z.object({
+      lat: z.coerce.number().min(-90).max(90).optional(),
+      lng: z.coerce.number().min(-180).max(180).optional(),
+    }).safeParse(request.query);
+    if (!params.success || !query.success) return reply.code(400).send({ error: 'requête invalide' });
+    try {
+      const database = db(request);
+      const [{ data: categorie, error: erreurCategorie }, liste] = await Promise.all([
+        database.from('categories').select('id, name, browse_mode').eq('id', params.data.categoryId).maybeSingle(),
+        database.rpc('category_merchants', {
+          p_category_id: params.data.categoryId,
+          p_lat: query.data.lat ?? null,
+          p_lng: query.data.lng ?? null,
+          p_limite: 50,
+        }),
+      ]);
+      if (erreurCategorie) throw erreurCategorie;
+      if (!categorie) return reply.code(404).send({ error: 'catégorie introuvable' });
+      if (liste.error) throw liste.error;
+      const brutes = (liste.data ?? []) as Record<string, unknown>[];
+      if (categorie.browse_mode === 'products' || brutes.length === 0) {
+        return reply.send({ category: { id: categorie.id, name: categorie.name }, mode: 'products', merchants: [], rayons: [] });
+      }
+
+      const ids = brutes.map((m) => m['id'] as string);
+      // La base plafonne une réponse à 1 000 lignes ; Restaurants en compte
+      // davantage. Quelques pages en parallèle, deux colonnes seulement.
+      // Tout ce qui ne dépend que de la liste part en même temps (~350 ms
+      // gagnés par rapport à deux vagues, mesuré).
+      const PAGE = 1000;
+      const [fiches, ouvertes, ...pages] = await Promise.all([
+        database.from('merchants').select('id, cover_url').in('id', ids),
+        avecOuvertureReelle(database, brutes.map((m) => ({
+          id: m['id'] as string, is_open: (m['is_open'] as boolean) ?? false,
+        }))),
+        ...[0, 1, 2, 3].map((n) => database.from('products')
+          .select('merchant_id, categories(name)')
+          .in('merchant_id', ids).eq('is_available', true)
+          .order('id').range(n * PAGE, n * PAGE + PAGE - 1)),
+      ]);
+      const couvertures = new Map((fiches.data ?? []).map((f) => [f.id as string, (f.cover_url as string | null) ?? null]));
+      const ouverte = new Map(ouvertes.map((o) => [o.id, o.is_open]));
+
+      const rayonsParBoutique = new Map<string, Set<string>>();
+      for (const page of pages) {
+        if (page.error) throw page.error;
+        for (const p of (page.data ?? []) as unknown as Array<{ merchant_id: string; categories: { name: string } | null }>) {
+          const nom = p.categories?.name?.trim();
+          if (!nom) continue;
+          const cle = nom.toUpperCase();
+          if (!rayonsParBoutique.has(p.merchant_id)) rayonsParBoutique.set(p.merchant_id, new Set());
+          rayonsParBoutique.get(p.merchant_id)!.add(cle);
+        }
+      }
+
+      const merchants = brutes.map((m, i) => ({
+        id: m['id'] as string,
+        name: m['name'] as string,
+        logo_url: (m['logo_url'] as string | null) ?? null,
+        cover_url: couvertures.get(m['id'] as string) ?? null,
+        address_hint: (m['address_hint'] as string | null) ?? '',
+        is_open: ouverte.get(m['id'] as string) ?? false,
+        prep_time_min: (m['prep_time_min'] as number | null) ?? null,
+        distance_m: (m['distance_m'] as number | null) ?? null,
+        rayons: [...(rayonsParBoutique.get(m['id'] as string) ?? [])],
+        rang: i,
+      }))
+        // Les vraiment ouvertes d'abord ; l'ordre de la base ensuite.
+        .sort((a, b) => Number(b.is_open) - Number(a.is_open) || a.rang - b.rang)
+        .map(({ rang: _rang, ...m }) => m);
+
+      const GENERIQUES = new Set(['BOISSONS', 'PLATS', 'ENTREES', 'ENTRÉES', 'DESSERTS', 'ACCOMPAGNEMENTS',
+        'SUPPLEMENTS', 'SUPPLÉMENTS', 'AUTRES', 'DIVERS', 'MENU', 'MENUS']);
+      const compte = new Map<string, number>();
+      for (const m of merchants) for (const r of m.rayons) compte.set(r, (compte.get(r) ?? 0) + 1);
+      const rayons = [...compte.entries()]
+        // Un filtre qui garde toutes les boutiques, ou une seule, n'aide pas.
+        .filter(([nom, n]) => !GENERIQUES.has(nom) && n >= 2 && n < merchants.length)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 10)
+        .map(([name, boutiques]) => ({ name, boutiques }));
+
+      return reply.send({ category: { id: categorie.id, name: categorie.name }, mode: 'merchants', merchants, rayons });
+    } catch (error) {
+      const failure = toHttpFailure(error);
+      return reply.code(failure.status).send(failure.body);
+    }
+  });
+
+  /**
    * Toutes les boutiques — la carte « Explorer les boutiques » de l'accueil.
    *
    * Elle ouvrait l'écran d'exploration sans catégorie, et ce mode ne savait
@@ -471,6 +574,72 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       return reply.send(envelope(`**${page.total} produits** dans cette catégorie.`, [
         productCarousel(page.items, 'Les produits', { merchant_id: params.data.merchantId, category_id: query.data.category, total: page.total }),
       ]));
+    } catch (error) {
+      const failure = toHttpFailure(error);
+      return reply.code(failure.status).send(failure.body);
+    }
+  });
+
+  /**
+   * La page d'une boutique : sa fiche, et toute sa carte rangée par rayon.
+   *
+   * En un seul appel. La plus grosse carte compte 131 produits (base de dev,
+   * 24/09) : tout tient dans une réponse, et l'appli peut empiler les rayons
+   * et y sauter d'un onglet sans une requête par rayon. L'ancienne page ne
+   * montrait qu'un rayon à la fois, filtré, dans une grille sans titres.
+   */
+  app.get('/merchants/:merchantId/carte', async (request, reply) => {
+    const params = z.object({ merchantId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'identifiant invalide' });
+    const merchantId = params.data.merchantId;
+    try {
+      const database = db(request);
+      const [fiche, ouverte, rayons, produits] = await Promise.all([
+        database.from('merchants')
+          .select('id, name, description, logo_url, cover_url, address_hint, prep_time_min, rating')
+          .eq('id', merchantId).eq('is_approved', true).maybeSingle(),
+        database.rpc('merchant_open_now', { p_merchant_id: merchantId }),
+        database.rpc('merchant_categories', { p_merchant_id: merchantId }),
+        // Les options obligatoires dans la même requête : un aller-retour
+        // de moins (~400 ms mesurés depuis Niamey vers la base).
+        database.from('products')
+          .select('id, name, description, image_url, price, is_available, category_id, product_options(is_required)')
+          .eq('merchant_id', merchantId).eq('is_available', true)
+          .order('name').limit(500),
+      ]);
+      if (fiche.error) throw fiche.error;
+      if (!fiche.data) return reply.code(404).send({ error: 'boutique introuvable' });
+      if (ouverte.error) throw ouverte.error;
+      if (rayons.error) throw rayons.error;
+      if (produits.error) throw produits.error;
+
+      const lignes = produits.data ?? [];
+      // « À personnaliser » : une option obligatoire. Le « + » ouvre alors la
+      // fiche au lieu d'ajouter un article incomplet.
+      const aOptions = new Set<string>(lignes
+        .filter((p) => ((p.product_options ?? []) as Array<{ is_required: boolean }>).some((o) => o.is_required))
+        .map((p) => p.id as string));
+
+      const merchant = { ...fiche.data, is_open: ouverte.data === true };
+      const item = (p: Record<string, unknown>) => ({
+        id: p.id, name: p.name, description: p.description, image_url: p.image_url,
+        price: p.price, is_available: p.is_available,
+        merchant_id: merchantId, merchant_name: merchant.name,
+        merchant_open: merchant.is_open, requires_options: aOptions.has(p.id as string),
+      });
+      const parRayon = new Map<string | null, Record<string, unknown>[]>();
+      for (const p of lignes) {
+        const cle = (p.category_id as string | null) ?? null;
+        parRayon.set(cle, [...(parRayon.get(cle) ?? []), item(p)]);
+      }
+      // L'ordre des rayons : le plus fourni d'abord (merchant_categories).
+      const sections = ((rayons.data ?? []) as Array<Record<string, unknown>>)
+        .filter((r) => parRayon.has(r.id as string))
+        .map((r) => ({ id: r.id, name: r.name, produits: parRayon.get(r.id as string)!.length, items: parRayon.get(r.id as string)! }));
+      const sansRayon = parRayon.get(null);
+      if (sansRayon?.length) sections.push({ id: null, name: 'Autres', produits: sansRayon.length, items: sansRayon });
+
+      return reply.send({ merchant, sections, total: lignes.length });
     } catch (error) {
       const failure = toHttpFailure(error);
       return reply.code(failure.status).send(failure.body);

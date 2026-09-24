@@ -42,13 +42,11 @@ Future<void> main() async {
   );
 
   runApp(const TovoClientApp());
-  WidgetsBinding.instance.addPostFrameCallback(
-    (_) {
-      unawaited(TovoPush.initialiser());
-      // Sans fenêtre d'autorisation : seulement si elle est déjà accordée.
-      TovoLocation.prechauffer();
-    },
-  );
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(TovoPush.initialiser());
+    // Sans fenêtre d'autorisation : seulement si elle est déjà accordée.
+    TovoLocation.prechauffer();
+  });
 }
 
 class TovoClientApp extends StatelessWidget {

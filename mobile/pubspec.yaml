@@ -105,6 +105,9 @@ flutter:
   # neuf allers-retours pour économiser un millième de l'APK.
   assets:
     - assets/icons/categories/
+    # Icônes 3D des catégories et sous-catégories, à la Glovo : Fluent Emoji
+    # de Microsoft (licence MIT, voir assets/icons/3d/LICENSE), 256 px.
+    - assets/icons/3d/
     - assets/branding/
 
   # DM Sans, embarquée et non chargée à l'exécution.
@@ -126,3 +129,11 @@ flutter:
           weight: 700
         - asset: assets/fonts/DMSans-ExtraBold.ttf
           weight: 800
+    # Flame : les NOMS des articles et des boutiques (choix du client,
+    # 24/09). Le reste de l'interface garde DM Sans.
+    - family: Flame
+      fonts:
+        - asset: assets/fonts/Flame-Regular.otf
+          weight: 400
+        - asset: assets/fonts/Flame-Bold.otf
+          weight: 700

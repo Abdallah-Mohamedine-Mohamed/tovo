@@ -154,7 +154,10 @@ class _OptionsEditorState extends State<OptionsEditor> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Options', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            const Text(
+              'Options',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
             Text(
               widget.productName,
               style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
@@ -169,7 +172,9 @@ class _OptionsEditorState extends State<OptionsEditor> {
         label: const Text('Option', style: TextStyle(color: Colors.white)),
       ),
       body: _chargement
-          ? const Center(child: CircularProgressIndicator(color: TovoTheme.teal))
+          ? const Center(
+              child: CircularProgressIndicator(color: TovoTheme.teal),
+            )
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
               children: [
@@ -178,7 +183,10 @@ class _OptionsEditorState extends State<OptionsEditor> {
                     padding: const EdgeInsets.only(bottom: 12),
                     child: Text(
                       _erreur!,
-                      style: const TextStyle(fontSize: 12, color: TovoTheme.danger),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: TovoTheme.danger,
+                      ),
                     ),
                   ),
                 if (_options.isEmpty) const _Vide(),
@@ -191,11 +199,8 @@ class _OptionsEditorState extends State<OptionsEditor> {
                       option['id'] as String,
                       'cette option',
                     ),
-                    onSupprimerValeur: (id) => _supprimer(
-                      'product_option_values',
-                      id,
-                      'ce choix',
-                    ),
+                    onSupprimerValeur: (id) =>
+                        _supprimer('product_option_values', id, 'ce choix'),
                   ),
               ],
             ),
@@ -246,7 +251,10 @@ class _CarteOption extends StatelessWidget {
                     children: [
                       Text(
                         (option['name'] as String?) ?? '',
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                       const SizedBox(height: 2),
                       Text(
@@ -255,16 +263,25 @@ class _CarteOption extends StatelessWidget {
                         // ne disent rien de la même façon.
                         [
                           obligatoire ? 'Le client doit choisir' : 'Facultatif',
-                          multiple ? 'plusieurs choix possibles' : 'un seul choix',
+                          multiple
+                              ? 'plusieurs choix possibles'
+                              : 'un seul choix',
                         ].join(' · '),
-                        style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: TovoTheme.muted,
+                        ),
                       ),
                     ],
                   ),
                 ),
                 IconButton(
                   onPressed: onSupprimerOption,
-                  icon: const Icon(Icons.delete_outline, size: 20, color: TovoTheme.danger),
+                  icon: const Icon(
+                    Icons.delete_outline,
+                    size: 20,
+                    color: TovoTheme.danger,
+                  ),
                 ),
               ],
             ),
@@ -296,14 +313,19 @@ class _CarteOption extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: ((valeur['price_delta'] as num?)?.toInt() ?? 0) == 0
+                      color:
+                          ((valeur['price_delta'] as num?)?.toInt() ?? 0) == 0
                           ? TovoTheme.muted
                           : TovoTheme.teal,
                     ),
                   ),
                   IconButton(
                     onPressed: () => onSupprimerValeur(valeur['id'] as String),
-                    icon: const Icon(Icons.close, size: 16, color: TovoTheme.muted),
+                    icon: const Icon(
+                      Icons.close,
+                      size: 16,
+                      color: TovoTheme.muted,
+                    ),
                   ),
                 ],
               ),
@@ -311,7 +333,10 @@ class _CarteOption extends StatelessWidget {
           TextButton.icon(
             onPressed: onAjouterValeur,
             icon: const Icon(Icons.add, size: 16),
-            label: const Text('Ajouter un choix', style: TextStyle(fontSize: 12)),
+            label: const Text(
+              'Ajouter un choix',
+              style: TextStyle(fontSize: 12),
+            ),
           ),
         ],
       ),
@@ -324,26 +349,26 @@ class _Vide extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const Padding(
-        padding: EdgeInsets.symmetric(vertical: 48, horizontal: 16),
-        child: Column(
-          children: [
-            Icon(Icons.tune, size: 36, color: TovoTheme.muted),
-            SizedBox(height: 12),
-            Text(
-              'Aucune option',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-            ),
-            SizedBox(height: 6),
-            Text(
-              'Les options permettent au client de préciser sa commande : '
-              'la taille de la portion, la sauce, l’accompagnement.\n\n'
-              'Sans option, le produit se commande tel quel.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: TovoTheme.muted),
-            ),
-          ],
+    padding: EdgeInsets.symmetric(vertical: 48, horizontal: 16),
+    child: Column(
+      children: [
+        Icon(Icons.tune, size: 36, color: TovoTheme.muted),
+        SizedBox(height: 12),
+        Text(
+          'Aucune option',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
         ),
-      );
+        SizedBox(height: 6),
+        Text(
+          'Les options permettent au client de préciser sa commande : '
+          'la taille de la portion, la sauce, l’accompagnement.\n\n'
+          'Sans option, le produit se commande tel quel.',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 12, color: TovoTheme.muted),
+        ),
+      ],
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------
@@ -394,26 +419,38 @@ class _DialogueOptionState extends State<_DialogueOption> {
           SwitchListTile(
             value: _obligatoire,
             onChanged: (v) => setState(() => _obligatoire = v),
-            title: const Text('Le client doit choisir', style: TextStyle(fontSize: 13)),
+            title: const Text(
+              'Le client doit choisir',
+              style: TextStyle(fontSize: 13),
+            ),
             contentPadding: EdgeInsets.zero,
             activeThumbColor: TovoTheme.teal,
           ),
           SwitchListTile(
             value: _multiple,
             onChanged: (v) => setState(() => _multiple = v),
-            title: const Text('Plusieurs choix possibles', style: TextStyle(fontSize: 13)),
+            title: const Text(
+              'Plusieurs choix possibles',
+              style: TextStyle(fontSize: 13),
+            ),
             contentPadding: EdgeInsets.zero,
             activeThumbColor: TovoTheme.teal,
           ),
         ],
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Annuler'),
+        ),
         FilledButton(
           onPressed: () {
             final nom = _nom.text.trim();
             if (nom.isEmpty) return;
-            Navigator.pop(context, _NouvelleOption(nom, _obligatoire, _multiple));
+            Navigator.pop(
+              context,
+              _NouvelleOption(nom, _obligatoire, _multiple),
+            );
           },
           child: const Text('Créer'),
         ),
@@ -450,7 +487,10 @@ class _DialogueValeurState extends State<_DialogueValeur> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Choix pour « ${widget.optionNom} »', style: const TextStyle(fontSize: 16)),
+      title: Text(
+        'Choix pour « ${widget.optionNom} »',
+        style: const TextStyle(fontSize: 16),
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -475,7 +515,10 @@ class _DialogueValeurState extends State<_DialogueValeur> {
         ],
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Annuler'),
+        ),
         FilledButton(
           onPressed: () {
             final nom = _nom.text.trim();

@@ -53,22 +53,78 @@ class _ProductCollectionState extends State<ProductCollection> {
         ? items
         : items.take(_visibles).toList();
     final caches = items.length - montres.length;
+    final total = (browse['total'] as num?)?.toInt() ?? items.length;
+    // « Tout voir » en haut à droite, à côté du titre (comme les rangées
+    // d'Uber Eats) : on voit d'abord quelques produits, et la suite est
+    // annoncée là où l'œil commence, pas dans une barre grise tout en bas.
+    final toutVoir =
+        widget.horizontal && browse.isNotEmpty && total > montres.length;
+    final titre = component.str('title');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (component.str('title').isNotEmpty)
+        if (titre.isNotEmpty || toutVoir)
           ViewportReveal(
             child: Padding(
               padding: const EdgeInsets.only(bottom: 16),
-              child: Text(
-                component.str('title'),
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.35,
-                  color: TovoTheme.ink,
-                ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          titre.isEmpty ? 'Résultats' : _majuscule(titre),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.35,
+                            color: TovoTheme.ink,
+                          ),
+                        ),
+                        if (toutVoir)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              '$total produits',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: TovoTheme.inkDoux,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (toutVoir)
+                    Semantics(
+                      button: true,
+                      label: 'Tout voir, $total produits',
+                      excludeSemantics: true,
+                      child: Material(
+                        color: const Color(0xFFF4F5F5),
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: () => widget.onInteraction(
+                            TovoInteraction('browse_catalog', browse),
+                          ),
+                          child: const SizedBox(
+                            width: 44,
+                            height: 44,
+                            child: Icon(
+                              Icons.arrow_forward_rounded,
+                              size: 21,
+                              color: TovoTheme.ink,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
@@ -127,73 +183,36 @@ class _ProductCollectionState extends State<ProductCollection> {
                   ? null
                   : () => _open(item, onInteraction),
             ),
-        // D'abord le reste de ce qui est déjà là, sans quitter le fil…
-        if (widget.horizontal && caches > 0)
-          _Suite(
-            libelle: caches == 1
-                ? 'Voir l’autre produit'
-                : 'Voir les $caches autres',
-            icone: Icons.expand_more_rounded,
-            onPressed: () => setState(() => _tout = true),
-          )
-        // … puis tout le catalogue correspondant.
-        else if (browse.isNotEmpty)
-          _Suite(
-            libelle:
-                'Parcourir les ${browse['total'] ?? items.length} produits',
-            icone: Icons.arrow_forward_rounded,
-            onPressed: () =>
-                onInteraction(TovoInteraction('browse_catalog', browse)),
-          ),
-      ],
-    );
-  }
-}
-
-class _Suite extends StatelessWidget {
-  const _Suite({
-    required this.libelle,
-    required this.icone,
-    required this.onPressed,
-  });
-
-  final String libelle;
-  final IconData icone;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 18),
-    child: SizedBox(
-      width: double.infinity,
-      child: TextButton(
-        style: TextButton.styleFrom(
-          backgroundColor: const Color(0xFFF4F5F5),
-          foregroundColor: TovoTheme.ink,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-        onPressed: onPressed,
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                libelle,
+        // Sans catalogue derrière (aperçu complet), la suite se déplie sur
+        // place : un simple lien, pas une barre.
+        if (!toutVoir && widget.horizontal && caches > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: TextButton.icon(
+              style: TextButton.styleFrom(
+                foregroundColor: TovoTheme.ink,
+                padding: EdgeInsets.zero,
+              ),
+              onPressed: () => setState(() => _tout = true),
+              icon: const Icon(Icons.expand_more_rounded, size: 18),
+              label: Text(
+                caches == 1
+                    ? 'Voir l’autre produit'
+                    : 'Voir les $caches autres',
                 style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-            Icon(icone, size: 18),
-          ],
-        ),
-      ),
-    ),
-  );
+          ),
+      ],
+    );
+  }
 }
+
+String _majuscule(String texte) =>
+    texte.isEmpty ? texte : texte[0].toUpperCase() + texte.substring(1);
 
 String _price(Map<String, dynamic> item) =>
     Money.format((item['price'] as num?)?.toInt() ?? 0);
@@ -332,16 +351,23 @@ class ProductTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              Text(
-                nom,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 14,
-                  height: 1.25,
-                  fontWeight: FontWeight.w600,
-                  color: TovoTheme.ink,
-                ),
+              // Le nom occupe TOUJOURS deux lignes : un nom court à côté
+              // d'un long décalait tout ce qui suit (boutique, prix). Une
+              // seconde ligne vide et invisible réserve la place, à la
+              // taille de police choisie par le client.
+              Stack(
+                children: [
+                  const Opacity(
+                    opacity: 0,
+                    child: Text('\n', maxLines: 2, style: _styleNom),
+                  ),
+                  Text(
+                    nom,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: _styleNom,
+                  ),
+                ],
               ),
               const SizedBox(height: 3),
               if (afficherBoutique || !available || fermee)
@@ -355,9 +381,9 @@ class ProductTile extends StatelessWidget {
                     style: TextStyle(fontSize: 11, color: TovoTheme.inkDoux),
                   ),
                 ),
-              // Prix alignés d'une tuile à l'autre quand la ligne boutique
-              // existe ; sinon, juste sous le nom.
-              if (afficherBoutique) const Spacer(),
+              // Le prix se cale en bas : aligné d'une tuile à l'autre, même
+              // si l'une porte « À personnaliser » et pas sa voisine.
+              const Spacer(),
               const SizedBox(height: 6),
               Text(
                 _price(data),
@@ -373,6 +399,14 @@ class ProductTile extends StatelessWidget {
       ),
     );
   }
+
+  static const _styleNom = TextStyle(
+    fontFamily: TovoTheme.policeNoms,
+    fontSize: 15,
+    height: 1.2,
+    fontWeight: FontWeight.w700,
+    color: TovoTheme.ink,
+  );
 
   Widget _ligneBoutique({required bool available, required bool fermee}) {
     final texte = !available

@@ -25,7 +25,8 @@ class MerchantHome extends StatefulWidget {
   State<MerchantHome> createState() => _MerchantHomeState();
 }
 
-class _MerchantHomeState extends State<MerchantHome> with WidgetsBindingObserver {
+class _MerchantHomeState extends State<MerchantHome>
+    with WidgetsBindingObserver {
   late final MerchantController _c = MerchantController(api: widget.api);
   int _onglet = 0;
 
@@ -117,7 +118,9 @@ class _MerchantHomeState extends State<MerchantHome> with WidgetsBindingObserver
           Switch(
             value: _c.ouverte,
             activeThumbColor: TovoTheme.success,
-            onChanged: _c.boutiqueId == null ? null : (_) => _c.basculerOuverture(),
+            onChanged: _c.boutiqueId == null
+                ? null
+                : (_) => _c.basculerOuverture(),
           ),
           // Derrière un menu, loin de l'interrupteur d'ouverture : les deux
           // gestes se ressemblent trop pour cohabiter en plein écran.
@@ -136,15 +139,18 @@ class _MerchantHomeState extends State<MerchantHome> with WidgetsBindingObserver
         child: _c.boutiqueId == null && !_c.chargement
             ? const _AucuneBoutique()
             : _onglet == 0
-                ? _ListeCommandes(controller: _c)
-                : _ListeProduits(controller: _c, onEditer: _editer),
+            ? _ListeCommandes(controller: _c)
+            : _ListeProduits(controller: _c, onEditer: _editer),
       ),
       floatingActionButton: _onglet == 1 && _c.boutiqueId != null
           ? FloatingActionButton.extended(
               onPressed: () => _editer(null),
               backgroundColor: TovoTheme.teal,
               icon: const Icon(Icons.add, color: Colors.white),
-              label: const Text('Produit', style: TextStyle(color: Colors.white)),
+              label: const Text(
+                'Produit',
+                style: TextStyle(color: Colors.white),
+              ),
             )
           : null,
       bottomNavigationBar: NavigationBar(
@@ -244,7 +250,10 @@ class _CarteCommande extends StatelessWidget {
               ),
               Text(
                 Money.format((commande['total'] as num?)?.toInt() ?? 0),
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ],
           ),
@@ -262,7 +271,8 @@ class _CarteCommande extends StatelessWidget {
           ),
           if (commande['order_items'] is List) ...[
             const SizedBox(height: 12),
-            for (final article in (commande['order_items'] as List).whereType<Map>())
+            for (final article
+                in (commande['order_items'] as List).whereType<Map>())
               Padding(
                 padding: const EdgeInsets.only(bottom: 5),
                 child: Text(
@@ -275,9 +285,12 @@ class _CarteCommande extends StatelessWidget {
           if (etape != null) ...[
             const SizedBox(height: 12),
             FilledButton(
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+              ),
               onPressed: controller.actionEnCours(commande['id'] as String)
-                  ? null : () => controller.avancer(commande['id'] as String, etape),
+                  ? null
+                  : () => controller.avancer(commande['id'] as String, etape),
               child: Text(MerchantController.libelleEtape(statut)),
             ),
           ],
@@ -303,7 +316,8 @@ class _ListeProduits extends StatelessWidget {
           _Message(
             icone: Icons.inventory_2_outlined,
             titre: 'Catalogue vide',
-            detail: 'Touchez « Produit » en bas à droite pour ajouter votre premier article.',
+            detail:
+                'Touchez « Produit » en bas à droite pour ajouter votre premier article.',
           ),
         ],
       );
@@ -322,44 +336,53 @@ class _ListeProduits extends StatelessWidget {
           borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-            border: Border.all(color: const Color(0x12000000)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      (produit['name'] as String?) ?? '',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: disponible ? TovoTheme.ink : TovoTheme.muted,
-                        decoration: disponible ? null : TextDecoration.lineThrough,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
+              border: Border.all(color: const Color(0x12000000)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        (produit['name'] as String?) ?? '',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: disponible ? TovoTheme.ink : TovoTheme.muted,
+                          decoration: disponible
+                              ? null
+                              : TextDecoration.lineThrough,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      Money.format((produit['price'] as num?)?.toInt() ?? 0),
-                      style: const TextStyle(fontSize: 12, color: TovoTheme.teal),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      Text(
+                        Money.format((produit['price'] as num?)?.toInt() ?? 0),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: TovoTheme.teal,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              // Rupture de stock en un geste : c'est l'action la plus
-              // fréquente d'un restaurant à midi, elle ne doit pas demander
-              // d'ouvrir une fiche produit.
-              Switch(
-                value: disponible,
-                activeThumbColor: TovoTheme.success,
-                onChanged: (_) => controller.basculerDisponibilite(produit),
-              ),
-              const Icon(Icons.chevron_right, size: 18, color: TovoTheme.muted),
-            ],
+                // Rupture de stock en un geste : c'est l'action la plus
+                // fréquente d'un restaurant à midi, elle ne doit pas demander
+                // d'ouvrir une fiche produit.
+                Switch(
+                  value: disponible,
+                  activeThumbColor: TovoTheme.success,
+                  onChanged: (_) => controller.basculerDisponibilite(produit),
+                ),
+                const Icon(
+                  Icons.chevron_right,
+                  size: 18,
+                  color: TovoTheme.muted,
+                ),
+              ],
             ),
           ),
         );
@@ -373,20 +396,24 @@ class _AucuneBoutique extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListView(
-        children: const [
-          _Message(
-            icone: Icons.storefront_outlined,
-            titre: 'Aucune boutique associée',
-            detail:
-                'Votre compte n’est rattaché à aucune boutique approuvée. '
-                'Contactez Tovo pour finaliser votre inscription.',
-          ),
-        ],
-      );
+    children: const [
+      _Message(
+        icone: Icons.storefront_outlined,
+        titre: 'Aucune boutique associée',
+        detail:
+            'Votre compte n’est rattaché à aucune boutique approuvée. '
+            'Contactez Tovo pour finaliser votre inscription.',
+      ),
+    ],
+  );
 }
 
 class _Message extends StatelessWidget {
-  const _Message({required this.icone, required this.titre, required this.detail});
+  const _Message({
+    required this.icone,
+    required this.titre,
+    required this.detail,
+  });
 
   final IconData icone;
   final String titre;
@@ -400,7 +427,10 @@ class _Message extends StatelessWidget {
         children: [
           Icon(icone, size: 40, color: TovoTheme.muted),
           const SizedBox(height: 12),
-          Text(titre, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+          Text(
+            titre,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 4),
           Text(
             detail,

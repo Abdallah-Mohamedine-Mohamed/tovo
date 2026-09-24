@@ -11,9 +11,9 @@ void main() {
   final filtre = FilteringTextInputFormatter.allow(RegExp(r'[\d+ ]'));
 
   TextEditingValue saisir(String texte) => filtre.formatEditUpdate(
-        TextEditingValue.empty,
-        TextEditingValue(text: texte),
-      );
+    TextEditingValue.empty,
+    TextEditingValue(text: texte),
+  );
 
   group('champ du numéro de téléphone', () {
     test('accepte les chiffres', () {

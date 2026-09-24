@@ -50,7 +50,8 @@ class TovoComponent {
     return value is T ? value : null;
   }
 
-  String str(String key, [String fallback = '']) => get<String>(key) ?? fallback;
+  String str(String key, [String fallback = '']) =>
+      get<String>(key) ?? fallback;
 
   bool flag(String key, [bool fallback = false]) => get<bool>(key) ?? fallback;
 
@@ -98,10 +99,8 @@ typedef InteractionCallback = void Function(TovoInteraction interaction);
 
 /// Construit le widget d'un composant. Reçoit le descripteur et le callback
 /// d'interaction à câbler sur les zones tapables.
-typedef ComponentBuilder = Widget Function(
-  TovoComponent component,
-  InteractionCallback onInteraction,
-);
+typedef ComponentBuilder =
+    Widget Function(TovoComponent component, InteractionCallback onInteraction);
 
 // -----------------------------------------------------------------------------
 // Registre
@@ -196,8 +195,13 @@ class ComponentRegistry {
 
   /// Hook d'observabilité, branché sur Sentry dans main_client.dart.
   /// Un pic de « type inconnu » signale des clients en retard de version.
-  static void Function(String reason, String type, Object? error, StackTrace? stack)?
-      onRenderFailure;
+  static void Function(
+    String reason,
+    String type,
+    Object? error,
+    StackTrace? stack,
+  )?
+  onRenderFailure;
 }
 
 // -----------------------------------------------------------------------------

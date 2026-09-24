@@ -19,17 +19,27 @@ import 'package:tovo/core/theme.dart';
 void main() {
   const cote = 1024.0;
 
-  Future<void> ecrire(String chemin, Future<ui.Image> Function() dessiner) async {
+  Future<void> ecrire(
+    String chemin,
+    Future<ui.Image> Function() dessiner,
+  ) async {
     final image = await dessiner();
     final octets = await image.toByteData(format: ui.ImageByteFormat.png);
     expect(octets, isNotNull, reason: 'encodage PNG impossible');
     final fichier = File(chemin);
     await fichier.parent.create(recursive: true);
     await fichier.writeAsBytes(octets!.buffer.asUint8List());
-    expect(await fichier.length(), greaterThan(1000), reason: '$chemin est vide');
+    expect(
+      await fichier.length(),
+      greaterThan(1000),
+      reason: '$chemin est vide',
+    );
   }
 
-  Future<ui.Image> peindre({required bool fondTeal, required double occupation}) async {
+  Future<ui.Image> peindre({
+    required bool fondTeal,
+    required double occupation,
+  }) async {
     final enregistreur = ui.PictureRecorder();
     final canvas = Canvas(enregistreur);
 

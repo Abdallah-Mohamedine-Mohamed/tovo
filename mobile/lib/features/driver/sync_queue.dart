@@ -31,8 +31,8 @@ import '../../core/api.dart';
 /// indicateur tourner indéfiniment.
 class SyncQueue {
   SyncQueue({required TovoApi api, SharedPreferences? prefs})
-      : _api = api,
-        _prefs = prefs;
+    : _api = api,
+      _prefs = prefs;
 
   static const String _cle = 'tovo.driver.sync_queue.v1';
 
@@ -56,13 +56,15 @@ class SyncQueue {
   final ValueNotifier<int> pending = ValueNotifier<int>(0);
 
   bool get hasPendingOrderChange => _actions.any(
-        (action) => action.kind == SyncKind.accept || action.kind == SyncKind.status,
-      );
+    (action) =>
+        action.kind == SyncKind.accept || action.kind == SyncKind.status,
+  );
 
   bool hasPendingAccept(String orderId) => _actions.any(
-        (action) => action.kind == SyncKind.accept &&
-            action.path == '/orders/$orderId/accept',
-      );
+    (action) =>
+        action.kind == SyncKind.accept &&
+        action.path == '/orders/$orderId/accept',
+  );
 
   Future<void> load() async {
     _prefs ??= await SharedPreferences.getInstance();
@@ -157,18 +159,18 @@ class SyncAction {
   final DateTime createdAt;
 
   factory SyncAction.accept(String orderId) => SyncAction(
-        kind: SyncKind.accept,
-        path: '/orders/$orderId/accept',
-        createdAt: DateTime.now(),
-      );
+    kind: SyncKind.accept,
+    path: '/orders/$orderId/accept',
+    createdAt: DateTime.now(),
+  );
 
   /// Preuve de livraison : le fichier reste local jusqu’à son envoi.
   factory SyncAction.proof(String orderId, String localPath) => SyncAction(
-        kind: SyncKind.proof,
-        path: '/orders/$orderId/proof',
-        body: {'order_id': orderId, 'local_path': localPath},
-        createdAt: DateTime.now(),
-      );
+    kind: SyncKind.proof,
+    path: '/orders/$orderId/proof',
+    body: {'order_id': orderId, 'local_path': localPath},
+    createdAt: DateTime.now(),
+  );
 
   /// Le livreur déclare avoir constaté le paiement du client.
   ///
@@ -176,17 +178,17 @@ class SyncAction {
   /// couverture doit pouvoir l'enregistrer sur-le-champ. Sinon il note le
   /// montant sur un papier, ou l'oublie.
   factory SyncAction.paiementRecu(String orderId) => SyncAction(
-        kind: SyncKind.payment,
-        path: '/orders/$orderId/payment-received',
-        createdAt: DateTime.now(),
-      );
+    kind: SyncKind.payment,
+    path: '/orders/$orderId/payment-received',
+    createdAt: DateTime.now(),
+  );
 
   factory SyncAction.status(String orderId, String status) => SyncAction(
-        kind: SyncKind.status,
-        path: '/orders/$orderId/status',
-        body: {'status': status},
-        createdAt: DateTime.now(),
-      );
+    kind: SyncKind.status,
+    path: '/orders/$orderId/status',
+    body: {'status': status},
+    createdAt: DateTime.now(),
+  );
 
   Future<TovoResponse> execute(TovoApi api) async {
     if (kind != SyncKind.proof) return api.post(path, body);
@@ -210,23 +212,31 @@ class SyncAction {
       // Android a nettoyé son cache avant qu'on ait pu envoyer. On
       // abandonne la preuve plutôt que de bloquer la file : la livraison,
       // elle, a déjà été confirmée par une action distincte.
-      return TovoResponse.success(content: 'preuve introuvable', components: const []);
+      return TovoResponse.success(
+        content: 'preuve introuvable',
+        components: const [],
+      );
     }
 
     try {
       final distant = '$orderId/${DateTime.now().millisecondsSinceEpoch}.jpg';
-      await Supabase.instance.client.storage.from('proofs').uploadBinary(
-        distant,
-        await fichier.readAsBytes(),
-        fileOptions: const FileOptions(contentType: 'image/jpeg'),
-      );
+      await Supabase.instance.client.storage
+          .from('proofs')
+          .uploadBinary(
+            distant,
+            await fichier.readAsBytes(),
+            fileOptions: const FileOptions(contentType: 'image/jpeg'),
+          );
       await Supabase.instance.client
           .from('orders')
           .update({'proof_photo_path': distant})
           .eq('id', orderId);
 
       await fichier.delete().catchError((_) => fichier);
-      return TovoResponse.success(content: 'preuve envoyée', components: const []);
+      return TovoResponse.success(
+        content: 'preuve envoyée',
+        components: const [],
+      );
     } on Exception {
       return TovoResponse.failure(
         message: 'réseau indisponible',
@@ -237,11 +247,11 @@ class SyncAction {
   }
 
   String encode() => jsonEncode({
-        'kind': kind.name,
-        'path': path,
-        'body': body,
-        'at': createdAt.toIso8601String(),
-      });
+    'kind': kind.name,
+    'path': path,
+    'body': body,
+    'at': createdAt.toIso8601String(),
+  });
 
   static SyncAction? decode(String brut) {
     try {
@@ -253,7 +263,8 @@ class SyncAction {
         ),
         path: json['path'] as String,
         body: (json['body'] as Map?)?.cast<String, dynamic>() ?? const {},
-        createdAt: DateTime.tryParse(json['at'] as String? ?? '') ?? DateTime.now(),
+        createdAt:
+            DateTime.tryParse(json['at'] as String? ?? '') ?? DateTime.now(),
       );
     } catch (_) {
       // Une entrée corrompue est ignorée plutôt que de bloquer toute la
@@ -263,11 +274,11 @@ class SyncAction {
   }
 
   String get label => switch (kind) {
-        SyncKind.accept => 'Acceptation de course',
-        SyncKind.status => 'Changement de statut',
-        SyncKind.proof => 'Photo de livraison',
-        SyncKind.payment => 'Encaissement constaté',
-      };
+    SyncKind.accept => 'Acceptation de course',
+    SyncKind.status => 'Changement de statut',
+    SyncKind.proof => 'Photo de livraison',
+    SyncKind.payment => 'Encaissement constaté',
+  };
 }
 
 enum SyncKind { accept, status, proof, payment }

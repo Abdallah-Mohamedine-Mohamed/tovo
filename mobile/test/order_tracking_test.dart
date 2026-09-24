@@ -124,18 +124,19 @@ void main() {
     expect(find.text('Confirmée'), findsNothing);
   });
 
-  testWidgets('« À voir avec le client » n’est pas présenté comme une adresse', (
-    tester,
-  ) async {
-    await afficherSuivi(
-      tester,
-      type: 'courier',
-      statut: 'pending',
-      extra: {
-        'dropoff': {'hint': 'À voir avec le client'},
-      },
-    );
-    expect(find.textContaining('À voir avec le client'), findsNothing);
-    expect(find.text('Destination à préciser au livreur'), findsOneWidget);
-  });
+  testWidgets(
+    '« À voir avec le client » n’est pas présenté comme une adresse',
+    (tester) async {
+      await afficherSuivi(
+        tester,
+        type: 'courier',
+        statut: 'pending',
+        extra: {
+          'dropoff': {'hint': 'À voir avec le client'},
+        },
+      );
+      expect(find.textContaining('À voir avec le client'), findsNothing);
+      expect(find.text('Destination à préciser au livreur'), findsOneWidget);
+    },
+  );
 }

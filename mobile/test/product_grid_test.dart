@@ -3,15 +3,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tovo/components/registry.dart';
 import 'package:tovo/components/widgets/product_carousel.dart';
 
-Map<String, dynamic> produit(int i, {bool dispo = true, bool options = false}) =>
-    {
-      'id': 'p$i',
-      'name': 'Produit $i',
-      'merchant_name': 'Boutique',
-      'price': 1000 + i,
-      'is_available': dispo,
-      'requires_options': options,
-    };
+Map<String, dynamic> produit(
+  int i, {
+  bool dispo = true,
+  bool options = false,
+}) => {
+  'id': 'p$i',
+  'name': 'Produit $i',
+  'merchant_name': 'Boutique',
+  'price': 1000 + i,
+  'is_available': dispo,
+  'requires_options': options,
+};
 
 Future<List<TovoInteraction>> afficher(
   WidgetTester tester,
@@ -41,10 +44,10 @@ Future<List<TovoInteraction>> afficher(
 }
 
 void main() {
-  testWidgets('quatre produits d’un coup d’œil, le reste à un geste', (
+  testWidgets('quatre produits, et « Tout voir » en haut à droite', (
     tester,
   ) async {
-    await afficher(
+    final gestes = await afficher(
       tester,
       [for (var i = 0; i < 6; i++) produit(i)],
       browse: {'query': 'tacos', 'total': 38},
@@ -52,20 +55,37 @@ void main() {
 
     expect(find.text('Produit 3'), findsOneWidget);
     expect(find.text('Produit 4'), findsNothing);
-    // Le catalogue complet vient après ce qui est déjà là.
-    expect(find.text('Parcourir les 38 produits'), findsNothing);
+    expect(find.text('38 produits'), findsOneWidget);
+    // Plus de barre « Parcourir » ni de « Voir les autres » en bas.
+    expect(find.textContaining('Parcourir'), findsNothing);
+    expect(find.textContaining('Voir les'), findsNothing);
 
+    final fleche = find.bySemanticsLabel('Tout voir, 38 produits');
+    // À droite du titre, au-dessus du premier produit.
+    expect(
+      tester.getCenter(fleche).dy,
+      lessThan(tester.getTopLeft(find.text('Produit 0')).dy),
+    );
+    expect(
+      tester.getCenter(fleche).dx,
+      greaterThan(tester.getCenter(find.text('Résultats')).dx),
+    );
+    await tester.tap(fleche);
+    expect(gestes.single.action, 'browse_catalog');
+    expect(gestes.single.payload['query'], 'tacos');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('sans catalogue derrière, la suite se déplie sur place', (
+    tester,
+  ) async {
+    await afficher(tester, [for (var i = 0; i < 6; i++) produit(i)]);
+    expect(find.bySemanticsLabel(RegExp('Tout voir')), findsNothing);
     await tester.ensureVisible(find.text('Voir les 2 autres'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Voir les 2 autres'));
     await tester.pumpAndSettle();
-    // Sous la ligne de flottaison du banc d'essai (800 × 600).
     expect(find.text('Produit 5', skipOffstage: false), findsOneWidget);
-    expect(
-      find.text('Parcourir les 38 produits', skipOffstage: false),
-      findsOneWidget,
-    );
-    expect(tester.takeException(), isNull);
   });
 
   testWidgets('« + » ajoute sans ouvrir la fiche, sauf produit à options', (
@@ -87,11 +107,7 @@ void main() {
   testWidgets('les indisponibles passent en dernier, sans « + »', (
     tester,
   ) async {
-    await afficher(tester, [
-      produit(1, dispo: false),
-      produit(2),
-      produit(3),
-    ]);
+    await afficher(tester, [produit(1, dispo: false), produit(2), produit(3)]);
 
     final x1 = tester.getTopLeft(find.text('Produit 1'));
     final x2 = tester.getTopLeft(find.text('Produit 2'));

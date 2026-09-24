@@ -11,6 +11,7 @@ import '../../components/widgets/product_carousel.dart';
 import '../../core/panier.dart';
 import '../../components/widgets/read_placeholder.dart';
 import 'product_sheet.dart';
+import 'boutique_screen.dart';
 import 'cart_screen.dart';
 
 class CatalogScreen extends StatefulWidget {
@@ -221,12 +222,16 @@ class _CatalogScreenState extends State<CatalogScreen> {
     });
   }
 
-  Future<void> _openMerchant(String id) async {
+  Future<void> _openMerchant(
+    String id, [
+    Map<String, dynamic> apercu = const {},
+  ]) async {
     final order = await Navigator.of(context).push<TovoResponse>(
       MaterialPageRoute(
-        builder: (_) => CatalogScreen(
+        builder: (_) => BoutiqueScreen(
           api: widget.api,
           merchantId: id,
+          apercu: apercu,
           conversationId: widget.conversationId,
         ),
       ),
@@ -241,13 +246,18 @@ class _CatalogScreenState extends State<CatalogScreen> {
 
   Future<void> _openProduct(String id) async {
     final matching = _items.where((item) => item['id'] == id);
-    await showProductSheet(
+    final issue = await showProductSheet(
       context,
       api: widget.api,
       productId: id,
       initialProduct: matching.isEmpty ? const {} : matching.first,
     );
-    if (mounted) await _loadCart();
+    if (!mounted) return;
+    if (issue == IssueFiche.commander) {
+      await _openCart();
+    } else {
+      await _loadCart();
+    }
   }
 
   Widget _tuile(Map<String, dynamic> produit) {
@@ -283,7 +293,13 @@ class _CatalogScreenState extends State<CatalogScreen> {
 
   void _interaction(TovoInteraction interaction) {
     if (interaction.action == 'select_merchant') {
-      unawaited(_openMerchant(interaction.payload['merchant_id'] as String));
+      unawaited(
+        _openMerchant(
+          interaction.payload['merchant_id'] as String,
+          (interaction.payload['apercu'] as Map?)?.cast<String, dynamic>() ??
+              const {},
+        ),
+      );
     }
   }
 
@@ -438,9 +454,17 @@ class _CatalogScreenState extends State<CatalogScreen> {
                       children: [
                         Expanded(
                           child: Text(
+                            // Venu de « Tout voir » : le titre est la
+                            // recherche elle-même (« Poulet »), comme un
+                            // rayon, pas un « Trouvez votre envie. » générique
+                            // qui faisait croire à un catalogue sans rapport.
                             merchantName ??
                                 (_directory
                                     ? 'Les bonnes adresses.'
+                                    : widget.query.trim().isNotEmpty &&
+                                          _search.text.trim() ==
+                                              widget.query.trim()
+                                    ? _majuscule(widget.query.trim())
                                     : 'Trouvez votre envie.'),
                             style: const TextStyle(
                               fontSize: 30,
@@ -742,3 +766,6 @@ class _SectionTab extends StatelessWidget {
     ),
   );
 }
+
+String _majuscule(String texte) =>
+    texte.isEmpty ? texte : texte[0].toUpperCase() + texte.substring(1);

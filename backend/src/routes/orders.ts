@@ -6,11 +6,13 @@ import { envelope, orderTracking } from '../components/builders.js';
 import {
   notifierBoutique,
   notifierLivreursCommandeRecue,
+  notifierClient,
 } from '../services/orderNotifications.js';
 import { queueDispatch } from '../services/dispatch.js';
 import { ouvrirPaiement } from '../services/payments.js';
 import { paiementMobileActif } from '../config/env.js';
 import { messageLivreurEnRoute } from '../services/livreur.js';
+import { serviceClient } from '../services/supabase.js';
 
 /**
  * Commandes — sans tour LLM, et c'est délibéré.
@@ -148,6 +150,45 @@ async function inscrireDansLaConversation(
 }
 
 export async function orderRoutes(app: FastifyInstance): Promise<void> {
+  app.post('/orders/:orderId/live-activity', { preHandler: app.requireAuth }, async (request, reply) => {
+    const params = z.object({ orderId: z.string().uuid() }).safeParse(request.params);
+    const body = z.object({
+      activity_token: z.string().regex(/^[0-9a-f]{32,512}$/i),
+      fcm_token: z.string().min(20).max(4096),
+    }).safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: 'données invalides' });
+
+    const { data: order } = await request.supabase!
+      .from('orders')
+      .select('id, status')
+      .eq('id', params.data.orderId)
+      .eq('user_id', request.user!.id)
+      .maybeSingle();
+    if (!order) return reply.code(404).send({ error: 'commande introuvable' });
+    if (order.status === 'delivered' || order.status === 'cancelled') {
+      return reply.code(409).send({ error: 'commande terminée' });
+    }
+    const { data: token } = await request.supabase!
+      .from('push_tokens')
+      .select('token')
+      .eq('user_id', request.user!.id)
+      .eq('app', 'client')
+      .eq('platform', 'ios')
+      .eq('token', body.data.fcm_token)
+      .maybeSingle();
+    if (!token) return reply.code(403).send({ error: 'appareil non enregistré' });
+
+    const { error } = await serviceClient().from('order_live_activities').upsert({
+      order_id: params.data.orderId,
+      user_id: request.user!.id,
+      activity_token: body.data.activity_token,
+      fcm_token: body.data.fcm_token,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'activity_token' });
+    if (error) return reply.code(503).send({ error: 'suivi indisponible' });
+    return reply.send({ status: order.status });
+  });
+
   app.post('/orders', { preHandler: app.requireAuth }, async (request, reply) => {
     const body = createOrderSchema.safeParse(request.body);
     if (!body.success) {
@@ -330,6 +371,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     // Pas de nouvelle carte de suivi : celle déjà affichée passe d'elle-même
     // à « annulée » (elle écoute la commande en temps réel). En renvoyer une
     // seconde empilait deux « Livraison annulée » l'une sous l'autre.
+    if (!refus) notifierClient(params.data.orderId, 'cancelled').catch(() => undefined);
     return reply.send(envelope((refus as string | null) ?? 'C’est annulé. Aucun livreur ne viendra.'));
   });
 

@@ -5,6 +5,7 @@ import '../../core/api.dart';
 import '../../core/theme.dart';
 import '../../core/catalog_image.dart';
 import '../../components/widgets/read_placeholder.dart';
+import '../../core/panier.dart';
 
 class ProductScreen extends StatefulWidget {
   const ProductScreen({
@@ -15,6 +16,7 @@ class ProductScreen extends StatefulWidget {
     this.embedded = false,
     this.onClose,
     this.onAdded,
+    this.onOrder,
   });
 
   final TovoApi api;
@@ -23,6 +25,10 @@ class ProductScreen extends StatefulWidget {
   final bool embedded;
   final VoidCallback? onClose;
   final VoidCallback? onAdded;
+
+  /// « Commander » : l'article est ajouté, puis la commande s'ouvre.
+  /// Sans lui, seul « Ajouter au panier » est proposé.
+  final VoidCallback? onOrder;
 
   @override
   State<ProductScreen> createState() => _ProductScreenState();
@@ -34,6 +40,7 @@ class _ProductScreenState extends State<ProductScreen> {
   int _quantity = 1;
   bool _loading = true;
   bool _adding = false;
+  bool _commande = false;
   String? _error;
 
   bool get _hasOptions => _component?.type == 'option_selector';
@@ -123,10 +130,11 @@ class _ProductScreenState extends State<ProductScreen> {
     });
   }
 
-  Future<void> _add() async {
+  Future<void> _add({bool commander = false}) async {
     if (_adding || !_complete || !_available || _component == null) return;
     setState(() {
       _adding = true;
+      _commande = commander;
       _error = null;
     });
     final body = {
@@ -172,7 +180,9 @@ class _ProductScreenState extends State<ProductScreen> {
     if (!mounted) return;
     setState(() => _adding = false);
     if (response.ok) {
-      if (widget.embedded) {
+      if (commander && widget.onOrder != null) {
+        widget.onOrder!.call();
+      } else if (widget.embedded) {
         widget.onAdded?.call();
       } else {
         Navigator.pop(context, true);
@@ -260,7 +270,8 @@ class _ProductScreenState extends State<ProductScreen> {
                           Text(
                             name,
                             style: const TextStyle(
-                              fontSize: 20,
+                              fontFamily: TovoTheme.policeNoms,
+                              fontSize: 22,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -315,9 +326,9 @@ class _ProductScreenState extends State<ProductScreen> {
                 Text(
                   name,
                   style: const TextStyle(
-                    fontSize: 28,
+                    fontFamily: TovoTheme.policeNoms,
+                    fontSize: 30,
                     height: 1.12,
-                    letterSpacing: -0.9,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -609,38 +620,101 @@ class _ProductScreenState extends State<ProductScreen> {
             style: TextStyle(fontSize: 12, color: TovoTheme.inkDoux),
           ),
         const SizedBox(height: 8),
-        FilledButton(
-          style: FilledButton.styleFrom(
-            backgroundColor: TovoTheme.teal,
-            foregroundColor: Colors.white,
-            minimumSize: const Size(0, 46),
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            shape: const StadiumBorder(),
-          ),
-          onPressed: !_adding && _complete && _available ? _add : null,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+        // « Commander » n'apparaît que panier vide : la commande est alors
+        // exactement cet article, à ce prix. Avec un panier déjà commencé,
+        // « Commander · 4 000 F » mentirait sur le total : on ajoute, et la
+        // pastille mène à la commande.
+        if (widget.onOrder == null ||
+            !_available ||
+            PanierEnDirect.instance.value != null)
+          _bouton(
+            principal: true,
+            enCours: _adding,
+            icone: Icons.add_rounded,
+            texte: _available ? 'Ajouter au panier' : 'Indisponible',
+            onPressed: () => _add(),
+          )
+        else
+          // Un seul article suffit souvent : « Commander » l'ajoute et ouvre
+          // la commande, sans détour par le panier. « Ajouter » reste là
+          // pour qui veut composer un panier.
+          Row(
             children: [
-              if (_adding)
-                const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else
-                const Icon(Icons.add_rounded, size: 20),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  _available ? 'Ajouter au panier' : 'Indisponible',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+              _bouton(
+                principal: false,
+                enCours: _adding && !_commande,
+                icone: Icons.add_rounded,
+                texte: 'Ajouter',
+                onPressed: () => _add(),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _bouton(
+                  principal: true,
+                  enCours: _adding && _commande,
+                  texte: 'Commander · ${Money.format(_unitPrice * _quantity)}',
+                  onPressed: () => _add(commander: true),
                 ),
               ),
             ],
           ),
-        ),
       ],
     ),
   );
+
+  Widget _bouton({
+    required bool principal,
+    required bool enCours,
+    required String texte,
+    required VoidCallback onPressed,
+    IconData? icone,
+  }) {
+    final actif = !_adding && _complete && _available;
+    final contenu = Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (enCours)
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: principal ? Colors.white : TovoTheme.teal,
+            ),
+          )
+        else if (icone != null)
+          Icon(icone, size: 20),
+        if (enCours || icone != null) const SizedBox(width: 8),
+        Flexible(
+          child: Text(texte, maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+      ],
+    );
+    const forme = StadiumBorder();
+    const taille = Size(0, 46);
+    const marge = EdgeInsets.symmetric(horizontal: 20);
+    return principal
+        ? FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: TovoTheme.teal,
+              foregroundColor: Colors.white,
+              minimumSize: taille,
+              padding: marge,
+              shape: forme,
+            ),
+            onPressed: actif ? onPressed : null,
+            child: contenu,
+          )
+        : OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: TovoTheme.teal,
+              minimumSize: taille,
+              padding: marge,
+              shape: forme,
+            ),
+            onPressed: actif ? onPressed : null,
+            child: contenu,
+          );
+  }
 }

@@ -28,6 +28,8 @@ import '../catalog/product_sheet.dart';
 import '../../components/widgets/pastille_panier.dart';
 import '../../core/panier.dart';
 import '../catalog/cart_screen.dart';
+import '../catalog/boutique_screen.dart';
+import '../catalog/categorie_screen.dart';
 
 /// Le fil conversationnel.
 ///
@@ -503,7 +505,7 @@ class _ChatScreenState extends State<ChatScreen> {
           remplaceLeDernier &&
           _tours.isNotEmpty &&
           reponse.ok &&
-          _memeNature(_tours.last, tour);
+          (_memeNature(_tours.last, tour) || _panierVide(_tours.last, tour));
 
       if (peutRemplacer) {
         _tours[_tours.length - 1] = tour;
@@ -523,6 +525,13 @@ class _ChatScreenState extends State<ChatScreen> {
       _versLeBas();
     }
   }
+
+  /// Le dernier article retiré : le serveur ne renvoie plus de panier, juste
+  /// « Votre panier est vide. ». Ce message prend la place de la carte panier.
+  static bool _panierVide(_Tour avant, _Tour apres) =>
+      apres.composants.isEmpty &&
+      avant.composants.isNotEmpty &&
+      avant.composants.first.type == 'cart_summary';
 
   /// Deux tours montrent-ils le même composant ?
   static bool _memeNature(_Tour a, _Tour b) {
@@ -927,6 +936,7 @@ class _ChatScreenState extends State<ChatScreen> {
           merchantId: p['merchant_id'] as String?,
           categoryId: p['category_id'] as String?,
           directory: p['merchant_id'] == null,
+          categoryName: p['category_name'] as String? ?? '',
         );
 
       case 'browse_catalog':
@@ -990,6 +1000,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _ouvrirCatalogue(
           merchantId: p['merchant_id'] as String?,
           query: p['query'] as String? ?? '',
+          apercu: (p['apercu'] as Map?)?.cast<String, dynamic>() ?? const {},
         );
 
       // --- interprétation nécessaire : l'assistant -------------------
@@ -1394,12 +1405,13 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _ouvrirProduit(String id, Map<String, dynamic>? product) async {
-    await showProductSheet(
+    final issue = await showProductSheet(
       context,
       api: widget.api,
       productId: id,
       initialProduct: product ?? const {},
     );
+    if (mounted && issue == IssueFiche.commander) await _ouvrirPanier();
   }
 
   /// Ajout d'un « + » : aucun message dans le fil (« Ajouté à votre panier »
@@ -1448,18 +1460,43 @@ class _ChatScreenState extends State<ChatScreen> {
     String? categoryId,
     String query = '',
     bool directory = false,
+    Map<String, dynamic> apercu = const {},
+    String categoryName = '',
   }) async {
+    // Une boutique, sans recherche ni rayon imposés : sa page, avec toute
+    // sa carte. Une catégorie : ses boutiques, à la Glovo. Sinon la grille
+    // filtrée du catalogue.
+    final boutique =
+        merchantId != null &&
+        query.trim().isEmpty &&
+        categoryId == null &&
+        !directory;
+    final categorie = directory && categoryId != null && merchantId == null;
     final order = await Navigator.of(context).push<TovoResponse>(
       MaterialPageRoute(
-        builder: (_) => CatalogScreen(
-          api: widget.api,
-          conversationId: _conversationId,
-          merchantId: merchantId,
-          merchantIds: merchantIds,
-          categoryId: categoryId,
-          query: query,
-          directory: directory,
-        ),
+        builder: (_) => boutique
+            ? BoutiqueScreen(
+                api: widget.api,
+                merchantId: merchantId,
+                apercu: apercu,
+                conversationId: _conversationId,
+              )
+            : categorie
+            ? CategorieScreen(
+                api: widget.api,
+                categoryId: categoryId,
+                nom: categoryName,
+                conversationId: _conversationId,
+              )
+            : CatalogScreen(
+                api: widget.api,
+                conversationId: _conversationId,
+                merchantId: merchantId,
+                merchantIds: merchantIds,
+                categoryId: categoryId,
+                query: query,
+                directory: directory,
+              ),
       ),
     );
     if (mounted && order != null) await _appeler(() async => order);

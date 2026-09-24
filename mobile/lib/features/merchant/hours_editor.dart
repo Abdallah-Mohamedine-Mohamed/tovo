@@ -60,7 +60,10 @@ class _EditeurHorairesState extends State<EditeurHoraires> {
 
   TimeOfDay _versHeure(String sql) {
     final p = sql.split(':');
-    return TimeOfDay(hour: int.tryParse(p[0]) ?? 0, minute: int.tryParse(p[1]) ?? 0);
+    return TimeOfDay(
+      hour: int.tryParse(p[0]) ?? 0,
+      minute: int.tryParse(p[1]) ?? 0,
+    );
   }
 
   String _versSql(TimeOfDay t) =>
@@ -101,7 +104,8 @@ class _EditeurHorairesState extends State<EditeurHoraires> {
     if (choisi == null || !mounted) return;
 
     setState(() {
-      final p = _semaine[jour] ??
+      final p =
+          _semaine[jour] ??
           _Plage(
             ouvre: const TimeOfDay(hour: 8, minute: 0),
             ferme: const TimeOfDay(hour: 22, minute: 0),
@@ -124,8 +128,10 @@ class _EditeurHorairesState extends State<EditeurHoraires> {
       final debut = p.ouvre.hour * 60 + p.ouvre.minute;
       final fin = p.ferme.hour * 60 + p.ferme.minute;
       if (fin <= debut) {
-        setState(() => _erreur =
-            '${_jours[entree.key]} : la fermeture doit être après l’ouverture.');
+        setState(
+          () => _erreur =
+              '${_jours[entree.key]} : la fermeture doit être après l’ouverture.',
+        );
         return;
       }
     }
@@ -139,16 +145,21 @@ class _EditeurHorairesState extends State<EditeurHoraires> {
       // On remplace la semaine entière plutôt que de rapprocher ligne par
       // ligne : un jour retiré de l'écran doit disparaître de la base, et
       // une mise à jour sélective laisserait des horaires fantômes.
-      await _db.from('merchant_hours').delete().eq('merchant_id', widget.merchantId);
+      await _db
+          .from('merchant_hours')
+          .delete()
+          .eq('merchant_id', widget.merchantId);
 
       final lignes = _semaine.entries
           .where((e) => e.value != null)
-          .map((e) => {
-                'merchant_id': widget.merchantId,
-                'day': e.key,
-                'opens_at': _versSql(e.value!.ouvre),
-                'closes_at': _versSql(e.value!.ferme),
-              })
+          .map(
+            (e) => {
+              'merchant_id': widget.merchantId,
+              'day': e.key,
+              'opens_at': _versSql(e.value!.ouvre),
+              'closes_at': _versSql(e.value!.ferme),
+            },
+          )
           .toList();
 
       if (lignes.isNotEmpty) {
@@ -171,7 +182,10 @@ class _EditeurHorairesState extends State<EditeurHoraires> {
     return Scaffold(
       backgroundColor: TovoTheme.surface,
       appBar: AppBar(
-        title: const Text('Horaires', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        title: const Text(
+          'Horaires',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        ),
         actions: [
           TextButton(
             onPressed: _enregistre ? null : _enregistrer,
@@ -180,7 +194,9 @@ class _EditeurHorairesState extends State<EditeurHoraires> {
         ],
       ),
       body: _charge
-          ? const Center(child: CircularProgressIndicator(color: TovoTheme.teal))
+          ? const Center(
+              child: CircularProgressIndicator(color: TovoTheme.teal),
+            )
           : ListView(
               padding: const EdgeInsets.all(14),
               children: [
@@ -190,7 +206,11 @@ class _EditeurHorairesState extends State<EditeurHoraires> {
                     'Votre boutique n’apparaît ouverte aux clients que pendant '
                     'ces heures, et seulement si l’interrupteur du haut est '
                     'levé.',
-                    style: TextStyle(fontSize: 12, color: TovoTheme.muted, height: 1.5),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: TovoTheme.muted,
+                      height: 1.5,
+                    ),
                   ),
                 ),
                 for (var jour = 0; jour < 7; jour++) _ligneJour(jour),
@@ -198,7 +218,10 @@ class _EditeurHorairesState extends State<EditeurHoraires> {
                   const SizedBox(height: 14),
                   Text(
                     _erreur!,
-                    style: const TextStyle(fontSize: 12, color: TovoTheme.danger),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: TovoTheme.danger,
+                    ),
                   ),
                 ],
               ],

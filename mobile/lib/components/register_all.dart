@@ -24,16 +24,16 @@ void registerTovoComponents() {
         CategoryGrid(component: component, onInteraction: onInteraction),
 
     'product_carousel': (component, onInteraction) => ProductCollection(
-          component: component,
-          onInteraction: onInteraction,
-          horizontal: true,
-        ),
+      component: component,
+      onInteraction: onInteraction,
+      horizontal: true,
+    ),
 
     'product_list': (component, onInteraction) => ProductCollection(
-          component: component,
-          onInteraction: onInteraction,
-          horizontal: false,
-        ),
+      component: component,
+      onInteraction: onInteraction,
+      horizontal: false,
+    ),
 
     'product_card': (component, onInteraction) =>
         ProductCard(component: component, onInteraction: onInteraction),

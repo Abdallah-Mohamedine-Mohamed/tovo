@@ -63,6 +63,10 @@ class TovoTheme {
   /// boutiquier doivent avoir l'air de venir du même endroit.
   static const String fontFamily = 'DM Sans';
 
+  /// Les NOMS des articles et des boutiques (choix du client, 24/09) :
+  /// Flame, plus gourmande. Le reste de l'interface ne change pas.
+  static const String policeNoms = 'Flame';
+
   /// Rayons généreux, dans l'esprit des interfaces de Google aujourd'hui.
   /// 16 restait anguleux à côté d'un contenu aéré ; 22 arrondit franchement
   /// sans virer à la pastille.

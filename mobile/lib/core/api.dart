@@ -137,6 +137,7 @@ class TovoApi {
         final response = await _send(
           () async => _client.get(_uri(path, query), headers: await _headers),
           retryNetwork: true,
+          chemin: path,
         );
         if (response.ok) unawaited(remember(path, response.raw, query: query));
         return response;
@@ -152,6 +153,7 @@ class TovoApi {
       headers: await _headers,
       body: jsonEncode(body),
     ),
+    chemin: path,
   );
 
   Future<TovoResponse> patch(String path, Map<String, dynamic> body) => _send(
@@ -160,10 +162,13 @@ class TovoApi {
       headers: await _headers,
       body: jsonEncode(body),
     ),
+    chemin: path,
   );
 
-  Future<TovoResponse> delete(String path) =>
-      _send(() async => _client.delete(_uri(path), headers: await _headers));
+  Future<TovoResponse> delete(String path) => _send(
+    () async => _client.delete(_uri(path), headers: await _headers),
+    chemin: path,
+  );
 
   Future<TovoResponse> chat(
     Map<String, dynamic> body, {
@@ -260,6 +265,7 @@ class TovoApi {
   Future<TovoResponse> _send(
     Future<http.Response> Function() request, {
     bool retryNetwork = false,
+    String? chemin,
   }) async {
     var jetonRenouvele = false;
 
@@ -282,7 +288,7 @@ class TovoApi {
 
       if (resultat != null) {
         // Tout panier renvoyé met la pastille à jour, d'où qu'il vienne.
-        PanierEnDirect.instance.observer(resultat);
+        PanierEnDirect.instance.observer(resultat, chemin: chemin);
         return resultat;
       }
 
