@@ -45,12 +45,15 @@ final class LiveActivityBridge: NSObject, FlutterStreamHandler {
       result(false)
       return
     }
-    guard let args = call.arguments as? [String: String],
-          let orderId = args["orderId"], !orderId.isEmpty else {
+    guard let args = call.arguments as? [String: Any],
+          let orderId = args["orderId"] as? String, !orderId.isEmpty else {
       result(FlutterError(code: "invalid_order", message: nil, details: nil))
       return
     }
-    let status = args["status"] ?? "pending"
+    let status = args["status"] as? String ?? "pending"
+    // Prénom du livreur, dès qu'il existe : l'île dit « Moussa vous l'apporte ».
+    let driver = (args["driver"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    let state = TovoOrderAttributes.ContentState(status: status, driver: driver)
     let existing = Activity<TovoOrderAttributes>.activities.first {
       $0.attributes.orderId == orderId
     }
@@ -65,12 +68,14 @@ final class LiveActivityBridge: NSObject, FlutterStreamHandler {
       do {
         let attributes = TovoOrderAttributes(
           orderId: orderId,
-          kind: args["kind"] ?? "food",
-          title: args["title"] ?? "Votre commande"
+          kind: args["kind"] as? String ?? "food",
+          title: args["title"] as? String ?? "Votre commande",
+          mode: args["mode"] as? String,
+          placedAt: (args["placedAt"] as? NSNumber)?.doubleValue
         )
         let activity = try Activity.request(
           attributes: attributes,
-          content: ActivityContent(state: .init(status: status), staleDate: nil),
+          content: ActivityContent(state: state, staleDate: nil),
           pushType: .token
         )
         observe(activity)
@@ -81,15 +86,16 @@ final class LiveActivityBridge: NSObject, FlutterStreamHandler {
     case "sync":
       guard let existing else { result(false); return }
       Task {
-        await existing.update(ActivityContent(state: .init(status: status), staleDate: nil))
+        await existing.update(ActivityContent(state: state, staleDate: nil))
       }
       result(true)
     case "end":
       guard let existing else { result(false); return }
       Task {
         await existing.end(
-          ActivityContent(state: .init(status: status), staleDate: nil),
-          dismissalPolicy: .after(Date().addingTimeInterval(60))
+          ActivityContent(state: state, staleDate: nil),
+          // Livrée : « Bon appétit ! » reste visible un quart d'heure.
+          dismissalPolicy: .after(Date().addingTimeInterval(15 * 60))
         )
       }
       result(true)

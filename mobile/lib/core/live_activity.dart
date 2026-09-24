@@ -25,6 +25,9 @@ class TovoLiveActivity {
     required String status,
     required bool courier,
     required String title,
+    DateTime? placedAt,
+    String? mode,
+    String? driver,
   }) async {
     if (!Platform.isIOS || orderId.isEmpty) return;
     _subscription ??= _tokens.receiveBroadcastStream().listen(
@@ -44,13 +47,28 @@ class TovoLiveActivity {
         'status': status,
         'kind': courier ? 'courier' : 'food',
         'title': title,
+        // Le chronomètre de l'île part de là et tourne tout seul.
+        if (placedAt != null)
+          'placedAt': placedAt.millisecondsSinceEpoch / 1000,
+        'mode': ?mode,
+        'driver': ?_prenom(driver),
       });
     } on PlatformException catch (error) {
       debugPrint('[live activity] ${error.message}');
     }
   }
 
-  static Future<void> sync(String orderId, String status) async {
+  /// Le prénom seul : « Moussa vous l'apporte » tient dans l'île.
+  static String? _prenom(String? nom) {
+    final t = nom?.trim() ?? '';
+    return t.isEmpty ? null : t.split(RegExp(r'\s+')).first;
+  }
+
+  static Future<void> sync(
+    String orderId,
+    String status, {
+    String? driver,
+  }) async {
     if (!Platform.isIOS || orderId.isEmpty) return;
     final finished = const {'delivered', 'cancelled'}.contains(status);
     if (finished) {
@@ -61,6 +79,7 @@ class TovoLiveActivity {
       await _methods.invokeMethod<bool>(finished ? 'end' : 'sync', {
         'orderId': orderId,
         'status': status,
+        'driver': ?_prenom(driver),
       });
     } on PlatformException catch (error) {
       debugPrint('[live activity] ${error.message}');

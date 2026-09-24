@@ -106,10 +106,19 @@ class _OrderTrackingState extends State<OrderTracking>
           status: _statut,
           courier: widget.component.str('type') == 'courier',
           title: widget.component.str('merchant_name', 'Votre livraison'),
+          placedAt: DateTime.tryParse(widget.component.str('placed_at')),
+          mode: widget.component.data['mode'] as String?,
+          driver: _livreur?['name'] as String?,
         ),
       );
     } else if (_orderId.isNotEmpty) {
-      unawaited(TovoLiveActivity.sync(_orderId, _statut));
+      unawaited(
+        TovoLiveActivity.sync(
+          _orderId,
+          _statut,
+          driver: _livreur?['name'] as String?,
+        ),
+      );
     }
     _relire();
     _abonner();
@@ -161,7 +170,13 @@ class _OrderTrackingState extends State<OrderTracking>
         _livreur =
             (etat['driver'] as Map?)?.cast<String, dynamic>() ?? _livreur;
       });
-      unawaited(TovoLiveActivity.sync(_orderId, statut));
+      unawaited(
+        TovoLiveActivity.sync(
+          _orderId,
+          statut,
+          driver: _livreur?['name'] as String?,
+        ),
+      );
 
       // Livrée pendant l'absence : plus rien à écouter, et l'abonnement
       // ouvert coûterait de la batterie pour un événement qui ne viendra pas.
@@ -201,7 +216,13 @@ class _OrderTrackingState extends State<OrderTracking>
             final nouveau = payload.newRecord['status'] as String?;
             if (nouveau == null || !mounted) return;
             setState(() => _statut = nouveau);
-            unawaited(TovoLiveActivity.sync(_orderId, nouveau));
+            unawaited(
+              TovoLiveActivity.sync(
+                _orderId,
+                nouveau,
+                driver: _livreur?['name'] as String?,
+              ),
+            );
             if (payload.newRecord['driver_id'] != null && _livreur == null) {
               unawaited(_relire());
             }

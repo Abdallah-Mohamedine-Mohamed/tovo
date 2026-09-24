@@ -4,7 +4,13 @@ import { firebaseApp } from './notifications.js';
 
 const terminal = new Set(['delivered', 'cancelled']);
 
-export async function updateLiveActivities(orderId: string, status: string): Promise<void> {
+/**
+ * Met à jour la Live Activity du client (écran verrouillé, Dynamic Island).
+ *
+ * `content-state` doit correspondre à TovoOrderAttributes.ContentState côté
+ * iOS : { status, driver }. `driver` est facultatif des deux côtés.
+ */
+export async function updateLiveActivities(orderId: string, status: string, driver: string | null = null): Promise<void> {
   const db = serviceClient();
   const { data: activities, error } = await db
     .from('order_live_activities')
@@ -26,7 +32,7 @@ export async function updateLiveActivities(orderId: string, status: string): Pro
         aps: {
           timestamp: now,
           event: ended ? 'end' : 'update',
-          'content-state': { status },
+          'content-state': { status, ...(driver ? { driver } : {}) },
           ...(ended ? { 'dismissal-date': now + 60 } : {}),
         },
       },
