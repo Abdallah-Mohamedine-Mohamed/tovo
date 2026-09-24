@@ -270,6 +270,31 @@ workflows:
             --workspace ios/Runner.xcworkspace \
             --scheme Runner
 
+      # LE WIDGET, VÉRIFIÉ AVANT L'ENVOI. Apple a refusé le premier IPA avec
+      # le widget (erreur 90360, « CFBundleName » manquant) — mais seulement
+      # à la toute fin, après l'upload. Même contrôle ici, en quelques
+      # secondes : clés présentes, et même version que l'app (exigé).
+      - name: Vérifier le widget dans l'IPA
+        script: |
+          DOSSIER=$(mktemp -d)
+          unzip -q build/ios/ipa/*.ipa -d "$DOSSIER"
+          APP="$DOSSIER/Payload/Runner.app"
+          EXT="$APP/PlugIns/TovoOrderWidget.appex"
+          lire() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Info.plist" 2>/dev/null; }
+          for CLE in CFBundleName CFBundleIdentifier CFBundleShortVersionString CFBundleVersion; do
+            if [ -z "$(lire "$EXT" "$CLE")" ]; then
+              echo "Widget : $CLE manquant ou vide dans Info.plist." >&2
+              exit 1
+            fi
+          done
+          for CLE in CFBundleShortVersionString CFBundleVersion; do
+            if [ "$(lire "$APP" "$CLE")" != "$(lire "$EXT" "$CLE")" ]; then
+              echo "Widget : $CLE = $(lire "$EXT" "$CLE"), app = $(lire "$APP" "$CLE") — Apple exige la même valeur." >&2
+              exit 1
+            fi
+          done
+          echo "Widget OK : $(lire "$EXT" CFBundleName) $(lire "$EXT" CFBundleShortVersionString) ($(lire "$EXT" CFBundleVersion))"
+
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
