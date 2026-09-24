@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:tovo/core/panier.dart';
 import 'package:tovo/components/register_all.dart';
 import 'package:tovo/core/api.dart';
 import 'package:tovo/core/catalog_image.dart';
@@ -126,6 +127,8 @@ void main() {
   });
 
   setUp(() {
+    // Le panier est partagé par toute l'appli : on repart de zéro.
+    PanierEnDirect.instance.vider();
     conversation = false;
     liveSearch = false;
     orderPosts = 0;
@@ -460,7 +463,7 @@ void main() {
     await open(tester, CatalogScreen(api: api, merchantId: 'garba'));
     expect(find.text('GARBA D\'OR'), findsOneWidget);
     // Le panier : une icône discrète en haut, plus de grand bandeau en bas.
-    expect(find.byTooltip('Panier'), findsOneWidget);
+    expect(find.byTooltip('Voir le panier'), findsOneWidget);
     expect(find.text('Voir mon panier'), findsNothing);
     await capture(tester, '03-boutique');
     await tester.tap(find.byTooltip('Toutes les catégories'));

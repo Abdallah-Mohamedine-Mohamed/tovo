@@ -8,6 +8,7 @@ import { EXECUTORS } from '../ai/tools.js';
 import {
   demandeDeCommandePassee,
   demandeGeneraleDeRepas,
+  demandeDeRecuperation,
   demandeUnColis,
   demandeUnLivreur,
   referenceAuxResultats,
@@ -565,7 +566,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // qui ouvre la carte : lui seul sait la pré-remplir. La voie rapide
     // l'ouvrait vide et le client retapait ce qu'il venait de dire.
     const detailsDeColis = texteClient ? /\d{2}\s?\d{2}\s?\d{2}|\b(à|a|chez|pour)\s+\p{Lu}/u.test(texteClient) : false;
-    if (texteClient && !detailsDeColis && (parJev
+    // « Va chercher un colis chez Moussa au 90 12 34 56 » : les détails sont
+    // extraits sans modèle (lieu, numéro), la voie rapide suffit.
+    const recuperation = texteClient ? demandeDeRecuperation(texteClient) : false;
+    if (texteClient && (!detailsDeColis || recuperation) && (parJev
       ? intention === 'colis' || intention === 'livreur'
       : demandeUnColis(texteClient) || demandeUnLivreur(texteClient))) {
       const executer = EXECUTORS['preparer_course'];
@@ -576,12 +580,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         {
           db,
           userId,
+          currentMessage: texteClient,
           ...(body.data.context ? { position: body.data.context } : {}),
         },
       );
-      const contenu = body.data.context
-        ? 'Un livreur vient chez vous et vous appelle pour les détails. Touchez **Appeler un livreur**.'
-        : 'Un livreur peut venir chez vous. Touchez **Ma position** pour qu’il sache où aller.';
+      // La carte prend la position d'elle-même : plus de « Touchez Ma
+      // position », qui restait affiché même une fois le livreur demandé.
+      const contenu = recuperation
+        ? 'Un livreur va le chercher et vous l’apporte. Il vous appelle pour les détails.'
+        : 'Un livreur vient chez vous et vous appelle pour les détails.';
 
       emit({ type: 'conversation', conversation_id: conversationId });
       emit({ type: 'results', components: resultat.components });

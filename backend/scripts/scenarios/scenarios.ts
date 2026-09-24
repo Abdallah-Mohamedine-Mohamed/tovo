@@ -146,4 +146,42 @@ export const SCENARIOS: Scenario[] = [
     protege: 'Le cas le plus courant doit rester instantané et juste.',
     etapes: [{ dire: 'du riz', attendu: { composants: ['product_carousel'], sansTexte: INTROUVABLE } }],
   },
+  // --- Captures du 24/09 (Documents/problem) -------------------------------
+  {
+    nom: 'Boutiques ouvertes, sans position',
+    protege: '« Quelles sont les boutiques ouvertes présentement ? » répondait par les catégories.',
+    etapes: [{
+      dire: 'Quelles sont les boutiques ouvertes présentement ?',
+      attendu: { composants: ['merchant_card'], sansComposants: ['category_grid'] },
+    }],
+  },
+  {
+    nom: 'Nom de boutique collé par la voix',
+    protege: '« Garbador » donnait des « suggestions proches » au lieu de Garba d’Or.',
+    etapes: [{
+      dire: 'Je veux manger à Garbador. Qu’est-ce que Garbador a comme produit ?',
+      attendu: { sansTexte: /suggestions proches/i },
+    }],
+  },
+  {
+    nom: 'Phrase inintelligible : pas de faux « 1278 produits »',
+    protege: 'Une transcription ratée annonçait des centaines de produits sans rapport.',
+    etapes: [{
+      dire: 'bon l ukounou me euh reserves me bon coin bon l ukounou',
+      attendu: { sansTexte: /d{3,} produits/ },
+    }],
+  },
+  {
+    nom: 'Demande de produit mal transcrite : pas de tuiles hors sujet',
+    protege: '« Je veux du bon à checker » proposait « Suivre ma commande ».',
+    etapes: [{
+      dire: 'Je veux du bon à checker.',
+      attendu: { sansTexte: /Vous voulez/ },
+    }],
+  },
+  {
+    nom: 'Livreur : plus de « Touchez Ma position »',
+    protege: 'Le message restait affiché alors que la carte prend la position seule.',
+    etapes: [{ dire: 'Je veux envoyer un livreur.', attendu: { composants: ['courier_form'], sansTexte: /Ma position/ } }],
+  },
 ];

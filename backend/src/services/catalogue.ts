@@ -67,7 +67,10 @@ export function filtrerSuggestionsTextuelles(query: string, items: ProductRow[])
   });
 }
 
-const MENU_WORDS = new Set('je j veux voudrais souhaite aimerais peux pourrais voir consulter regarder manger commander prendre acheter montre montrez donne donnez moi la le les de du des d chez a au en carte menu menus produit produits article articles plat plats propose proposes proposer proposez boutique restaurant resto enseigne tous toutes tout toute un une svp merci ce que'.split(' '));
+// Les mots d'une QUESTION sur la boutique (« qu'est-ce que … a comme
+// produit ? ») comptent aussi : restés dans la requête, ils devenaient la
+// recherche de « qu est comme » chez Garba d'Or.
+const MENU_WORDS = new Set('je j veux voudrais souhaite aimerais peux pourrais voir consulter regarder manger commander prendre acheter montre montrez donne donnez moi la le les de du des d chez a au en carte menu menus produit produits article articles plat plats propose proposes proposer proposez boutique restaurant resto enseigne tous toutes tout toute un une svp merci ce que qu est quoi quel quelle quels quelles comme il y avez as vous ont avoir vend vendez vendent quoi'.split(' '));
 
 export function requeteSansEnseigne(message: string, merchants: Array<{ id: string; name: string }>): string {
   const words = normaliserIntention(message).split(' ');
@@ -90,8 +93,18 @@ export function requeteSansEnseigne(message: string, merchants: Array<{ id: stri
     }
   }
   if (!best) return message;
+  // Le nom retiré PARTOUT : à l'oral on le répète (« … à Garbador.
+  // Qu'est-ce que Garbador a… »), et la seconde fois restait dans la requête.
+  // … mais seulement le nom de la boutique RECONNUE dans la phrase : retirer
+  // ceux de toutes les boutiques effaçait « poulet » d'un « tacos poulet chez
+  // Otakoss » s'il existait aussi une boutique POULET.
+  const reconnue = words.slice(best.start, best.start + best.length).join(' ');
+  const nomsColles = new Set(aliases
+    .filter((alias) => normaliserIntention(alias).replace(/ /g, '') === reconnue.replace(/ /g, '')
+      || boutiquesCorrespondantes(reconnue, [{ id: 'candidate', name: alias }]).length > 0)
+    .map((alias) => normaliserIntention(alias).replace(/ /g, '')));
   return words.filter((word, index) => (index < best.start || index >= best.start + best.length)
-    && !MENU_WORDS.has(word)).join(' ');
+    && !nomsColles.has(word) && !MENU_WORDS.has(word)).join(' ');
 }
 
 export async function cataloguePage(db: SupabaseClient, filter: CatalogueFilter, semantic = true): Promise<CataloguePage> {
@@ -225,7 +238,13 @@ export async function resolveCatalogueIntent(db: SupabaseClient, message: string
   }
   if (!marker) {
     const exactProducts = productQuery ? await cataloguePage(db, { q: productQuery, limit: 1 }, false) : null;
-    if (exactProducts && exactProducts.total > 0) return { merchants: [], query: message, menu: false };
+    // Un produit ne l'emporte sur une boutique reconnue que s'il correspond
+    // EXACTEMENT. Les « suggestions proches » de la recherche tolérante
+    // (« Garba », « Garba Poisson ») faisaient passer « Garbador » — Garba
+    // d'Or dit à voix haute — pour une recherche de produit.
+    if (exactProducts && exactProducts.total > 0 && exactProducts.match_type !== 'similar') {
+      return { merchants: [], query: message, menu: false };
+    }
   }
   if (openOnly) {
     const opened = candidates.filter((merchant) => merchant.is_open);
@@ -303,6 +322,20 @@ export function searchAnswer(page: CataloguePage, filter: CatalogueFilter): Cata
   const query = filter.q ?? '';
   const similar = page.match_type === 'similar';
   const preview = page.items.slice(0, 8);
+  const mots = query.split(' ').filter(Boolean);
+  // Une longue phrase qui ramène des centaines de produits n'a pas été
+  // comprise : chaque mot, pris seul, trouve quelque chose. Annoncer
+  // « 1278 produits correspondent » à « bon l ukounou me reserves bon coin »
+  // était faux. Mieux vaut le dire, et demander le nom du produit.
+  if (mots.length >= 4 && page.total > 150) {
+    return {
+      content: 'Je n’ai pas bien compris ce que vous cherchez. Pouvez-vous me redire le nom du produit ?',
+      summary: { incompris: true, requete: query },
+      components: [],
+    };
+  }
+  // En titre, quelques mots propres, jamais la phrase entière.
+  const titre = mots.length <= 3 ? query : '';
   return {
     content: page.total === 0
       ? query
@@ -313,7 +346,7 @@ export function searchAnswer(page: CataloguePage, filter: CatalogueFilter): Cata
     summary: { total: page.total, affiches: preview.length, suggestions: similar,
       produits: preview.map((product) => ({ id: product.id, nom: product.name, prix: product.price, boutique: product.merchant_name, a_personnaliser: product.requires_options ?? false })),
       consigne: 'Le carrousel est un aperçu. Le total concerne tous les résultats accessibles dans le catalogue.' },
-    components: preview.length ? [productCarousel(preview, query, {
+    components: preview.length ? [productCarousel(preview, titre, {
       query, total: page.total, merchant_ids: filter.merchant_ids, category_id: page.category_id ?? filter.category_id,
     })] : [],
   };

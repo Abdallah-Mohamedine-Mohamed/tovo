@@ -8,6 +8,7 @@ import '../../components/registry.dart';
 import '../../components/widgets/read_placeholder.dart';
 import '../../core/api.dart';
 import '../../core/location.dart';
+import '../../core/panier.dart';
 import '../../core/push.dart';
 import '../../core/theme.dart';
 import '../../core/catalog_image.dart';
@@ -266,6 +267,7 @@ class _CartScreenState extends State<CartScreen> {
       }
       if (generation != _generation) return;
       _cart = _panierDans(reponse);
+      if (_cart == null) PanierEnDirect.instance.vider();
       _devisPour = quantite > 0 && destination != null ? destination.cle : null;
     });
     // Un article retiré : la réponse ne porte pas la livraison, on la redemande.
@@ -335,6 +337,8 @@ class _CartScreenState extends State<CartScreen> {
     if (reponse.ok) {
       unawaited(HapticFeedback.mediumImpact());
       unawaited(TovoPush.enregistrer('client'));
+      // Commande partie : plus de panier, plus de pastille.
+      PanierEnDirect.instance.vider();
       Navigator.of(context).pop(reponse);
       return;
     }

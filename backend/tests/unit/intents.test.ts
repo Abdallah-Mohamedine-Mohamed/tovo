@@ -67,6 +67,15 @@ describe('intentions de catalogue', () => {
     expect(boutiquesCorrespondantes('scenario tacos', avecVariante).map((b) => b.id)).toEqual(['scenario']);
   });
 
+  it('un nom collé par la voix : « Garbador » est GARBA D’OR', () => {
+    expect(
+      boutiquesMentionnees("Je veux manger à Garbador. Qu'est-ce que Garbador a comme produit ?", BOUTIQUES)
+        .map((b) => b.id),
+    ).toEqual(['garba']);
+    // Mot entier seulement : un morceau de mot ne suffit pas.
+    expect(boutiquesMentionnees('des garbadorines', BOUTIQUES)).toEqual([]);
+  });
+
   it('lettres inversées : une seule faute (« lina hcips »)', () => {
     expect(boutiquesCorrespondantes('lina hcips', [{ id: 'lina', name: 'LINA CHIPS' }]).map((b) => b.id)).toEqual(['lina']);
   });

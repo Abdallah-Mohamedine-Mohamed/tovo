@@ -15,6 +15,7 @@ import {
 import { anonClient } from '../services/supabase.js';
 import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, merchantMenu } from '../services/catalogue.js';
 import { demandeDeRepas } from '../ai/intents.js';
+import { avecOuvertureReelle } from '../services/ouverture.js';
 
 /**
  * Catalogue — le parcours sans IA de la Phase 2.
@@ -358,9 +359,10 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
    * lister des boutiques QUE pour une catégorie : il retombait sur les
    * produits. Le client demandait des enseignes et recevait des articles.
    *
-   * Ouvertes d'abord, puis les mieux notées. `is_open` suffit ici : c'est
-   * l'interrupteur du boutiquier, et interroger les horaires de chaque
-   * enseigne une par une ralentirait l'ouverture de l'écran pour un tri.
+   * Ouvertes d'abord, puis les mieux notées. « Ouverte » = interrupteur ET
+   * horaires du jour : l'interrupteur seul affichait « Ouverte » sur des
+   * boutiques hors horaires, fermées une fois dedans. Les horaires de toute
+   * la liste sont lus en une requête.
    */
   app.get('/merchants', async (request, reply) => {
     const { data, error } = await db(request)
@@ -377,7 +379,7 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(failure.status).send(failure.body);
     }
 
-    const boutiques = ((data ?? []) as Record<string, unknown>[]).map((m) => ({
+    const brutes = ((data ?? []) as Record<string, unknown>[]).map((m) => ({
       id: m['id'] as string,
       name: m['name'] as string,
       description: (m['description'] as string | null) ?? null,
@@ -388,6 +390,11 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       prep_time_min: (m['prep_time_min'] as number) ?? 20,
       distance_m: null,
     }));
+    // Tri stable : les vraiment ouvertes d'abord, l'ordre des notes conservé.
+    const boutiques = (await avecOuvertureReelle(db(request), brutes))
+      .map((b, i) => ({ b, i }))
+      .sort((x, y) => Number(y.b.is_open) - Number(x.b.is_open) || x.i - y.i)
+      .map(({ b }) => b);
     const ouvertes = boutiques.filter((b) => b.is_open).length;
     return reply.send(envelope(
       ouvertes > 0 ? `${ouvertes} boutique${ouvertes > 1 ? 's' : ''} ouverte${ouvertes > 1 ? 's' : ''} en ce moment` : 'Tout est fermé pour l’instant',

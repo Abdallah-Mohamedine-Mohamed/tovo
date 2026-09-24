@@ -3,7 +3,7 @@ import { llmClient, LlmUnavailableError, type LlmTurn } from './llmClient.js';
 import { SYSTEM_PROMPT, contexteUtilisateur } from './systemPrompt.js';
 import { EXECUTORS, TOOL_DEFINITIONS, type ToolContext } from './tools.js';
 import { collectIds, sanitizeToolResult, validateComponents } from './validate.js';
-import { envelope, type ChatEnvelope, type Component } from '../components/builders.js';
+import { envelope, merchantCard, type ChatEnvelope, type Component } from '../components/builders.js';
 import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type CataloguePage, type PendingMerchantChoice } from '../services/catalogue.js';
 import {
   demandeBoutiqueOuverte,
@@ -16,6 +16,7 @@ import {
 } from './intents.js';
 import { resumeAffichage } from './memoire.js';
 import type { Intention } from './jev.js';
+import { avecOuvertureReelle } from '../services/ouverture.js';
 
 /**
  * Boucle d'orchestration.
@@ -97,6 +98,35 @@ export class ChatUnavailableError extends Error {
   }
 }
 
+/** Les boutiques ouvertes en ce moment, les mieux notées d'abord. */
+async function boutiquesOuvertes(db: SupabaseClient): Promise<{ components: Component[]; summary: unknown }> {
+  const { data } = await db
+    .from('merchants')
+    .select('id, name, description, logo_url, address_hint, is_open, rating, prep_time_min')
+    .eq('is_approved', true)
+    .eq('is_open', true)
+    .order('rating', { ascending: false })
+    .limit(40);
+  const brutes = ((data ?? []) as Record<string, unknown>[]).map((m) => ({
+    id: m['id'] as string,
+    name: m['name'] as string,
+    description: (m['description'] as string | null) ?? null,
+    logo_url: (m['logo_url'] as string | null) ?? null,
+    address_hint: (m['address_hint'] as string | null) ?? '',
+    is_open: true,
+    rating: Number(m['rating'] ?? 5),
+    prep_time_min: (m['prep_time_min'] as number) ?? 20,
+    distance_m: null,
+  }));
+  // Interrupteur ET horaires : on en lit plus, on n'en garde que les
+  // vraiment ouvertes.
+  const boutiques = (await avecOuvertureReelle(db, brutes)).filter((b) => b.is_open).slice(0, 8);
+  return {
+    components: boutiques.map(merchantCard),
+    summary: { boutiques: boutiques.map((b) => ({ id: b.id, nom: b.name })) },
+  };
+}
+
 export function rechercheProduitRapide(message: string, query: string): boolean {
   const mots = query.split(/\s+/).filter(Boolean);
   const questionCourte = /^(avez vous|as tu|il y a|y a t il|un|une|du|de la|des)\b/
@@ -171,7 +201,12 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
 
   // Le produit est déjà trouvé : inutile de charger toutes les enseignes,
   // puis de refaire exactement la même recherche. C'est le chemin courant.
-  if (pageInitiale && (pageInitiale.total > 0 || pageInitiale.category_id)) {
+  // Seulement un résultat EXACT (ou une catégorie) : une « suggestion
+  // proche » ne doit pas couper court à la reconnaissance d'une boutique.
+  // « Garbador » (Garba d'Or dit à voix haute) trouvait « Garba » en
+  // suggestion, et la carte de la boutique n'était jamais proposée.
+  if (pageInitiale && pageInitiale.match_type !== 'similar'
+    && (pageInitiale.total > 0 || pageInitiale.category_id)) {
     const direct = searchAnswer(pageInitiale, { q: requeteInitiale, limit: 8 });
     input.onEvent?.({ type: 'results', components: direct.components });
     input.onEvent?.({ type: 'text', text: direct.content });
@@ -205,16 +240,21 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
       direct = searchAnswer(page, filter);
     }
   }
-  if (!direct && intent && !input.audio && input.position
+  // « Quelles boutiques sont ouvertes ? » : la réponse existe même sans la
+  // position du client. Elle était exigée ; sans elle, la question partait
+  // au modèle, qui répondait… par la liste des catégories.
+  if (!direct && intent && !input.audio
       && intent.merchants.length === 0 && !intent.missing
       && demandeBoutiqueOuverte(input.message)) {
-    const ouvertes = await EXECUTORS.boutiques_proches!({}, {
-      db: input.db,
-      userId: input.userId,
-      currentMessage: input.message,
-      catalogueIntent: intent,
-      position: input.position,
-    });
+    const ouvertes = input.position
+      ? await EXECUTORS.boutiques_proches!({}, {
+        db: input.db,
+        userId: input.userId,
+        currentMessage: input.message,
+        catalogueIntent: intent,
+        position: input.position,
+      })
+      : await boutiquesOuvertes(input.db);
     direct = {
       content: ouvertes.components.length > 0
         ? 'Voici les boutiques ouvertes en ce moment.'

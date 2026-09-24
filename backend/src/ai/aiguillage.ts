@@ -1,6 +1,7 @@
 import { env } from '../config/env.js';
 import { quickReplies, type Component } from '../components/builders.js';
 import { classerIntention, type DecisionJev, type Intention, INTENTIONS } from './jev.js';
+import { normaliserIntention } from './intents.js';
 
 /**
  * Aiguillage par Jev : quelle route pour ce message ?
@@ -41,6 +42,21 @@ export async function consulterJev(message: string): Promise<DecisionJev | null>
 
 const ACTIONS = new Set<Intention>(['livreur', 'colis', 'suivi', 'annuler', 'habitude']);
 
+/**
+ * La forme d'une demande de produit : un verbe de souhait suivi d'un article
+ * partitif ou indéfini. Pas les demandes d'action (« un livreur », « ma
+ * commande »), qui gardent leurs tuiles.
+ */
+export function demandeDeProduit(message: string): boolean {
+  const n = normaliserIntention(message);
+  if (/\b(livreur|livreurs|coursier|colis|commande|commandes|annule|annuler)\b/.test(n)) return false;
+  return /\b(je veux|je voudrais|j aimerais|donne moi|donnez moi|il me faut|j ai besoin d|avez vous)\b.*\b(du|de la|de l|des|un|une|d)\b/.test(n)
+    // « un coca chez X », « du riz » : un article en tête, ou « chez » une
+    // boutique, désignent un produit.
+    || /^(un|une|du|de la|de l|des|d)\b/.test(n)
+    || /\bchez\b/.test(n);
+}
+
 /** Ce que le client lit sur la tuile : SA phrase, pas notre catégorie. */
 export const LIBELLES: Record<Intention, string> = {
   recherche: 'Trouver un produit',
@@ -76,6 +92,11 @@ export function decider(decision: DecisionJev | null, message: string, seuil: nu
   if (!pistes.includes(decision.choix)) pistes.unshift(decision.choix);
 
   if (pistes.length < 2 || !pistes.some((i) => ACTIONS.has(i))) return { type: 'habituel', decision };
+  // « Je veux du X », « donne-moi un X » : la FORME d'une demande de produit,
+  // même quand X est mal transcrit (« du bon à checker » pour « de
+  // l'attiéké »). Jev, perdu sur le mot, proposait « Suivre ma commande » et
+  // « Des idées de quoi commander ». La recherche, elle, tolère les fautes.
+  if (!pistes.includes('recherche') && demandeDeProduit(message)) return { type: 'habituel', decision };
 
   const texte = message.trim().slice(0, 300);
   return {

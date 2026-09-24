@@ -25,6 +25,8 @@ import 'conversation_chrome.dart';
 import 'photo_capture_sheet.dart';
 import '../catalog/catalog_screen.dart';
 import '../catalog/product_sheet.dart';
+import '../../components/widgets/pastille_panier.dart';
+import '../../core/panier.dart';
 import '../catalog/cart_screen.dart';
 
 /// Le fil conversationnel.
@@ -156,6 +158,8 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     unawaited(_lirePrenom());
     unawaited(_demarrer());
+    // La pastille montre le panier en cours dès l'ouverture.
+    unawaited(PanierEnDirect.instance.rafraichir(widget.api));
   }
 
   Future<void> _demarrer() async {
@@ -942,13 +946,7 @@ class _ChatScreenState extends State<ChatScreen> {
         );
 
       case 'add_to_cart':
-        _appeler(
-          () => widget.api.post('/cart/items', {
-            'product_id': p['product_id'],
-            'quantity': p['quantity'] ?? 1,
-            'selections': p['selections'] ?? const [],
-          }),
-        );
+        unawaited(_ajouterAuPanier(p));
 
       // Ces trois gestes changent un panier déjà à l'écran : ils le
       // mettent à jour sur place au lieu d'en empiler une copie plus bas.
@@ -1231,6 +1229,10 @@ class _ChatScreenState extends State<ChatScreen> {
         if (arrivee?['lat'] != null)
           'dropoff': {'lat': arrivee!['lat'], 'lng': arrivee['lng']},
         'dropoff_contact': p['dropoff_contact'],
+        // « Aller chercher » : où et qui appeler sur place.
+        if (p['mode'] == 'recuperer') 'mode': 'recuperer',
+        if ((p['pickup_contact'] as String?)?.isNotEmpty ?? false)
+          'pickup_contact': p['pickup_contact'],
         'parcel': p['parcel'] ?? 'small',
         'payment_method': p['payment_method'] ?? 'cash',
       });
@@ -1400,12 +1402,33 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// Ajout d'un « + » : aucun message dans le fil (« Ajouté à votre panier »
+  /// faisait du bruit sans rien apprendre au client). Une vibration, et la
+  /// pastille se met à jour d'elle-même. Seul un refus s'écrit dans le fil,
+  /// avec ses choix (panier ouvert dans une autre boutique…).
+  Future<void> _ajouterAuPanier(Map<String, dynamic> p) async {
+    final reponse = await widget.api.post('/cart/items', {
+      'product_id': p['product_id'],
+      'quantity': p['quantity'] ?? 1,
+      'selections': p['selections'] ?? const [],
+    });
+    if (!mounted) return;
+    if (reponse.ok) {
+      unawaited(HapticFeedback.lightImpact());
+      return;
+    }
+    await _appeler(() async => reponse);
+  }
+
   Future<void> _ouvrirPanier({String? initialAddressId}) async {
     if (_charge || _transcribing || _enregistreLaVoix || _voiceAction) return;
     _navigation++;
-    final cartPreview = _tours.lastOrNull?.composants
-        .where((component) => component.type == 'cart_summary')
-        .firstOrNull;
+    // Le panier déjà connu (celui de la pastille) : l'écran s'ouvre plein.
+    final cartPreview =
+        PanierEnDirect.instance.value?.composant ??
+        _tours.lastOrNull?.composants
+            .where((component) => component.type == 'cart_summary')
+            .firstOrNull;
     final order = await Navigator.of(context).push<TovoResponse>(
       MaterialPageRoute(
         builder: (_) => CartScreen(
@@ -1801,6 +1824,11 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                     ],
                   ),
+                ),
+              if (activity == null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: PastillePanier(onTap: _ouvrirPanier),
                 ),
               AnimatedContainer(
                 duration: motionDuration,

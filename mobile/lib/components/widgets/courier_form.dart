@@ -4,15 +4,18 @@ import '../../core/location.dart';
 import '../../core/theme.dart';
 import '../registry.dart';
 
-/// `courier_form` — « Un livreur vient chez vous ».
+/// `courier_form` — la carte livreur, dans ses deux sortes.
 ///
-/// Un livreur, pas un formulaire. Au Niger on n'écrit pas une adresse : on
-/// appelle un livreur, il vient, et le reste se règle au téléphone. La carte
-/// ne demande donc qu'une chose, la position, que le téléphone connaît déjà.
-/// Destination et destinataire sont facultatifs, rangés sous « Ajouter des
-/// détails » — ouverts d'office si le client les a déjà donnés en parlant.
+/// « Je veux un livreur » recouvre deux demandes :
+///  - **Venir chez moi** : le livreur vient à ma position, je lui remets un
+///    colis, il le porte ailleurs.
+///  - **Aller chercher** : il va chercher quelque chose ailleurs (« chez
+///    Moussa, Harobanda ») et me l'apporte.
 ///
-/// Un seul geste : « Appeler un livreur ».
+/// La sorte comprise par le serveur est présélectionnée ; le client en change
+/// d'un geste. Un livreur, pas un formulaire : au Niger on n'écrit pas une
+/// adresse, on appelle un livreur et le reste se règle au téléphone. Seule la
+/// position du client est indispensable — le téléphone la connaît déjà.
 class CourierForm extends StatefulWidget {
   const CourierForm({
     super.key,
@@ -31,15 +34,37 @@ class _CourierFormState extends State<CourierForm> {
   late final Map<String, dynamic> _pickup = widget.component.map('pickup');
   late final Map<String, dynamic> _dropoff = widget.component.map('dropoff');
 
-  late double? _lat = (_pickup['lat'] as num?)?.toDouble();
-  late double? _lng = (_pickup['lng'] as num?)?.toDouble();
+  late String _mode = widget.component.str('mode', 'deposer') == 'recuperer'
+      ? 'recuperer'
+      : 'deposer';
+  bool get _recuperer => _mode == 'recuperer';
 
+  /// La position du CLIENT : le départ quand il envoie, l'arrivée quand on
+  /// lui apporte.
+  late double? _lat = _num(
+    _recuperer ? _dropoff['lat'] : _pickup['lat'],
+  );
+  late double? _lng = _num(
+    _recuperer ? _dropoff['lng'] : _pickup['lng'],
+  );
+
+  static double? _num(Object? v) => (v as num?)?.toDouble();
+
+  // Venir chez moi.
   late final _repere = TextEditingController();
   late final _destination = TextEditingController(
-    text: (_dropoff['hint'] as String?) ?? '',
+    text: _recuperer ? '' : (_dropoff['hint'] as String?) ?? '',
   );
   late final _destinataire = TextEditingController(
     text: widget.component.str('dropoff_contact', ''),
+  );
+
+  // Aller chercher.
+  late final _ouChercher = TextEditingController(
+    text: _recuperer ? (_pickup['hint'] as String?) ?? '' : '',
+  );
+  late final _contactSurPlace = TextEditingController(
+    text: widget.component.str('pickup_contact', ''),
   );
 
   late bool _details =
@@ -70,6 +95,8 @@ class _CourierFormState extends State<CourierForm> {
     _repere.dispose();
     _destination.dispose();
     _destinataire.dispose();
+    _ouChercher.dispose();
+    _contactSurPlace.dispose();
     super.dispose();
   }
 
@@ -98,12 +125,29 @@ class _CourierFormState extends State<CourierForm> {
   }
 
   void _appeler() {
-    final repere = _repere.text.trim();
-    final dropLat = (_dropoff['lat'] as num?)?.toDouble();
-    final dropLng = (_dropoff['lng'] as num?)?.toDouble();
     setState(() => _envoye = true);
+    if (_recuperer) {
+      final ou = _ouChercher.text.trim();
+      widget.onInteraction(
+        TovoInteraction('submit_courier', {
+          'mode': 'recuperer',
+          // Le départ n'est qu'une description ; la position envoyée est
+          // celle du client, autour de laquelle un livreur est cherché.
+          'pickup': {'lat': _lat, 'lng': _lng, 'hint': ou},
+          'pickup_contact': _contactSurPlace.text.trim(),
+          'dropoff': {'lat': _lat, 'lng': _lng},
+          'dropoff_hint': 'Chez le client',
+          'payment_method': _paiement,
+        }),
+      );
+      return;
+    }
+    final repere = _repere.text.trim();
+    final dropLat = _num(_dropoff['lat']);
+    final dropLng = _num(_dropoff['lng']);
     widget.onInteraction(
       TovoInteraction('submit_courier', {
+        'mode': 'deposer',
         'pickup': {
           'lat': _lat,
           'lng': _lng,
@@ -176,9 +220,28 @@ class _CourierFormState extends State<CourierForm> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
-            'Un livreur vient chez vous',
-            style: TextStyle(
+          // Les deux sortes, d'un geste.
+          Wrap(
+            spacing: 8,
+            children: [
+              for (final (valeur, libelle) in const [
+                ('deposer', 'Venir chez moi'),
+                ('recuperer', 'Aller chercher'),
+              ])
+                ChoiceChip(
+                  label: Text(libelle),
+                  selected: _mode == valeur,
+                  showCheckmark: false,
+                  onSelected: (_) => setState(() => _mode = valeur),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            _recuperer
+                ? 'Un livreur va chercher pour vous'
+                : 'Un livreur vient chez vous',
+            style: const TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w800,
               letterSpacing: -0.3,
@@ -186,12 +249,34 @@ class _CourierFormState extends State<CourierForm> {
           ),
           const SizedBox(height: 3),
           Text(
-            'Il vous appelle dans les $minutes minutes pour les détails.',
+            _recuperer
+                ? 'Il vous l’apporte, et vous appelle dans les $minutes minutes.'
+                : 'Il vous appelle dans les $minutes minutes pour les détails.',
             style: const TextStyle(fontSize: 13, color: TovoTheme.muted),
           ),
           const SizedBox(height: 16),
 
-          // Le seul point requis : où le livreur doit venir.
+          if (_recuperer) ...[
+            // Ce qui compte ici : OÙ aller chercher. Visible d'office.
+            _Champ(
+              controller: _ouChercher,
+              libelle: 'Où aller chercher ?',
+              exemple: 'Chez Moussa, Harobanda',
+              icone: Icons.inventory_2_outlined,
+            ),
+            const SizedBox(height: 8),
+            _Champ(
+              controller: _contactSurPlace,
+              libelle: 'Numéro sur place (facultatif)',
+              exemple: '90 00 00 00',
+              icone: Icons.call_outlined,
+              telephone: true,
+            ),
+            const SizedBox(height: 14),
+          ],
+
+          // Ma position : le départ (venir chez moi) ou l'arrivée (aller
+          // chercher).
           Row(
             children: [
               Icon(
@@ -203,8 +288,12 @@ class _CourierFormState extends State<CourierForm> {
               Expanded(
                 child: Text(
                   positionConnue
-                      ? 'Ma position actuelle'
-                      : 'Où le livreur doit-il venir ?',
+                      ? (_recuperer
+                            ? 'Livré à ma position'
+                            : 'Ma position actuelle')
+                      : (_recuperer
+                            ? 'Où vous l’apporter ?'
+                            : 'Où le livreur doit-il venir ?'),
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -219,48 +308,50 @@ class _CourierFormState extends State<CourierForm> {
             ],
           ),
 
-          // Tout le reste est facultatif, et replié.
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => setState(() => _details = !_details),
-              style: TextButton.styleFrom(
-                padding: EdgeInsets.zero,
-                foregroundColor: TovoTheme.inkDoux,
+          if (!_recuperer) ...[
+            // Tout le reste est facultatif, et replié.
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => setState(() => _details = !_details),
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  foregroundColor: TovoTheme.inkDoux,
+                ),
+                icon: Icon(
+                  _details ? Icons.expand_less : Icons.expand_more,
+                  size: 18,
+                ),
+                label: const Text(
+                  'Ajouter des détails (facultatif)',
+                  style: TextStyle(fontSize: 12.5),
+                ),
               ),
-              icon: Icon(
-                _details ? Icons.expand_less : Icons.expand_more,
-                size: 18,
+            ),
+            if (_details) ...[
+              _Champ(
+                controller: _repere,
+                libelle: 'Un repère chez vous',
+                exemple: 'Face à la pharmacie',
+                icone: Icons.place_outlined,
               ),
-              label: const Text(
-                'Ajouter des détails (facultatif)',
-                style: TextStyle(fontSize: 12.5),
+              const SizedBox(height: 8),
+              _Champ(
+                controller: _destination,
+                libelle: 'Destination',
+                exemple: 'Yantala, près du marché',
+                icone: Icons.flag_outlined,
               ),
-            ),
-          ),
-          if (_details) ...[
-            _Champ(
-              controller: _repere,
-              libelle: 'Un repère chez vous',
-              exemple: 'Face à la pharmacie',
-              icone: Icons.place_outlined,
-            ),
-            const SizedBox(height: 8),
-            _Champ(
-              controller: _destination,
-              libelle: 'Destination',
-              exemple: 'Yantala, près du marché',
-              icone: Icons.flag_outlined,
-            ),
-            const SizedBox(height: 8),
-            _Champ(
-              controller: _destinataire,
-              libelle: 'Numéro du destinataire',
-              exemple: '90 00 00 00',
-              icone: Icons.call_outlined,
-              telephone: true,
-            ),
-            const SizedBox(height: 6),
+              const SizedBox(height: 8),
+              _Champ(
+                controller: _destinataire,
+                libelle: 'Numéro du destinataire',
+                exemple: '90 00 00 00',
+                icone: Icons.call_outlined,
+                telephone: true,
+              ),
+              const SizedBox(height: 6),
+            ],
           ],
 
           if (mobileMoney) ...[
@@ -290,7 +381,7 @@ class _CourierFormState extends State<CourierForm> {
                       ? (mobileMoney
                             ? 'Paiement au livreur'
                             : 'Espèces, au livreur')
-                      : forfait
+                      : forfait || _recuperer
                       ? 'Course en ville'
                       : distance != null
                       ? 'Course · ${Money.distance(distance)}'
@@ -317,9 +408,9 @@ class _CourierFormState extends State<CourierForm> {
             style: FilledButton.styleFrom(
               minimumSize: const Size.fromHeight(50),
             ),
-            child: const Text(
-              'Appeler un livreur',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+            child: Text(
+              _recuperer ? 'Envoyer le livreur' : 'Appeler un livreur',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
             ),
           ),
         ],

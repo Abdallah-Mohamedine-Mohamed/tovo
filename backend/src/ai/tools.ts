@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { LlmToolDefinition } from './llmClient.js';
 import type { Component } from '../components/builders.js';
+import { avecOuvertureReelle } from '../services/ouverture.js';
 import {
   cartSummary,
   categoryGrid,
@@ -21,7 +22,9 @@ import { offreVille } from '../services/livreur.js';
 import { paiementMobileActif } from '../config/env.js';
 import {
   demandeDeProximite,
+  demandeDeRecuperation,
   demandeDeRepas,
+  lieuDeRecuperation,
   normaliserIntention,
   requeteProduitUtilisateur,
 } from './intents.js';
@@ -572,8 +575,13 @@ const boutiquesProches: Executor = async (args, ctx) => {
 
   if (error) throw error;
 
-  const boutiques = ((data ?? []) as Array<Record<string, unknown>>)
-    .filter((boutique) => boutique.is_open === true);
+  // nearby_merchants ne lit que l'interrupteur : les horaires du jour
+  // tranchent ici (services/ouverture.ts).
+  const boutiques = (await avecOuvertureReelle(
+    ctx.db,
+    ((data ?? []) as Array<Record<string, unknown>>)
+      .map((b) => ({ ...b, id: b.id as string, is_open: b.is_open === true }) as Record<string, unknown> & { id: string; is_open: boolean }),
+  )).filter((boutique) => boutique.is_open === true);
   if (boutiques.length === 0) return vide;
 
   return {
@@ -1095,13 +1103,66 @@ const historiqueCommandes: Executor = async (args, ctx) => {
 };
 
 /**
- * La carte « Un livreur vient chez vous ».
+ * La carte livreur, dans l'une de ses deux sortes :
  *
- * Tout est pré-rempli, rien n'est exigé au-delà de la position : le départ
- * est celle du téléphone, le reste (destination, destinataire) est repris de
- * ce que le client a dit, s'il l'a dit. Le livreur appelle pour le reste.
+ *  - « deposer » — « Un livreur vient chez vous » : départ = la position du
+ *    téléphone ; destination et destinataire repris de ce que le client a
+ *    dit, s'il l'a dit.
+ *  - « recuperer » — « Un livreur va chercher pour vous » : il va chercher
+ *    ailleurs (« chez Moussa, Harobanda ») et apporte au client ; arrivée =
+ *    la position du téléphone.
+ *
+ * La sorte est celle que le modèle indique, sinon celle que la phrase du
+ * client laisse entendre (« va chercher », « récupère », « apporte-moi »).
+ * Le client peut toujours changer sur la carte. Le livreur appelle pour le
+ * reste.
  */
 const preparerCourse: Executor = async (args, ctx) => {
+  const message = ctx.currentMessage ?? '';
+  const modeDonne = texte(args, 'mode');
+  const mode = modeDonne === 'recuperer' || modeDonne === 'deposer'
+    ? modeDonne
+    : demandeDeRecuperation(message) ? 'recuperer' : 'deposer';
+  if (mode === 'recuperer') {
+    const offre = await offreVille(ctx.db);
+    // Un numéro dit dans la phrase (« au 90 12 34 56 ») : celui de la
+    // personne qui remet le colis — et il n'a rien à faire dans le lieu.
+    const telephone = /(?:\+?227\s?)?\d{2}(?:[\s.]?\d{2}){3}/;
+    const contact = texte(args, 'contact_sur_place') || (telephone.exec(message)?.[0] ?? '');
+    const ou = (texte(args, 'ou_recuperer') || lieuDeRecuperation(message) || '')
+      .replace(telephone, '')
+      .replace(/\s+(?:au|a|à)\s*$/i, '')
+      .trim();
+    return {
+      summary: {
+        sorte: 'le livreur va chercher et apporte au client',
+        a_recuperer: ou || null,
+        contact_sur_place: contact || null,
+        position_connue: Boolean(ctx.position),
+        consigne: 'La carte suffit : le client touche « Envoyer le livreur ». Ne pose aucune question.',
+      },
+      components: [
+        {
+          type: 'courier_form',
+          data: {
+            mode: 'recuperer',
+            // Le départ n'est qu'une description : l'adresse exacte est
+            // rarement connue, le livreur appelle sur place.
+            pickup: { hint: ou || null },
+            pickup_contact: contact || null,
+            // L'arrivée : chez le client.
+            dropoff: ctx.position
+              ? { lat: ctx.position.lat, lng: ctx.position.lng, hint: 'Chez vous' }
+              : null,
+            estimate: offre.prix === null ? null : { price: offre.prix, flat: true },
+            callback_minutes: offre.minutes,
+            mobile_money: paiementMobileActif,
+          },
+        },
+      ],
+    };
+  }
+
   type Point = { lat?: number; lng?: number; hint?: string };
   const donne = args.depart as Point | undefined;
   const depart: Point | undefined = donne?.lat && donne?.lng
@@ -1150,6 +1211,7 @@ const preparerCourse: Executor = async (args, ctx) => {
       {
         type: 'courier_form',
         data: {
+          mode: 'deposer',
           pickup: depart ?? null,
           dropoff: arrivee ?? null,
           dropoff_contact: destinataire || null,
@@ -1398,6 +1460,12 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
           properties: { lat: S.number('Latitude'), lng: S.number('Longitude'), hint: S.string('Repère') },
         },
         destinataire: S.string('Numéro de téléphone du destinataire, seulement si le client le donne'),
+        mode: S.string(
+          "« deposer » si le livreur vient chez le client prendre un colis ; « recuperer » s'il doit aller " +
+          'chercher quelque chose ailleurs et l\'apporter au client (« va chercher », « récupère », « apporte-moi »).',
+        ),
+        ou_recuperer: S.string('Pour « recuperer » : où aller chercher, tel que le client l\'a dit (« chez Moussa, Harobanda »)'),
+        contact_sur_place: S.string('Pour « recuperer » : le numéro de la personne qui remet le colis, seulement si donné'),
       },
     },
   },

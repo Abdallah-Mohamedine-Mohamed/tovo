@@ -50,6 +50,15 @@ describe('decider — la route selon la confiance de Jev', () => {
     expect(decider(d('recherche', 0.6, { recherche: 0.6, boutique: 0.35 }), 'attieke').type).toBe('habituel');
   });
 
+  it('une demande en forme de produit, mal transcrite : la recherche, pas des tuiles hors sujet', () => {
+    // Vu en vrai : « Je veux du bon à checker » (attiéké mal entendu) donnait
+    // « Des idées de quoi commander » et « Suivre ma commande ».
+    const perdu = d('envie', 0.45, { envie: 0.45, suivi: 0.3, social: 0.2 });
+    expect(decider(perdu, 'Je veux du bon à checker.').type).toBe('habituel');
+    // Une vraie hésitation sur une action garde ses tuiles.
+    expect(decider(perdu, 'où en est ma commande de tout à l’heure').type).toBe('clarifier');
+  });
+
   it('Jev éteint, en panne ou trop lent : chemin habituel', () => {
     expect(decider(null, 'pain').type).toBe('habituel');
     expect(decider({ ...d(null, 0), erreur: 'TimeoutError' }, 'pain').type).toBe('habituel');

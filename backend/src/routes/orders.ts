@@ -70,6 +70,12 @@ const courierSchema = z.object({
   dropoff_contact: facultatif(30),
   /** Chez qui le prendre, si ce n'est pas l'expéditeur lui-même. */
   pickup_contact: facultatif(30),
+  /**
+   * « deposer » : le livreur vient chez le client (départ = sa position).
+   * « recuperer » : il va chercher ailleurs et apporte au client (arrivée =
+   * sa position, départ décrit par pickup_hint). Migration 0059.
+   */
+  mode: z.enum(['deposer', 'recuperer']).default('deposer'),
 });
 
 /**
@@ -176,6 +182,10 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
             p_parcel_note: body.data.parcel_note,
             p_dropoff_contact: body.data.dropoff_contact,
             p_pickup_contact: body.data.pickup_contact,
+            // Seulement pour « récupérer » : sans la migration 0059, la base
+            // ne connaît pas ce paramètre, et « déposer » doit continuer de
+            // fonctionner.
+            ...(body.data.mode === 'recuperer' ? { p_mode: 'recuperer' } : {}),
           });
 
     if (error) {
@@ -317,11 +327,10 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(failure.status).send(failure.body);
     }
 
-    const suivi = await db.rpc('order_tracking', { p_order_id: params.data.orderId });
-    return reply.send(envelope(
-      (refus as string | null) ?? 'C’est annulé. Aucun livreur ne viendra.',
-      suivi.data ? [orderTracking(suivi.data as Record<string, unknown>)] : [],
-    ));
+    // Pas de nouvelle carte de suivi : celle déjà affichée passe d'elle-même
+    // à « annulée » (elle écoute la commande en temps réel). En renvoyer une
+    // seconde empilait deux « Livraison annulée » l'une sous l'autre.
+    return reply.send(envelope((refus as string | null) ?? 'C’est annulé. Aucun livreur ne viendra.'));
   });
 
   app.get('/orders', { preHandler: app.requireAuth }, async (request, reply) => {

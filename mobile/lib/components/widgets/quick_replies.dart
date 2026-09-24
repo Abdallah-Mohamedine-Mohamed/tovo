@@ -15,19 +15,28 @@ class QuickReplies extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = component.list('items');
     if (items.isEmpty) return const SizedBox.shrink();
+    // Pas de titre par défaut : ces choix répondent toujours à une question
+    // déjà posée juste au-dessus (« Vous voulez : », « Vider ou garder ? »).
+    // « Vous pouvez aussi demander », ajouté d'office, s'intercalait entre la
+    // question et ses réponses.
+    final titre = component.str('title');
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 28),
+      padding: const EdgeInsets.symmetric(vertical: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(bottom: 24),
-            child: Text(
-              'Vous pouvez aussi demander',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          if (titre.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Text(
+                titre,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
-          ),
           for (var index = 0; index < items.length; index++)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),

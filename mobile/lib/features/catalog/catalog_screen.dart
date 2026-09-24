@@ -6,7 +6,9 @@ import '../../components/registry.dart';
 import '../../core/api.dart';
 import '../../core/theme.dart';
 import '../../core/catalog_image.dart';
+import '../../components/widgets/pastille_panier.dart';
 import '../../components/widgets/product_carousel.dart';
+import '../../core/panier.dart';
 import '../../components/widgets/read_placeholder.dart';
 import 'product_sheet.dart';
 import 'cart_screen.dart';
@@ -51,7 +53,6 @@ class _CatalogScreenState extends State<CatalogScreen> {
   int _total = 0;
   int _generation = 0;
   TovoComponent? _cartPreview;
-  bool _hasCart = false;
   bool _loading = true;
   bool _directory = false;
   bool _similar = false;
@@ -217,7 +218,6 @@ class _CatalogScreenState extends State<CatalogScreen> {
         .firstOrNull;
     setState(() {
       _cartPreview = component;
-      _hasCart = component?.list('items').isNotEmpty ?? false;
     });
   }
 
@@ -250,12 +250,25 @@ class _CatalogScreenState extends State<CatalogScreen> {
     if (mounted) await _loadCart();
   }
 
+  Widget _tuile(Map<String, dynamic> produit) {
+    void ouvrir() => _openProduct(produit['id'] as String);
+    return ProductTile(
+      data: produit,
+      onOpen: ouvrir,
+      onAdd: ouvrir,
+      afficherBoutique: widget.merchantId == null,
+      onMerchant: widget.merchantId == null
+          ? () => _openMerchant(produit['merchant_id'] as String)
+          : null,
+    );
+  }
+
   Future<void> _openCart() async {
     final order = await Navigator.of(context).push<TovoResponse>(
       MaterialPageRoute(
         builder: (_) => CartScreen(
           api: widget.api,
-          initialCart: _cartPreview,
+          initialCart: PanierEnDirect.instance.value?.composant ?? _cartPreview,
           conversationId: widget.conversationId,
         ),
       ),
@@ -401,15 +414,11 @@ class _CatalogScreenState extends State<CatalogScreen> {
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        actions: [
-          if (_hasCart)
-            IconButton(
-              tooltip: 'Panier',
-              onPressed: _openCart,
-              icon: const Icon(Icons.shopping_bag_outlined),
-            ),
-        ],
       ),
+      // La même pastille que dans la discussion : le panier au même endroit,
+      // partout, et à jour dès le premier ajout.
+      floatingActionButton: PastillePanier(onTap: _openCart),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       body: RefreshIndicator(
         onRefresh: () => _directory ? _start() : _load(reset: true),
         child: CustomScrollView(
@@ -584,31 +593,29 @@ class _CatalogScreenState extends State<CatalogScreen> {
               // l'ajout au panier d'Explorer.
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-                sliver: SliverGrid.builder(
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 14,
-                    mainAxisSpacing: 22,
-                    mainAxisExtent: hauteurTuileProduit(
-                      context,
-                      (MediaQuery.sizeOf(context).width - 40 - 14) / 2,
+                // Des rangées de deux, chacune à la hauteur de son contenu :
+                // une grille à hauteur fixe réservait à toutes les tuiles la
+                // place du pire cas, et laissait des vides sous les prix.
+                sliver: SliverList.builder(
+                  itemCount: (_items.length + 1) ~/ 2,
+                  itemBuilder: (_, rangee) => Padding(
+                    padding: EdgeInsets.only(top: rangee == 0 ? 0 : 22),
+                    child: IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var colonne = 0; colonne < 2; colonne++) ...[
+                            if (colonne == 1) const SizedBox(width: 14),
+                            Expanded(
+                              child: rangee * 2 + colonne < _items.length
+                                  ? _tuile(_items[rangee * 2 + colonne])
+                                  : const SizedBox.shrink(),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
                   ),
-                  itemCount: _items.length,
-                  itemBuilder: (_, index) {
-                    final produit = _items[index];
-                    void ouvrir() => _openProduct(produit['id'] as String);
-                    return ProductTile(
-                      data: produit,
-                      onOpen: ouvrir,
-                      onAdd: ouvrir,
-                      afficherBoutique: widget.merchantId == null,
-                      onMerchant: widget.merchantId == null
-                          ? () =>
-                                _openMerchant(produit['merchant_id'] as String)
-                          : null,
-                    );
-                  },
                 ),
               ),
             if (_error != null)
@@ -667,7 +674,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
                   ),
                 ),
               ),
-            const SliverToBoxAdapter(child: SizedBox(height: 32)),
+            // De la place sous le dernier produit : la pastille ne le cache pas.
+            const SliverToBoxAdapter(child: SizedBox(height: 96)),
           ],
         ),
       ),

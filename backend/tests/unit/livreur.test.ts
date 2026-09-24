@@ -112,7 +112,8 @@ describe('POST /chat — un livreur sans formulaire', () => {
       client_message_id: MESSAGE, text: 'Je veux un livreur',
     } });
     expect(res.json().components[0].type).toBe('courier_form');
-    expect(res.json().content).toContain('Ma position');
+    // La carte prend la position d'elle-même : plus de « Touchez Ma position ».
+    expect(res.json().content).not.toContain('Ma position');
     expect(db.rpc).not.toHaveBeenCalledWith('place_courier_order', expect.anything());
     await app.close();
   });
@@ -129,6 +130,38 @@ describe('POST /chat — un livreur sans formulaire', () => {
     expect(carte.data.callback_minutes).toBe(7);
     expect(res.json().content).not.toMatch(/taille|destinataire|point de départ/i);
     expect(generate).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+describe('les deux sortes de livreur', () => {
+  it('« va chercher » se reconnaît, et ne commande jamais un livreur chez moi', async () => {
+    const { demandeDeRecuperation, demandeUnLivreur, lieuDeRecuperation } = await import('../../src/ai/intents.js');
+    expect(demandeDeRecuperation('Va chercher un colis chez Moussa, à Harobanda')).toBe(true);
+    expect(demandeDeRecuperation('récupère mon paquet au marché')).toBe(true);
+    expect(demandeDeRecuperation('apporte-moi le document')).toBe(true);
+    expect(demandeDeRecuperation('Je veux envoyer un colis')).toBe(false);
+    // Sinon, la commande directe « viens chez moi » partait.
+    expect(demandeUnLivreur('Je veux un livreur pour aller chercher mon colis')).toBe(false);
+    expect(lieuDeRecuperation('Va chercher un colis chez Moussa, à Harobanda')).toBe('Chez Moussa, à Harobanda');
+  });
+
+  it('« va chercher mon colis chez Moussa au 90 12 34 56 » : la carte, lieu et numéro remplis', async () => {
+    const db = fausseBase();
+    const app = await appAvec(db);
+    const res = await app.inject({ method: 'POST', url: '/chat', payload: {
+      client_message_id: MESSAGE, context: NIAMEY,
+      text: 'Va chercher mon colis chez Moussa au 90 12 34 56',
+    } });
+    const carte = res.json().components[0];
+    expect(carte.type).toBe('courier_form');
+    expect(carte.data.mode).toBe('recuperer');
+    expect(carte.data.pickup.hint).toBe('Chez Moussa');
+    expect(carte.data.pickup_contact).toBe('90 12 34 56');
+    // L'arrivée : chez le client.
+    expect(carte.data.dropoff).toMatchObject({ lat: NIAMEY.lat, lng: NIAMEY.lng });
+    expect(res.json().content).toContain('apporte');
+    expect(db.rpc).not.toHaveBeenCalledWith('place_courier_order', expect.anything());
     await app.close();
   });
 });

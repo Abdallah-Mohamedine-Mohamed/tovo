@@ -480,6 +480,9 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
   Widget build(BuildContext context) {
     final course = controller.course!;
     final coursier = course['type'] == 'courier';
+    // « Aller chercher » (migration 0059) : le colis est ailleurs, le client
+    // l'attend chez lui. Le départ n'a pas d'adresse exacte : on appelle.
+    final recuperer = coursier && course['mode'] == 'recuperer';
     final dropoff =
         (course['dropoff'] as Map?)?.cast<String, dynamic>() ?? const {};
     final pickup = (course['pickup'] as Map?)?.cast<String, dynamic>();
@@ -512,8 +515,11 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
               Text(
                 coursier
                     ? switch (controller.statut) {
+                        'assigned' when recuperer => 'Allez chercher le colis',
                         'assigned' => 'Récupérez le colis',
                         'picked_up' => 'Colis récupéré',
+                        'delivering' when recuperer =>
+                          'En route vers le client',
                         'delivering' => 'En route vers le destinataire',
                         _ => controller.statut,
                       }
@@ -531,7 +537,11 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
               // choisir entre deux itinéraires.
               _EtapeCourse(
                 couleur: TovoTheme.teal,
-                titre: coursier ? 'Récupérer le colis' : 'Récupérer le repas',
+                titre: recuperer
+                    ? 'Aller chercher le colis'
+                    : coursier
+                    ? 'Récupérer le colis'
+                    : 'Récupérer le repas',
                 nom:
                     (boutique?['name'] as String?) ??
                     (course['merchant_name'] as String?),
@@ -540,9 +550,14 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
                     (boutique?['hint'] as String?),
                 // Sur une course coursier il n'y a pas de boutique : le
                 // contact du point de retrait est celui qui remet le colis.
+                // À défaut de contact sur place, le client : c'est chez lui
+                // (« venir chez moi »), ou lui seul sait où aller (« aller
+                // chercher »). Sans ce repli, aucun numéro n'était affiché.
                 telephone:
                     (pickup?['contact'] as String?) ??
-                    boutique?['phone'] as String?,
+                    (coursier
+                        ? (client?['phone'] as String?)
+                        : (boutique?['phone'] as String?)),
                 lat: _nombre(pickup?['lat'] ?? boutique?['lat']),
                 lng: _nombre(pickup?['lng'] ?? boutique?['lng']),
                 actif: !enRouteVersClient,
@@ -550,7 +565,11 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
               const SizedBox(height: 12),
               _EtapeCourse(
                 couleur: TovoTheme.danger,
-                titre: coursier ? 'Livrer le colis' : 'Livrer le repas',
+                titre: recuperer
+                    ? 'Apporter au client'
+                    : coursier
+                    ? 'Livrer le colis'
+                    : 'Livrer le repas',
                 nom: client?['name'] as String?,
                 repere: dropoff['hint'] as String?,
                 // Pour un colis, celui qui commande n'est presque jamais

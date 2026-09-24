@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../components/registry.dart';
 import 'config.dart';
 import 'read_cache.dart';
+import 'panier.dart';
 
 /// Client du backend Tovo.
 ///
@@ -218,7 +219,10 @@ class TovoApi {
             onEvent(event);
           }
         }
-        if (result != null) return result;
+        if (result != null) {
+          PanierEnDirect.instance.observer(result);
+          return result;
+        }
         break;
       }
     } on Exception {
@@ -276,7 +280,11 @@ class TovoApi {
         if (await renouveler()) continue;
       }
 
-      if (resultat != null) return resultat;
+      if (resultat != null) {
+        // Tout panier renvoyé met la pastille à jour, d'où qu'il vienne.
+        PanierEnDirect.instance.observer(resultat);
+        return resultat;
+      }
 
       if (!retryNetwork || essai >= 2) {
         return TovoResponse.failure(

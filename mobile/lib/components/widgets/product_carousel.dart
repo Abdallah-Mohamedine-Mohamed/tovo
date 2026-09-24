@@ -224,9 +224,15 @@ void _ajouter(Map<String, dynamic> item, InteractionCallback onInteraction) {
 
 /// Hauteur d'une tuile de largeur [largeur] : la photo carrée, puis le
 /// texte, qui grandit avec la taille de police choisie par le client.
-double hauteurTuileProduit(BuildContext context, double largeur) {
+double hauteurTuileProduit(
+  BuildContext context,
+  double largeur, {
+  bool avecBoutique = true,
+}) {
   final echelle = MediaQuery.textScalerOf(context).scale(14) / 14;
-  return largeur + 22 + 96 * echelle;
+  // Sans la ligne « boutique » (page d'une enseigne), la tuile est plus
+  // courte : sinon un grand vide séparait le nom du plat de son prix.
+  return largeur + 22 + (avecBoutique ? 96 : 76) * echelle;
 }
 
 /// Un produit en tuile : photo carrée, « + » dessus, nom, boutique, prix.
@@ -349,7 +355,9 @@ class ProductTile extends StatelessWidget {
                     style: TextStyle(fontSize: 11, color: TovoTheme.inkDoux),
                   ),
                 ),
-              const Spacer(),
+              // Prix alignés d'une tuile à l'autre quand la ligne boutique
+              // existe ; sinon, juste sous le nom.
+              if (afficherBoutique) const Spacer(),
               const SizedBox(height: 6),
               Text(
                 _price(data),

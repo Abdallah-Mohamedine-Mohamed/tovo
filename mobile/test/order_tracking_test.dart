@@ -34,16 +34,20 @@ void main() {
   ) async {
     await afficherSuivi(tester, type: 'delivery', statut: 'preparing');
 
-    expect(find.text('En préparation'), findsOneWidget);
+    // Le titre, et l'étape en cours dans la frise.
+    expect(find.text('En préparation'), findsNWidgets(2));
     expect(find.text('La boutique prépare votre commande.'), findsOneWidget);
-    expect(find.text('Ensuite : Prête'), findsOneWidget);
+    // Quatre étapes verticales, pas six.
+    expect(find.text('Confirmée'), findsOneWidget);
+    expect(find.text('En route'), findsOneWidget);
+    expect(find.text('Prête'), findsNothing);
   });
 
   testWidgets('le retrait du repas précède son trajet', (tester) async {
     await afficherSuivi(tester, type: 'delivery', statut: 'picked_up');
 
     expect(find.text('Le livreur a récupéré votre commande.'), findsOneWidget);
-    expect(find.text('Ensuite : En route'), findsOneWidget);
+    expect(find.text('Livrée'), findsOneWidget);
   });
 
   testWidgets('un livreur : trois étapes, et il va vous appeler', (
@@ -53,7 +57,10 @@ void main() {
 
     expect(find.text('Un livreur va vous appeler'), findsOneWidget);
     expect(find.textContaining('7 minutes'), findsOneWidget);
-    expect(find.text('Ensuite : Colis récupéré'), findsOneWidget);
+    // Trois étapes, de haut en bas.
+    expect(find.text('Livreur en route'), findsOneWidget);
+    expect(find.text('Colis récupéré'), findsOneWidget);
+    expect(find.text('Livré'), findsOneWidget);
     expect(find.text('Destination à préciser au livreur'), findsOneWidget);
     expect(find.text('En préparation'), findsNothing);
     // Personne à appeler tant qu'aucun livreur n'est assigné.
@@ -78,11 +85,34 @@ void main() {
     expect(gestes.single.payload['phone'], '+22790000000');
   });
 
+  testWidgets('« aller chercher » : il part le chercher, puis vous l’apporte', (
+    tester,
+  ) async {
+    await afficherSuivi(
+      tester,
+      type: 'courier',
+      statut: 'assigned',
+      extra: {
+        'mode': 'recuperer',
+        'pickup': {'hint': 'Chez Awa, Yantala'},
+        'driver': {'name': 'Moussa Issoufou', 'phone': '+22790000000'},
+      },
+    );
+    expect(find.text('Moussa part le chercher'), findsOneWidget);
+    expect(find.text('Il part le chercher'), findsOneWidget);
+    expect(find.text('Livré chez vous'), findsOneWidget);
+    // Où il va, et pas une « destination » qui est chez le client.
+    expect(
+      find.textContaining('À récupérer : Chez Awa, Yantala'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Destination'), findsNothing);
+  });
+
   testWidgets('un colis livré est nommé comme tel', (tester) async {
     await afficherSuivi(tester, type: 'courier', statut: 'delivered');
 
     expect(find.text('Colis livré'), findsOneWidget);
-    expect(find.text('Terminé'), findsOneWidget);
   });
 
   testWidgets('une commande annulée ne montre pas de progression', (
@@ -91,6 +121,21 @@ void main() {
     await afficherSuivi(tester, type: 'delivery', statut: 'cancelled');
 
     expect(find.text('Annulée'), findsOneWidget);
-    expect(find.textContaining('Ensuite'), findsNothing);
+    expect(find.text('Confirmée'), findsNothing);
+  });
+
+  testWidgets('« À voir avec le client » n’est pas présenté comme une adresse', (
+    tester,
+  ) async {
+    await afficherSuivi(
+      tester,
+      type: 'courier',
+      statut: 'pending',
+      extra: {
+        'dropoff': {'hint': 'À voir avec le client'},
+      },
+    );
+    expect(find.textContaining('À voir avec le client'), findsNothing);
+    expect(find.text('Destination à préciser au livreur'), findsOneWidget);
   });
 }

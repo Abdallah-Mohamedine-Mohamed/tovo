@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:tovo/core/panier.dart';
 import 'package:tovo/components/register_all.dart';
 import 'package:tovo/components/registry.dart';
 import 'package:tovo/components/widgets/product_carousel.dart';
@@ -59,6 +60,8 @@ void main() {
   };
 
   setUp(() {
+    // Le panier est partagé par toute l'appli : on repart de zéro.
+    PanierEnDirect.instance.vider();
     requests.clear();
     cart = false;
     failNextPage = false;
@@ -266,7 +269,7 @@ void main() {
     await tester.tap(find.text('Ajouter au panier'));
     await tester.pumpAndSettle();
     expect(find.byTooltip('Fermer la fiche'), findsNothing);
-    expect(find.byTooltip('Panier'), findsOneWidget);
+    expect(find.byTooltip('Voir le panier'), findsOneWidget);
     expect(find.text('Voir mon panier'), findsNothing);
     expect(find.text('53 produits'), findsOneWidget);
   });

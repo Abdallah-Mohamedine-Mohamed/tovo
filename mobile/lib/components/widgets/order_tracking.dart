@@ -6,11 +6,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme.dart';
 import '../registry.dart';
 
+/// Quatre moments pour un repas. « Prête » et « récupérée » sont dites par
+/// le titre au-dessus ; six étapes empilées faisaient une liste à lire.
 const List<String> _etapesCommandeVisibles = [
   'Confirmée',
   'En préparation',
-  'Prête',
-  'Récupérée',
   'En route',
   'Livrée',
 ];
@@ -24,6 +24,13 @@ const List<String> _etapesColisVisibles = [
   'Livré',
 ];
 
+/// « Aller chercher » : il part chercher, il a le colis, il est chez vous.
+const List<String> _etapesRecuperationVisibles = [
+  'Il part le chercher',
+  'Colis récupéré',
+  'Livré chez vous',
+];
+
 int _etapeColisVisible(String statut) => switch (statut) {
   'pending' || 'confirmed' || 'ready' || 'assigned' => 0,
   'picked_up' || 'delivering' => 1,
@@ -31,27 +38,17 @@ int _etapeColisVisible(String statut) => switch (statut) {
   _ => -1,
 };
 
-int _etapeCommandeVisible(String statut) {
-  switch (statut) {
-    case 'pending':
-      return -1;
-    case 'confirmed':
-      return 0;
-    case 'preparing':
-      return 1;
-    case 'ready':
-    case 'assigned':
-      return 2;
-    case 'picked_up':
-      return 3;
-    case 'delivering':
-      return 4;
-    case 'delivered':
-      return 5;
-    default:
-      return -1;
-  }
-}
+int _etapeCommandeVisible(String statut) => switch (statut) {
+  'confirmed' => 0,
+  'preparing' || 'ready' || 'assigned' => 1,
+  'picked_up' || 'delivering' => 2,
+  'delivered' => 3,
+  _ => -1,
+};
+
+/// La valeur par défaut que la base écrit quand le client n'a pas donné de
+/// destination : ce n'est pas une adresse, on ne l'affiche pas comme telle.
+const _destinationInconnue = 'À voir avec le client';
 
 /// `order_tracking` — composant vivant.
 ///
@@ -248,8 +245,26 @@ class _OrderTrackingState extends State<OrderTracking>
     return nom.isEmpty ? '' : nom.split(RegExp(r'\s+')).first;
   }
 
+  /// « Aller chercher » (migration 0059) : le livreur va chercher ailleurs
+  /// et apporte au client.
+  bool get _recuperer => widget.component.str('mode') == 'recuperer';
+
   String _description(bool colis) {
     if (_statut == 'cancelled') return 'Cette commande ne sera pas livrée.';
+    if (colis && _recuperer) {
+      final minutes =
+          (widget.component.data['callback_minutes'] as num?)?.toInt() ?? 7;
+      return switch (_statut) {
+        'pending' ||
+        'confirmed' ||
+        'ready' => 'Dans les $minutes minutes, pour convenir des détails.',
+        'assigned' => 'Il va chercher votre colis.',
+        'picked_up' => 'Il a votre colis et vient vers vous.',
+        'delivering' => 'Votre colis est en chemin vers vous.',
+        'delivered' => 'Votre colis vous a été remis.',
+        _ => 'Suivez votre livraison ici.',
+      };
+    }
     if (colis) {
       final minutes =
           (widget.component.data['callback_minutes'] as num?)?.toInt() ?? 7;
@@ -280,7 +295,9 @@ class _OrderTrackingState extends State<OrderTracking>
   @override
   Widget build(BuildContext context) {
     final colis = widget.component.str('type', '') == 'courier';
-    final etapes = colis ? _etapesColisVisibles : _etapesCommandeVisibles;
+    final etapes = colis
+        ? (_recuperer ? _etapesRecuperationVisibles : _etapesColisVisibles)
+        : _etapesCommandeVisibles;
     final courante = colis
         ? _etapeColisVisible(_statut)
         : _etapeCommandeVisible(_statut);
@@ -294,11 +311,16 @@ class _OrderTrackingState extends State<OrderTracking>
     final libelle = colis
         ? switch (_statut) {
             'pending' || 'confirmed' || 'ready' => 'Un livreur va vous appeler',
+            'assigned' when _recuperer =>
+              _prenomLivreur.isEmpty
+                  ? 'Votre livreur part le chercher'
+                  : '$_prenomLivreur part le chercher',
             'assigned' =>
               _prenomLivreur.isEmpty
                   ? 'Votre livreur arrive'
                   : '$_prenomLivreur arrive',
             'picked_up' => 'Colis récupéré',
+            'delivering' when _recuperer => 'Votre colis arrive',
             'delivering' => 'Colis en route',
             'delivered' => 'Colis livré',
             'cancelled' => 'Livraison annulée',
@@ -306,12 +328,15 @@ class _OrderTrackingState extends State<OrderTracking>
           }
         : _libelles[_statut] ?? _statut;
 
-    final destination =
-        ((widget.component.map('dropoff')['hint'] as String?) ?? '').trim();
+    final brute = ((widget.component.map('dropoff')['hint'] as String?) ?? '')
+        .trim();
+    final destination = brute == _destinationInconnue ? '' : brute;
     final details = [
       if (widget.component.str('merchant_name').isNotEmpty)
         widget.component.str('merchant_name'),
-      if (destination.isNotEmpty)
+      if (colis && _recuperer)
+        'À récupérer : ${(widget.component.map('pickup')['hint'] as String?) ?? 'à préciser au livreur'}'
+      else if (destination.isNotEmpty)
         destination
       else if (colis)
         'Destination à préciser au livreur',
@@ -345,7 +370,7 @@ class _OrderTrackingState extends State<OrderTracking>
                     fontSize: 24,
                     height: 1.2,
                     fontWeight: FontWeight.w700,
-                    color: annulee ? TovoTheme.danger : TovoTheme.ink,
+                    color: annulee ? TovoTheme.inkDoux : TovoTheme.ink,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -361,8 +386,8 @@ class _OrderTrackingState extends State<OrderTracking>
             ),
           ),
           if (!annulee) ...[
-            const SizedBox(height: 18),
-            _BarreEtapes(etapes: etapes, courante: courante),
+            const SizedBox(height: 20),
+            _EtapesVerticales(etapes: etapes, courante: courante),
           ],
           if (_livreur != null && !annulee && _statut != 'delivered') ...[
             const SizedBox(height: 18),
@@ -421,45 +446,98 @@ class _OrderTrackingState extends State<OrderTracking>
   }
 }
 
-/// La progression sur une ligne : un segment par étape, puis la suivante.
-///
-/// Cinq ou six étapes empilées occupaient l'écran pour redire ce que le
-/// titre dit déjà. Deux lignes suffisent : où on en est, et ce qui vient.
-class _BarreEtapes extends StatelessWidget {
-  const _BarreEtapes({required this.etapes, required this.courante});
+/// La progression, de haut en bas : ce qui est fait, où on en est, ce qui
+/// vient. Trois ou quatre lignes, pas plus.
+class _EtapesVerticales extends StatelessWidget {
+  const _EtapesVerticales({required this.etapes, required this.courante});
 
   final List<String> etapes;
   final int courante;
 
   @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      for (var i = 0; i < etapes.length; i++)
+        _Etape(
+          libelle: etapes[i],
+          faite: i < courante,
+          active: i == courante,
+          derniere: i == etapes.length - 1,
+        ),
+    ],
+  );
+}
+
+class _Etape extends StatelessWidget {
+  const _Etape({
+    required this.libelle,
+    required this.faite,
+    required this.active,
+    required this.derniere,
+  });
+
+  final String libelle;
+  final bool faite;
+  final bool active;
+  final bool derniere;
+
+  @override
   Widget build(BuildContext context) {
-    final suivante = courante + 1 < etapes.length ? etapes[courante + 1] : null;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            for (var index = 0; index < etapes.length; index++) ...[
-              if (index > 0) const SizedBox(width: 4),
-              Expanded(
-                child: AnimatedContainer(
+    final atteinte = faite || active;
+    return SizedBox(
+      height: derniere ? 26 : 44,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 20,
+            child: Column(
+              children: [
+                AnimatedContainer(
                   duration: TovoTheme.normal,
-                  height: 4,
+                  width: 16,
+                  height: 16,
+                  margin: const EdgeInsets.only(top: 2),
                   decoration: BoxDecoration(
-                    color: index <= courante ? TovoTheme.teal : TovoTheme.line,
-                    borderRadius: BorderRadius.circular(2),
+                    shape: BoxShape.circle,
+                    color: active ? TovoTheme.teal : Colors.white,
+                    border: Border.all(
+                      color: atteinte ? TovoTheme.teal : TovoTheme.line,
+                      width: 1.5,
+                    ),
                   ),
+                  child: faite
+                      ? const Icon(Icons.check, size: 11, color: TovoTheme.teal)
+                      : null,
                 ),
-              ),
-            ],
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          suivante == null ? 'Terminé' : 'Ensuite : $suivante',
-          style: const TextStyle(fontSize: 12.5, color: TovoTheme.inkDoux),
-        ),
-      ],
+                if (!derniere)
+                  Expanded(
+                    child: AnimatedContainer(
+                      duration: TovoTheme.normal,
+                      width: 1.5,
+                      margin: const EdgeInsets.symmetric(vertical: 3),
+                      color: faite ? TovoTheme.teal : TovoTheme.line,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            libelle,
+            style: TextStyle(
+              fontSize: 14,
+              height: 1.3,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              color: active
+                  ? TovoTheme.ink
+                  : faite
+                  ? TovoTheme.inkDoux
+                  : TovoTheme.muted,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

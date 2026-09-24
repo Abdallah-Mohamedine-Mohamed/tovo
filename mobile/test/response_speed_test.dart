@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:tovo/core/panier.dart';
 import 'package:tovo/components/register_all.dart';
 import 'package:tovo/components/registry.dart';
 import 'package:tovo/core/api.dart';
@@ -132,6 +133,8 @@ void main() {
   });
   tearDownAll(() => Supabase.instance.dispose());
   setUp(() {
+    // Le panier est partagé par toute l'appli : on repart de zéro.
+    PanierEnDirect.instance.vider();
     SharedPreferences.setMockInitialValues({});
     registerTovoComponents();
   });

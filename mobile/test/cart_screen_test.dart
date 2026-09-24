@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:tovo/core/panier.dart';
 import 'package:tovo/components/registry.dart';
 import 'package:tovo/core/api.dart';
 import 'package:tovo/core/theme.dart';
@@ -63,6 +64,8 @@ void main() {
   );
 
   setUp(() {
+    // Le panier est partagé par toute l'appli : on repart de zéro.
+    PanierEnDirect.instance.vider();
     quantity = 1;
     blocked = false;
     failure = false;

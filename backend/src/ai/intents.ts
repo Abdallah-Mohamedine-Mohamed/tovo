@@ -21,6 +21,9 @@ const MOTS_RECHERCHE_VIDES = new Set([
   // Liaisons d'une relance : « Et les tacos ? » cherchait « et tacos », et
   // l'affichait tel quel en titre.
   'et', 'alors', 'aussi', 'sinon', 'plutot', 'encore',
+  // Remplissage de l'oral : une note vocale transcrite les garde, et
+  // « bon l ukounou me euh » devenait la recherche de tous ces mots.
+  'euh', 'heu', 'hein', 'ben', 'bah', 'bon', 'voila', 'donc', 'me', 'm', 'l', 'd', 's', 'n',
 ]);
 
 /**
@@ -41,7 +44,9 @@ export function requeteProduitUtilisateur(texte: string): string {
     .filter(Boolean)
     .filter((mot) => !MOTS_RECHERCHE_VIDES.has(mot))
     .filter((mot) => !['envie', 'dans', 'votre', 'comme', 'commander'].includes(mot));
-  return (correction >= 0 ? [...new Set(mots)] : mots).join(' ');
+  // Sans doublons : à l'oral on répète (« garbador… garbador »), et le mot
+  // répété s'affichait deux fois en titre.
+  return [...new Set(mots)].join(' ');
 }
 
 /**
@@ -69,6 +74,9 @@ export function demandeOuverte(requete: string): boolean {
  */
 export function demandeUnLivreur(texte: string): boolean {
   const n = normaliserIntention(texte);
+  // « … pour aller chercher un colis » : l'autre sorte de course. Elle passe
+  // par la carte, jamais par la commande directe « viens chez moi ».
+  if (demandeDeRecuperation(texte)) return false;
   if (!/\b(un|une|des) (livreur|livreurs|coursier|coursiers|livreuse)\b/.test(n)) return false;
   if (/\b(devenir|travailler|travail|emploi|recrute|recrutez|recrutement|inscrire|inscription|postuler)\b/.test(n)) {
     return false;
@@ -78,12 +86,34 @@ export function demandeUnLivreur(texte: string): boolean {
   return demande || n.split(' ').length <= 3;
 }
 
-/** Envoyer un colis, un paquet, un document. */
+/** Envoyer un colis, un paquet, un document — ou se le faire apporter. */
 export function demandeUnColis(texte: string): boolean {
   const reduit = normaliserIntention(texte);
   const objet = /\b(colis|paquet|document|documents|courrier)\b/.test(reduit);
   const action = /\b(envoyer|livrer|expedier|deposer|remettre|transporter)\b/.test(reduit);
-  return objet && action;
+  return objet && (action || demandeDeRecuperation(texte));
+}
+
+/**
+ * Le livreur doit-il aller CHERCHER quelque chose ailleurs pour l'apporter
+ * au client ? « Va chercher un colis chez Moussa », « récupère mon paquet au
+ * marché », « apporte-moi le document ». L'autre sorte : il vient chez le
+ * client prendre un colis à porter.
+ */
+export function demandeDeRecuperation(texte: string): boolean {
+  const n = normaliserIntention(texte);
+  return /\b(va|vas|aller|allez|passe|passer|passez) (me |le |la |les )?(chercher|recuperer|prendre)\b/.test(n)
+    || /\b(recuperer|recupere|recuperez)\b/.test(n)
+    || /\b(apporte|apportez|ramene|ramenez|amene|amenez) (le |la |les )?moi\b/.test(n)
+    || /\bme (l |le |la |les )?(apporter|ramener|amener)\b/.test(n);
+}
+
+/** Où aller chercher : « Chez Moussa, Harobanda », « Au marché ». */
+export function lieuDeRecuperation(texte: string): string | null {
+  // La virgule fait partie du lieu : « chez Moussa, à Harobanda ».
+  const lieu = /\b((?:chez|au|aux)\s+[^.;!?]+?)(?=\s+(?:et|pour|puis|svp|stp)\b|[.;!?]|$)/i.exec(texte);
+  if (!lieu) return null;
+  return lieu[1]!.trim().replace(/^./, (c) => c.toUpperCase());
 }
 
 /** Une phrase sociale ou émotionnelle ne doit jamais devenir un produit. */
@@ -359,10 +389,15 @@ export function boutiquesMentionnees<T extends { id: string; name: string }>(
   // devenir une recherche globale sur le mot « garba ». Pour un nom d'un
   // seul mot, on exige en revanche une formulation sans vocabulaire de
   // repas : sinon une boutique POULET capturerait « manger du poulet ».
+  // Collé aussi : à l'oral, « Garba d'Or » est transcrit « Garbador ». On
+  // compare alors le nom sans espaces à un MOT ENTIER du message, jamais à
+  // un morceau (« scenariotacos » ne doit pas trouver « O TACOS »).
+  const motsDuMessage = new Set(normalise.split(' '));
   const exactes = boutiques.filter((boutique) => {
     const nom = normaliserIntention(boutique.name);
     const nomCompose = nom.split(' ').length > 1;
-    return nom.length >= 5 && nomCompose && normalise.includes(nom);
+    if (nom.length < 5 || !nomCompose) return false;
+    return normalise.includes(nom) || motsDuMessage.has(nom.replace(/ /g, ''));
   });
   if (exactes.length > 0) return exactes;
 
