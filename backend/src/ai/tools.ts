@@ -1139,7 +1139,7 @@ const preparerCourse: Executor = async (args, ctx) => {
         a_recuperer: ou || null,
         contact_sur_place: contact || null,
         position_connue: Boolean(ctx.position),
-        consigne: 'La carte suffit : le client touche « Envoyer le livreur ». Ne pose aucune question.',
+        consigne: 'La carte suffit : le client touche « Commander le livreur ». Ne pose aucune question.',
       },
       components: [
         {
@@ -1205,7 +1205,7 @@ const preparerCourse: Executor = async (args, ctx) => {
       arrivee: arrivee?.hint ?? null,
       destinataire: destinataire || null,
       estimation: estimate?.price ?? null,
-      consigne: 'La carte suffit : le client touche « Appeler un livreur ». Ne pose aucune question.',
+      consigne: 'La carte suffit : le client touche « Commander le livreur ». Ne pose aucune question.',
     },
     components: [
       {
@@ -1445,7 +1445,7 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
       "Affiche la carte « Un livreur vient chez vous » pour un colis ou une course, sans boutique. " +
       "Le départ est la position du client par défaut. Tout est facultatif : passe seulement ce que " +
       "le client a DIT (destination, numéro du destinataire), n'invente rien et ne demande rien. " +
-      "Ne valide jamais l'envoi : le client touche « Appeler un livreur ».",
+      "Ne valide jamais l'envoi : le client touche « Commander le livreur ».",
     parameters: {
       type: 'object',
       properties: {

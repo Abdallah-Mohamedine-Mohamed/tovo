@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:tovo/core/api.dart';
 import 'package:tovo/core/catalog_image.dart';
+import 'package:tovo/core/noms.dart';
 import 'package:tovo/core/panier.dart';
 import 'package:tovo/core/theme.dart';
 import 'package:tovo/features/catalog/boutique_screen.dart';
@@ -61,11 +62,12 @@ void main() {
       );
     }
     await systeme.load();
-    final flame = FontLoader('Flame');
-    for (final g in ['Regular', 'Bold']) {
-      flame.addFont(rootBundle.load('assets/fonts/Flame-$g.otf'));
+    // La police de l'app client (TovoTheme.policeClient).
+    final geist = FontLoader('Geist');
+    for (final g in ['Regular', 'Medium', 'SemiBold', 'Bold']) {
+      geist.addFont(rootBundle.load('assets/fonts/Geist-$g.ttf'));
     }
-    await flame.load();
+    await geist.load();
     final icones = FontLoader('MaterialIcons');
     icones.addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
     await icones.load();
@@ -213,7 +215,7 @@ void main() {
 
   testVisuel('toucher une boutique ouvre sa page', (tester) async {
     await ouvrir(tester);
-    await tester.tap(find.text('${boutiques.first['name']}'));
+    await tester.tap(find.text(enPhrase(boutiques.first['name'] as String)));
     await tester.pumpAndSettle();
     final page = tester.widget<BoutiqueScreen>(find.byType(BoutiqueScreen));
     expect(page.merchantId, boutiques.first['id']);

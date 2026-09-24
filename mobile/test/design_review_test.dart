@@ -92,11 +92,12 @@ void main() {
       );
     }
     await previewFont.load();
-    final flame = FontLoader('Flame');
-    for (final g in ['Regular', 'Bold']) {
-      flame.addFont(rootBundle.load('assets/fonts/Flame-$g.otf'));
+    // La police de l'app client (TovoTheme.policeClient).
+    final geist = FontLoader('Geist');
+    for (final g in ['Regular', 'Medium', 'SemiBold', 'Bold']) {
+      geist.addFont(rootBundle.load('assets/fonts/Geist-$g.ttf'));
     }
-    await flame.load();
+    await geist.load();
     final icons = FontLoader('MaterialIcons');
     icons.addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
     await icons.load();
@@ -448,19 +449,19 @@ void main() {
       find.text('Voici les plats au poulet.').hitTestable(),
       findsOneWidget,
     );
-    await tester.ensureVisible(find.text('Attieke Poulet'));
+    await tester.ensureVisible(find.text('Attieke poulet'));
     await tester.pumpAndSettle();
-    expect(find.text('Attieke Poulet').hitTestable(), findsOneWidget);
+    expect(find.text('Attieke poulet').hitTestable(), findsOneWidget);
     expect(find.byTooltip('Retour à la discussion'), findsNothing);
     await capture(tester, '09-resultats-inline');
-    await tester.tap(find.text('Attieke Poulet'));
+    await tester.tap(find.text('Attieke poulet'));
     await tester.pumpAndSettle();
     expect(find.byType(ProductScreen), findsOneWidget);
     await capture(tester, '10-fiche-inline');
     await tester.tap(find.byTooltip('Fermer la fiche'));
     await tester.pumpAndSettle();
     expect(find.byType(ProductScreen), findsNothing);
-    expect(find.text('Attieke Poulet'), findsOneWidget);
+    expect(find.text('Attieke poulet'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -483,7 +484,7 @@ void main() {
     tester,
   ) async {
     await open(tester, CatalogScreen(api: api, merchantId: 'garba'));
-    await tester.tap(find.text('Attieke Demi Poulet'));
+    await tester.tap(find.text('Attieke demi poulet'));
     await tester.pumpAndSettle();
     await tester.runAsync(
       () async => Future<void>.delayed(const Duration(milliseconds: 300)),

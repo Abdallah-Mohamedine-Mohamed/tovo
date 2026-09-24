@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../../components/registry.dart';
 import '../../components/widgets/read_placeholder.dart';
 import '../../core/api.dart';
+import '../../core/noms.dart';
 import '../../core/location.dart';
 import '../../core/panier.dart';
 import '../../core/push.dart';
@@ -483,7 +484,7 @@ class _CartScreenState extends State<CartScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
                 children: [
                   Text(
-                    _cart!.str('merchant_name'),
+                    enPhrase(_cart!.str('merchant_name')),
                     style: const TextStyle(
                       fontSize: 26,
                       height: 1.15,
@@ -796,7 +797,7 @@ class _CartScreenState extends State<CartScreen> {
     final id = article['item_id'] as String?;
     final quantite = (article['quantity'] as num?)?.toInt() ?? 1;
     final photo = article['image_url'] as String? ?? '';
-    final nom = '${article['product_name'] ?? ''}';
+    final nom = enPhrase('${article['product_name'] ?? ''}');
     final options = article['selections_label'] as String? ?? '';
     final disponible = article['is_available'] != false;
     final actif = !_miseAJour && !_commandeEnCours && id != null;

@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../components/registry.dart' show Money;
 import '../../core/theme.dart';
+import '../../core/noms.dart';
 import '../../core/viewport_reveal.dart';
 
 enum ConversationSymbol {
@@ -309,6 +310,118 @@ class ConversationBackdrop extends StatelessWidget {
   );
 }
 
+/// « Commande en cours » : l'étape en une ligne, touchée pour suivre.
+class _ActiveOrderCard extends StatelessWidget {
+  const _ActiveOrderCard({required this.order, required this.onTap});
+
+  final Map<String, dynamic> order;
+  final VoidCallback onTap;
+
+  static String etape(String statut, {required bool colis}) {
+    if (colis) {
+      return switch (statut) {
+        'assigned' => 'Votre livreur arrive',
+        'picked_up' => 'Colis récupéré',
+        'delivering' => 'Colis en route',
+        _ => 'On cherche un livreur',
+      };
+    }
+    return switch (statut) {
+      'pending' => 'La boutique confirme',
+      'confirmed' => 'Commande acceptée',
+      'preparing' => 'En cuisine',
+      'ready' => 'Prête, un livreur arrive',
+      'assigned' => 'Un livreur va la chercher',
+      'picked_up' || 'delivering' => 'En route vers vous',
+      _ => 'Commande en cours',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colis = order['type'] == 'courier';
+    final boutique = enPhrase(order['merchant_name'] as String?);
+    return Semantics(
+      button: true,
+      label: 'Suivre ma commande',
+      child: Material(
+        color: const Color(0xFFF4F5F5),
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 16, 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 52,
+                  height: 52,
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Image.asset(
+                    colis
+                        ? 'assets/icons/3d/colis.png'
+                        : 'assets/icons/3d/repas.png',
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        colis ? 'Votre livreur' : 'Commande en cours',
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          color: TovoTheme.inkDoux,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        etape('${order['status']}', colis: colis),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: TovoTheme.ink,
+                        ),
+                      ),
+                      if (!colis && boutique.isNotEmpty)
+                        Text(
+                          boutique,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: TovoTheme.inkDoux,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const Text(
+                  'Suivre',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: TovoTheme.ink,
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded, color: TovoTheme.ink),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class ConversationHome extends StatelessWidget {
   const ConversationHome({
     super.key,
@@ -319,6 +432,8 @@ class ConversationHome extends StatelessWidget {
     required this.onBrowseShops,
     this.lastOrder,
     this.onReorder,
+    this.activeOrder,
+    this.onTrack,
   });
   final String? firstName;
   final List<Map<String, dynamic>> recent;
@@ -329,6 +444,10 @@ class ConversationHome extends StatelessWidget {
   /// Dernière commande livrée (GET /orders), ou nulle.
   final Map<String, dynamic>? lastOrder;
   final ValueChanged<Map<String, dynamic>>? onReorder;
+
+  /// Commande pas encore livrée, proposée au suivi (sans y sauter d'office).
+  final Map<String, dynamic>? activeOrder;
+  final ValueChanged<Map<String, dynamic>>? onTrack;
 
   @override
   Widget build(BuildContext context) {
@@ -353,7 +472,8 @@ class ConversationHome extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.only(top: 28, bottom: 68),
             child: Column(
-              mainAxisAlignment: recent.isEmpty && lastOrder == null
+              mainAxisAlignment:
+                  recent.isEmpty && lastOrder == null && activeOrder == null
                   ? MainAxisAlignment.center
                   : MainAxisAlignment.start,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -396,6 +516,17 @@ class ConversationHome extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (activeOrder != null && onTrack != null)
+                  entre(
+                    1,
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(26, 28, 26, 0),
+                      child: _ActiveOrderCard(
+                        order: activeOrder!,
+                        onTap: () => onTrack!(activeOrder!),
+                      ),
+                    ),
+                  ),
                 if (lastOrder != null && onReorder != null)
                   entre(
                     1,

@@ -116,6 +116,9 @@ describe('POST /chat — un livreur sans formulaire', () => {
     expect(res.json().components[0].type).toBe('courier_form');
     // La carte prend la position d'elle-même : plus de « Touchez Ma position ».
     expect(res.json().content).not.toContain('Ma position');
+    // Le client a déjà tout dit : la carte commandera d'elle-même dès qu'elle
+    // aura la position, sans lui faire toucher un bouton de plus.
+    expect(res.json().components[0].data.auto).toBe(true);
     expect(db.rpc).not.toHaveBeenCalledWith('place_courier_order', expect.anything());
     await app.close();
   });
@@ -130,6 +133,8 @@ describe('POST /chat — un livreur sans formulaire', () => {
     expect(carte.data.pickup).toMatchObject({ lat: NIAMEY.lat, lng: NIAMEY.lng });
     expect(carte.data.estimate).toEqual({ price: 1000, flat: true });
     expect(carte.data.callback_minutes).toBe(7);
+    // Un colis peut avoir des détails à ajouter : le client garde le bouton.
+    expect(carte.data.auto).toBeUndefined();
     expect(res.json().content).not.toMatch(/taille|destinataire|point de départ/i);
     expect(generate).not.toHaveBeenCalled();
     await app.close();

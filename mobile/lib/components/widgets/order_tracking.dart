@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/theme.dart';
+import '../../core/noms.dart';
 import '../../core/live_activity.dart';
 import '../registry.dart';
 
@@ -105,7 +106,9 @@ class _OrderTrackingState extends State<OrderTracking>
           orderId: _orderId,
           status: _statut,
           courier: widget.component.str('type') == 'courier',
-          title: widget.component.str('merchant_name', 'Votre livraison'),
+          title: enPhrase(
+            widget.component.str('merchant_name', 'Votre livraison'),
+          ),
           placedAt: DateTime.tryParse(widget.component.str('placed_at')),
           mode: widget.component.data['mode'] as String?,
           driver: _livreur?['name'] as String?,
@@ -369,7 +372,7 @@ class _OrderTrackingState extends State<OrderTracking>
     final destination = brute == _destinationInconnue ? '' : brute;
     final details = [
       if (widget.component.str('merchant_name').isNotEmpty)
-        widget.component.str('merchant_name'),
+        enPhrase(widget.component.str('merchant_name')),
       if (colis && _recuperer)
         'À récupérer : ${(widget.component.map('pickup')['hint'] as String?) ?? 'à préciser au livreur'}'
       else if (destination.isNotEmpty)

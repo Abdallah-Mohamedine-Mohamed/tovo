@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../core/noms.dart';
 import '../../core/catalog_image.dart';
 import '../registry.dart';
 
@@ -133,13 +134,13 @@ class MerchantCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        component.str('name'),
+                        enPhrase(component.str('name')),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontFamily: TovoTheme.policeNoms,
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
+                          fontSize: 16.5,
+                          fontWeight: FontWeight.w600,
                           color: TovoTheme.ink,
                         ),
                       ),

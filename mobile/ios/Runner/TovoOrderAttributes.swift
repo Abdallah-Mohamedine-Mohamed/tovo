@@ -23,4 +23,7 @@ struct TovoOrderAttributes: ActivityAttributes {
   /// Heure de la commande, en secondes depuis 1970 : le chronomètre part de
   /// là et tourne tout seul, sans aucune mise à jour.
   var placedAt: Double?
+  /// Arrivée estimée, en secondes depuis 1970 : « Arrive dans 17:42 », un
+  /// compte à rebours qui défile tout seul.
+  var etaAt: Double?
 }

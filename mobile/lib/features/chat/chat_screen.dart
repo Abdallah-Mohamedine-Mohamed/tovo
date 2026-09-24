@@ -123,6 +123,9 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Nulle s'il n'y en a pas : un nouveau client ne voit rien de vide.
   Map<String, dynamic>? _derniereCommande;
 
+  /// Une commande pas encore livrée : une carte sur l'accueil la propose.
+  Map<String, dynamic>? _commandeEnCours;
+
   /// Le client a choisi d'écrire : la box reste ouverte d'un message à
   /// l'autre (voir ConversationComposer.ecrit).
   bool _modeEcrit = false;
@@ -231,9 +234,15 @@ class _ChatScreenState extends State<ChatScreen> {
     if (commandes.ok) {
       final liste = ((commandes.raw['orders'] as List?) ?? const [])
           .cast<Map<String, dynamic>>();
+      // Au-delà de 12 heures, une commande « en cours » est une commande
+      // oubliée (jamais confirmée) : on ne la ressort plus à chaque ouverture.
+      final limite = DateTime.now().subtract(const Duration(hours: 12));
       enCours = liste.where((o) {
         final s = '${o['status']}';
-        return s != 'delivered' && s != 'cancelled';
+        final le = DateTime.tryParse('${o['placed_at'] ?? ''}');
+        return s != 'delivered' &&
+            s != 'cancelled' &&
+            (le == null || le.isAfter(limite));
       }).firstOrNull;
       // Un colis ne se « recommande » pas : l'adresse et le destinataire
       // changent à chaque fois. Sans articles (serveur plus ancien), il n'y
@@ -246,9 +255,13 @@ class _ChatScreenState extends State<ChatScreen> {
       if (derniere != null) setState(() => _derniereCommande = derniere);
     }
 
+    // L'app ne saute plus d'elle-même dans le suivi quelques secondes après
+    // l'ouverture : le client venait peut-être faire autre chose. Une carte
+    // sur l'accueil propose de suivre ; la Live Activity suit déjà, app
+    // fermée.
     if (enCours != null && mounted) {
       unawaited(TovoPush.enregistrer('client'));
-      await _appeler(() => widget.api.get('/orders/${enCours!['id']}'));
+      setState(() => _commandeEnCours = enCours);
     }
   }
 
@@ -1736,6 +1749,12 @@ class _ChatScreenState extends State<ChatScreen> {
                                   onBrowseShops: () =>
                                       _ouvrirCatalogue(directory: true),
                                   lastOrder: _derniereCommande,
+                                  activeOrder: _commandeEnCours,
+                                  onTrack: (commande) => _appeler(
+                                    () => widget.api.get(
+                                      '/orders/${commande['id']}',
+                                    ),
+                                  ),
                                   onReorder: (commande) {
                                     _ajouterTourUtilisateur(
                                       'Recommander ma commande'

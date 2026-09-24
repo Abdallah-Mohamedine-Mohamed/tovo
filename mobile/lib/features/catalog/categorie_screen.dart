@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../components/widgets/pastille_panier.dart';
 import '../../components/widgets/read_placeholder.dart';
 import '../../core/api.dart';
+import '../../core/noms.dart';
 import '../../core/catalog_image.dart';
 import '../../core/icones_3d.dart';
 import '../../core/panier.dart';
@@ -299,7 +300,7 @@ class _CategorieScreenState extends State<CategorieScreen> {
             children: [
               for (final rayon in _rayons)
                 _IconeRayon(
-                  libelle: _lisible('${rayon['name']}'),
+                  libelle: enPhrase('${rayon['name']}'),
                   icone:
                       Icones3d.rayon('${rayon['name']}') ??
                       'assets/icons/3d/colis.png',
@@ -428,13 +429,13 @@ class _CategorieScreenState extends State<CategorieScreen> {
               ),
               const SizedBox(height: 10),
               Text(
-                '${b['name']}',
+                enPhrase(b['name'] as String?),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontFamily: TovoTheme.policeNoms,
-                  fontSize: 19,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
                   color: TovoTheme.ink,
                 ),
               ),
@@ -651,12 +652,4 @@ String _normaliser(String texte) {
     tampon.write(i < 0 ? c : sans[i]);
   }
   return tampon.toString();
-}
-
-/// « BOX POULET PANE » → « Box poulet pane ».
-String _lisible(String nom) {
-  final t = nom.trim();
-  if (t.isEmpty || t != t.toUpperCase()) return t;
-  final bas = t.toLowerCase();
-  return bas[0].toUpperCase() + bas.substring(1);
 }

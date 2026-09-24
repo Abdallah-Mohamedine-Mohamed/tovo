@@ -10,6 +10,7 @@
 		A10000000000000000000001 /* LiveActivityBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* LiveActivityBridge.swift */; };
 		A10000000000000000000002 /* TovoOrderAttributes.swift in Runner Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* TovoOrderAttributes.swift */; };
 		A10000000000000000000003 /* TovoOrderAttributes.swift in Widget Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* TovoOrderAttributes.swift */; };
+		A10000000000000000000028 /* Ressources in Widget Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000027 /* Ressources */; };
 		A10000000000000000000004 /* TovoOrderWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* TovoOrderWidget.swift */; };
 		A10000000000000000000008 /* TovoOrderWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000009 /* TovoOrderWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A10000000000000000000023 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* GoogleService-Info.plist */; };
@@ -64,6 +65,7 @@
 /* Begin PBXFileReference section */
 		A10000000000000000000005 /* LiveActivityBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityBridge.swift; sourceTree = "<group>"; };
 		A10000000000000000000006 /* TovoOrderAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TovoOrderAttributes.swift; sourceTree = "<group>"; };
+		A10000000000000000000027 /* Ressources */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Ressources; sourceTree = "<group>"; };
 		A10000000000000000000007 /* TovoOrderWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TovoOrderWidget.swift; sourceTree = "<group>"; };
 		A10000000000000000000009 /* TovoOrderWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TovoOrderWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000013 /* Widget Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -103,6 +105,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000007 /* TovoOrderWidget.swift */,
+				A10000000000000000000027 /* Ressources */,
 				A10000000000000000000013 /* Widget Info.plist */,
 			);
 			path = TovoOrderWidget;
@@ -269,7 +272,7 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A10000000000000000000018 /* Widget Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000018 /* Widget Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000028 /* Ressources in Widget Resources */, ); runOnlyForDeploymentPostprocessing = 0; };
 		331C807F294A63A400263BE5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;

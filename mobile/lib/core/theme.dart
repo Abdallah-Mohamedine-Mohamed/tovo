@@ -63,9 +63,11 @@ class TovoTheme {
   /// boutiquier doivent avoir l'air de venir du même endroit.
   static const String fontFamily = 'DM Sans';
 
-  /// Les NOMS des articles et des boutiques (choix du client, 24/09) :
-  /// Flame, plus gourmande. Le reste de l'interface ne change pas.
-  static const String policeNoms = 'Flame';
+  /// La police de l'app client (choix du client, 25/09) : Geist, nette et
+  /// moderne. Les noms d'articles et de boutiques aussi, en poids moyen :
+  /// pas de gras épais.
+  static const String policeClient = 'Geist';
+  static const String policeNoms = policeClient;
 
   /// Rayons généreux, dans l'esprit des interfaces de Google aujourd'hui.
   /// 16 restait anguleux à côté d'un contenu aéré ; 22 arrondit franchement
@@ -79,21 +81,21 @@ class TovoTheme {
     final base = build();
     return base.copyWith(
       textTheme: base.textTheme.apply(
-        fontFamily: 'CupertinoSystemText',
-        fontFamilyFallback: const ['Arial', 'DM Sans'],
+        fontFamily: policeClient,
+        fontFamilyFallback: const ['DM Sans'],
         bodyColor: const Color(0xFF202020),
         displayColor: const Color(0xFF202020),
       ),
       primaryTextTheme: base.primaryTextTheme.apply(
-        fontFamily: 'CupertinoSystemText',
-        fontFamilyFallback: const ['Arial', 'DM Sans'],
+        fontFamily: policeClient,
+        fontFamilyFallback: const ['DM Sans'],
       ),
       scaffoldBackgroundColor: Colors.white,
       appBarTheme: base.appBarTheme.copyWith(
         backgroundColor: Colors.white,
         toolbarHeight: 56,
         titleTextStyle: const TextStyle(
-          fontFamily: 'CupertinoSystemText',
+          fontFamily: policeClient,
           fontSize: 15,
           fontWeight: FontWeight.w600,
           color: ink,
@@ -123,7 +125,7 @@ class TovoTheme {
             borderRadius: BorderRadius.circular(16),
           ),
           textStyle: const TextStyle(
-            fontFamily: 'CupertinoSystemText',
+            fontFamily: policeClient,
             fontSize: 15,
             fontWeight: FontWeight.w600,
           ),

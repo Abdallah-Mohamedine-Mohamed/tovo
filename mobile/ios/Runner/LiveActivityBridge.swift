@@ -71,7 +71,8 @@ final class LiveActivityBridge: NSObject, FlutterStreamHandler {
           kind: args["kind"] as? String ?? "food",
           title: args["title"] as? String ?? "Votre commande",
           mode: args["mode"] as? String,
-          placedAt: (args["placedAt"] as? NSNumber)?.doubleValue
+          placedAt: (args["placedAt"] as? NSNumber)?.doubleValue,
+          etaAt: (args["etaAt"] as? NSNumber)?.doubleValue
         )
         let activity = try Activity.request(
           attributes: attributes,

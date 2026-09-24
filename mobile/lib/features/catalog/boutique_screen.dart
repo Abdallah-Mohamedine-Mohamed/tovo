@@ -7,6 +7,7 @@ import '../../components/widgets/pastille_panier.dart';
 import '../../components/widgets/product_carousel.dart';
 import '../../components/widgets/read_placeholder.dart';
 import '../../core/api.dart';
+import '../../core/noms.dart';
 import '../../core/catalog_image.dart';
 import '../../core/panier.dart';
 import '../../core/theme.dart';
@@ -347,12 +348,16 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
         children: [
           Positioned.fill(
             bottom: 36,
-            child: CatalogImage(
-              couverture,
-              fit: BoxFit.cover,
-              decodeWidth: 900,
-              errorBuilder: (_, __, ___) =>
-                  const ColoredBox(color: Color(0xFFF4F5F5)),
+            // Un bas en courbe douce plutôt qu'un rectangle tranché net.
+            child: ClipPath(
+              clipper: const _BordDoux(),
+              child: CatalogImage(
+                couverture,
+                fit: BoxFit.cover,
+                decodeWidth: 900,
+                errorBuilder: (_, __, ___) =>
+                    const ColoredBox(color: Color(0xFFF4F5F5)),
+              ),
             ),
           ),
           Positioned(left: 16, right: 16, top: _haut + 8, child: _boutons()),
@@ -420,12 +425,13 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '${_boutique['name'] ?? ''}',
+            enPhrase(_boutique['name'] as String?),
             style: const TextStyle(
               fontFamily: TovoTheme.policeNoms,
-              fontSize: 30,
-              height: 1.1,
-              fontWeight: FontWeight.w700,
+              fontSize: 28,
+              height: 1.15,
+              letterSpacing: -0.6,
+              fontWeight: FontWeight.w600,
               color: TovoTheme.ink,
             ),
           ),
@@ -506,7 +512,7 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
     },
   );
 
-  String _nomRayon(int i) => _lisible('${_rayons[i]['name'] ?? ''}');
+  String _nomRayon(int i) => enPhrase('${_rayons[i]['name'] ?? ''}');
 
   Widget _rayon(int i) {
     final rayon = _rayons[i];
@@ -628,15 +634,6 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
   );
 }
 
-/// « PETIT DEJEUNER » → « Petit dejeuner » : les rayons importés sont en
-/// capitales, qui crient dans une page sobre.
-String _lisible(String nom) {
-  final t = nom.trim();
-  if (t.isEmpty || t != t.toUpperCase()) return t;
-  final bas = t.toLowerCase();
-  return bas[0].toUpperCase() + bas.substring(1);
-}
-
 class _Barre extends SliverPersistentHeaderDelegate {
   _Barre({required this.child, required this.hauteur, this.marge = 0});
   final Widget child;
@@ -672,4 +669,27 @@ class _Barre extends SliverPersistentHeaderDelegate {
   @override
   bool shouldRebuild(covariant _Barre old) =>
       old.child != child || old.hauteur != hauteur || old.marge != marge;
+}
+
+/// Le bas de la couverture : une courbe douce et asymétrique, plus basse à
+/// gauche (sous le logo), qui remonte légèrement vers la droite. Assez pour
+/// quitter le rectangle, pas assez pour faire décoratif.
+class _BordDoux extends CustomClipper<Path> {
+  const _BordDoux();
+
+  @override
+  Path getClip(Size taille) {
+    final l = taille.width;
+    final h = taille.height;
+    return Path()
+      ..moveTo(0, 0)
+      ..lineTo(l, 0)
+      ..lineTo(l, h - 26)
+      ..cubicTo(l * 0.74, h - 4, l * 0.42, h - 30, l * 0.18, h - 8)
+      ..quadraticBezierTo(l * 0.08, h, 0, h - 2)
+      ..close();
+  }
+
+  @override
+  bool shouldReclip(covariant _BordDoux old) => false;
 }

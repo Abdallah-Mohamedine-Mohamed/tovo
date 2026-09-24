@@ -584,6 +584,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           ...(body.data.context ? { position: body.data.context } : {}),
         },
       );
+      // « Je veux un livreur », sans plus : le client a déjà tout dit. Il
+      // manquait seulement sa position (sinon la commande serait partie
+      // plus haut, sans carte). La carte la prend et commande d'elle-même :
+      // lui faire toucher « Commander » ensuite serait redemander ce qu'il
+      // vient de dire. Un colis à envoyer ou à aller chercher garde le
+      // bouton : là, il y a des détails à ajouter.
+      const livreurSeul = !recuperation && !demandeUnColis(texteClient)
+        && (parJev ? intention === 'livreur' : demandeUnLivreur(texteClient));
+      if (livreurSeul) {
+        for (const composant of resultat.components) {
+          if (composant.type === 'courier_form') composant.data = { ...composant.data, auto: true };
+        }
+      }
       // La carte prend la position d'elle-même : plus de « Touchez Ma
       // position », qui restait affiché même une fois le livreur demandé.
       const contenu = recuperation

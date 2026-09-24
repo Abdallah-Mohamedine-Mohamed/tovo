@@ -39,7 +39,7 @@ void main() {
     // Rien à remplir : pas de champ visible avant « Ajouter des détails ».
     expect(find.byType(TextField), findsNothing);
 
-    await tester.tap(find.text('Appeler un livreur'));
+    await tester.tap(find.text('Commander le livreur'));
     await tester.pump();
 
     expect(gestes, hasLength(1));
@@ -49,9 +49,9 @@ void main() {
     expect(gestes.single.payload.containsKey('dropoff'), isFalse);
 
     // La carte s'éteint : plus de bouton, donc pas de second livreur.
-    expect(find.text('Appeler un livreur'), findsNothing);
+    expect(find.text('Commander le livreur'), findsNothing);
     expect(
-      find.textContaining('Livreur demandé', findRichText: true),
+      find.textContaining('Livreur commandé', findRichText: true),
       findsOneWidget,
     );
   });
@@ -64,10 +64,10 @@ void main() {
       'callback_minutes': 7,
       'utilise': true,
     });
-    expect(find.text('Appeler un livreur'), findsNothing);
+    expect(find.text('Commander le livreur'), findsNothing);
     expect(find.byType(FilledButton), findsNothing);
     expect(
-      find.textContaining('Livreur demandé', findRichText: true),
+      find.textContaining('Livreur commandé', findRichText: true),
       findsOneWidget,
     );
   });
@@ -84,7 +84,7 @@ void main() {
     expect(find.text('Harobanda'), findsOneWidget);
     expect(find.text('90123456'), findsOneWidget);
 
-    await tester.tap(find.text('Appeler un livreur'));
+    await tester.tap(find.text('Commander le livreur'));
     expect(gestes.single.payload['dropoff_hint'], 'Harobanda');
     expect(gestes.single.payload['dropoff_contact'], '90123456');
   });
@@ -105,7 +105,7 @@ void main() {
       expect(find.text('90 12 34 56'), findsOneWidget);
       expect(find.text('Livré à ma position'), findsOneWidget);
 
-      await tester.tap(find.text('Envoyer le livreur'));
+      await tester.tap(find.text('Commander le livreur'));
       await tester.pump();
       final p = gestes.single.payload;
       expect(p['mode'], 'recuperer');
@@ -128,7 +128,7 @@ void main() {
       find.widgetWithText(TextField, 'Où aller chercher ?'),
       'Au grand marché',
     );
-    await tester.tap(find.text('Envoyer le livreur'));
+    await tester.tap(find.text('Commander le livreur'));
     await tester.pump();
     expect(gestes.single.payload['mode'], 'recuperer');
     expect(
@@ -153,5 +153,48 @@ void main() {
     expect(find.byType(SnackBar), findsNothing);
     final bouton = tester.widget<FilledButton>(find.byType(FilledButton));
     expect(bouton.onPressed, isNull);
+  });
+
+  // « Je veux un livreur », sans plus : le client l'a déjà dit. Dès que la
+  // position est là, la carte commande d'elle-même — aucun bouton à toucher.
+  testWidgets('« je veux un livreur » : commandé sans second geste', (
+    tester,
+  ) async {
+    final gestes = await _afficher(tester, {
+      'auto': true,
+      'pickup': {'lat': 13.51, 'lng': 2.11, 'hint': 'Ma position actuelle'},
+      'callback_minutes': 7,
+    });
+    await tester.pump();
+    expect(gestes.single.action, 'submit_courier');
+    expect(gestes.single.payload['pickup'], containsPair('lat', 13.51));
+    expect(find.text('Commander le livreur'), findsNothing);
+    expect(
+      find.textContaining('Livreur commandé', findRichText: true),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('« aller chercher » attend toujours le geste du client', (
+    tester,
+  ) async {
+    final gestes = await _afficher(tester, {
+      'auto': true,
+      'mode': 'recuperer',
+      'dropoff': {'lat': 13.51, 'lng': 2.11},
+    });
+    await tester.pump();
+    // Il faut d'abord dire où aller chercher : rien ne part tout seul.
+    expect(gestes, isEmpty);
+    expect(find.text('Commander le livreur'), findsOneWidget);
+  });
+
+  testWidgets('le bouton est gris clair, pas un aplat sombre', (tester) async {
+    await _afficher(tester, {
+      'pickup': {'lat': 13.51, 'lng': 2.11},
+    });
+    final bouton = tester.widget<FilledButton>(find.byType(FilledButton));
+    final fond = bouton.style!.backgroundColor!.resolve({});
+    expect(fond!.computeLuminance(), greaterThan(0.8));
   });
 }

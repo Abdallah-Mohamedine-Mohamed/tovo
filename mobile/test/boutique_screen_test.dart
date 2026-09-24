@@ -59,11 +59,12 @@ void main() {
       );
     }
     await systeme.load();
-    final flame = FontLoader('Flame');
-    for (final g in ['Regular', 'Bold']) {
-      flame.addFont(rootBundle.load('assets/fonts/Flame-$g.otf'));
+    // La police de l'app client (TovoTheme.policeClient).
+    final geist = FontLoader('Geist');
+    for (final g in ['Regular', 'Medium', 'SemiBold', 'Bold']) {
+      geist.addFont(rootBundle.load('assets/fonts/Geist-$g.ttf'));
     }
-    await flame.load();
+    await geist.load();
     final icones = FontLoader('MaterialIcons');
     icones.addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
     await icones.load();
@@ -163,7 +164,7 @@ void main() {
   ) async {
     await ouvrir(tester);
     expect(requetes.single.path, endsWith('/carte'));
-    expect(find.text('Restaurant Albarka Food'), findsOneWidget);
+    expect(find.text('Restaurant albarka food'), findsOneWidget);
     // Pas de délai affiché : demandé par le client (24/09).
     expect(find.textContaining('Prête'), findsNothing);
     // Les capitales importées sont adoucies : « PETIT DEJEUNER » crie.
@@ -221,7 +222,7 @@ void main() {
     sansCouverture = true;
     await ouvrir(tester);
     expect(find.byTooltip('Retour'), findsOneWidget);
-    expect(find.text('Restaurant Albarka Food'), findsOneWidget);
+    expect(find.text('Restaurant albarka food'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await capturer(tester, '3-sans-couverture');
   });

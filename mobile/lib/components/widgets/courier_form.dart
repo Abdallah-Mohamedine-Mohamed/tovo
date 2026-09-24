@@ -69,21 +69,39 @@ class _CourierFormState extends State<CourierForm> {
   bool _localisation = false;
   late bool _envoye = widget.component.data['utilise'] == true;
 
+  /// « Je veux un livreur », sans plus : la carte commande d'elle-même dès
+  /// que la position est connue. Le client l'a déjà dit ; lui faire toucher
+  /// un bouton de plus serait le lui redemander.
+  bool get _auto => widget.component.data['auto'] == true;
+
   @override
   void initState() {
     super.initState();
-    if (_envoye || (_lat != null && _lng != null)) return;
-    // Le client a demandé un livreur : chercher sa position est la suite
-    // logique, pas un geste de plus à lui demander. Déjà connue depuis
-    // l'ouverture de l'app, elle est là tout de suite.
-    final recente = TovoLocation.recente;
-    if (recente != null) {
-      _lat = recente.latitude;
-      _lng = recente.longitude;
-    } else {
-      _localisation = true;
-      _prendreMaPosition(discret: true);
+    if (_envoye) return;
+    if (_lat == null || _lng == null) {
+      // Le client a demandé un livreur : chercher sa position est la suite
+      // logique, pas un geste de plus à lui demander. Déjà connue depuis
+      // l'ouverture de l'app, elle est là tout de suite.
+      final recente = TovoLocation.recente;
+      if (recente != null) {
+        _lat = recente.latitude;
+        _lng = recente.longitude;
+      } else {
+        _localisation = true;
+        _prendreMaPosition(discret: true);
+        return;
+      }
     }
+    _commanderSiAuto();
+  }
+
+  void _commanderSiAuto() {
+    if (!_auto || _envoye || _recuperer || _lat == null || _lng == null) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_envoye) _appeler();
+    });
   }
 
   @override
@@ -109,6 +127,7 @@ class _CourierFormState extends State<CourierForm> {
         _lng = position.longitude;
       }
     });
+    if (position != null) _commanderSiAuto();
     if (position == null && !discret) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -175,8 +194,8 @@ class _CourierFormState extends State<CourierForm> {
             TextSpan(
               children: [
                 const TextSpan(
-                  text: 'Livreur demandé',
-                  style: TextStyle(fontWeight: FontWeight.w700),
+                  text: 'Livreur commandé',
+                  style: TextStyle(fontWeight: FontWeight.w600),
                 ),
                 TextSpan(
                   text: ' · il vous appelle dans les $minutes minutes',
@@ -239,7 +258,7 @@ class _CourierFormState extends State<CourierForm> {
                 : 'Un livreur vient chez vous',
             style: const TextStyle(
               fontSize: 18,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w600,
               letterSpacing: -0.3,
             ),
           ),
@@ -393,20 +412,31 @@ class _CourierFormState extends State<CourierForm> {
                   Money.format(prix),
                   style: const TextStyle(
                     fontSize: 18,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
             ],
           ),
           const SizedBox(height: 14),
+          // Gris clair, comme les pastilles : un geste, pas une alarme.
+          // « Commander le livreur » : explicite et court. Ni « appeler »
+          // (on ne téléphone pas), ni « confirmer » (confirmer quoi ?).
           FilledButton(
             onPressed: positionConnue && !_envoye ? _appeler : null,
             style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(50),
+              minimumSize: const Size.fromHeight(52),
+              backgroundColor: const Color(0xFFEDEFEF),
+              foregroundColor: TovoTheme.ink,
+              disabledBackgroundColor: const Color(0xFFF4F5F5),
+              disabledForegroundColor: TovoTheme.muted,
+              elevation: 0,
+              shape: const StadiumBorder(),
             ),
             child: Text(
-              _recuperer ? 'Envoyer le livreur' : 'Appeler un livreur',
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+              _localisation && _auto
+                  ? 'Je cherche votre position…'
+                  : 'Commander le livreur',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
             ),
           ),
         ],

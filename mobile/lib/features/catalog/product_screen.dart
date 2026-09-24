@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../components/registry.dart';
 import '../../core/api.dart';
+import '../../core/noms.dart';
 import '../../core/theme.dart';
 import '../../core/catalog_image.dart';
 import '../../components/widgets/read_placeholder.dart';
@@ -196,7 +197,7 @@ class _ProductScreenState extends State<ProductScreen> {
   Widget build(BuildContext context) {
     final product = _product;
     final photo = product['image_url'] as String? ?? '';
-    final name = product['name'] as String? ?? '';
+    final name = enPhrase(product['name'] as String?);
     final description = product['description'] as String? ?? '';
     final body = _loading && product.isEmpty
         ? widget.embedded
@@ -271,8 +272,8 @@ class _ProductScreenState extends State<ProductScreen> {
                             name,
                             style: const TextStyle(
                               fontFamily: TovoTheme.policeNoms,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w700,
+                              fontSize: 21,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                           if ((product['merchant_name'] as String?)
@@ -327,9 +328,9 @@ class _ProductScreenState extends State<ProductScreen> {
                   name,
                   style: const TextStyle(
                     fontFamily: TovoTheme.policeNoms,
-                    fontSize: 30,
+                    fontSize: 28,
                     height: 1.12,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
                 if ((product['merchant_name'] as String?)?.isNotEmpty ==

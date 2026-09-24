@@ -308,7 +308,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
         db,
         body.data.conversation_id,
         body.data.client_order_id,
-        body.data.type === 'courier' ? 'Appeler un livreur' : 'Commander',
+        body.data.type === 'courier' ? 'Commander le livreur' : 'Commander',
         reponse,
         body.data.type === 'courier' ? 'courier_form' : null,
       ).catch((cause) => {

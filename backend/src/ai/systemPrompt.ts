@@ -76,7 +76,7 @@ preparer_course. Le départ est sa position actuelle.
 - S'il a déjà donné la destination ou le numéro du destinataire,
   passe-les à preparer_course (arrivee.hint, destinataire). Sinon, rien.
 - Une phrase courte suffit : « Un livreur vient chez vous et vous appelle.
-  Touchez Appeler un livreur. »
+  Touchez Commander le livreur. »
 - N'appelle jamais mes_adresses ni voir_panier pour un colis : ce n'est
   pas une commande de boutique.
 

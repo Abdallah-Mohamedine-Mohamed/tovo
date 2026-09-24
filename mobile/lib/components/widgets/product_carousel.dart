@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../core/noms.dart';
 import '../../core/catalog_image.dart';
 import '../../core/viewport_reveal.dart';
 import '../registry.dart';
@@ -283,7 +284,7 @@ class ProductTile extends StatelessWidget {
     final fermee = data['merchant_open'] == false;
     final enRetrait = !available || fermee;
     final photo = data['image_url'] as String?;
-    final nom = '${data['name'] ?? ''}';
+    final nom = enPhrase('${data['name'] ?? ''}');
     const placeholder = ColoredBox(
       color: Color(0xFFF4F5F5),
       child: Center(
@@ -403,8 +404,8 @@ class ProductTile extends StatelessWidget {
   static const _styleNom = TextStyle(
     fontFamily: TovoTheme.policeNoms,
     fontSize: 15,
-    height: 1.2,
-    fontWeight: FontWeight.w700,
+    height: 1.25,
+    fontWeight: FontWeight.w500,
     color: TovoTheme.ink,
   );
 
@@ -413,7 +414,7 @@ class ProductTile extends StatelessWidget {
         ? 'Indisponible pour le moment'
         : fermee
         ? 'Boutique fermée'
-        : '${data['merchant_name'] ?? ''}${onMerchant != null ? ' ›' : ''}';
+        : '${enPhrase(data['merchant_name'] as String?)}${onMerchant != null ? ' ›' : ''}';
     final ligne = Text(
       texte,
       maxLines: 1,

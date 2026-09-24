@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../core/noms.dart';
 import '../registry.dart';
 
 /// `cart_summary` — récapitulatif du panier.
@@ -23,7 +24,7 @@ class CartSummary extends StatelessWidget {
     final items = component.list('items');
     final peutCommander = component.flag('can_checkout');
     final blocage = component.str('blocked_reason');
-    final merchant = component.str('merchant_name');
+    final merchant = enPhrase(component.str('merchant_name'));
 
     return Container(
       decoration: BoxDecoration(
@@ -141,7 +142,7 @@ class _Ligne extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  (data['product_name'] as String?) ?? '',
+                  enPhrase(data['product_name'] as String?),
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,

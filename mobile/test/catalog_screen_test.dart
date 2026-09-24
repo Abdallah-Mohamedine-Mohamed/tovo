@@ -33,11 +33,12 @@ void main() {
       fonts.addFont(rootBundle.load('assets/fonts/DMSans-$weight.ttf'));
     }
     await fonts.load();
-    final flame = FontLoader('Flame');
-    for (final g in ['Regular', 'Bold']) {
-      flame.addFont(rootBundle.load('assets/fonts/Flame-$g.otf'));
+    // La police de l'app client (TovoTheme.policeClient).
+    final geist = FontLoader('Geist');
+    for (final g in ['Regular', 'Medium', 'SemiBold', 'Bold']) {
+      geist.addFont(rootBundle.load('assets/fonts/Geist-$g.ttf'));
     }
-    await flame.load();
+    await geist.load();
     final icons = FontLoader('MaterialIcons');
     icons.addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
     await icons.load();

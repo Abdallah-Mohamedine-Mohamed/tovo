@@ -16,6 +16,10 @@ class TovoLiveActivity {
   static const _tokens = EventChannel('tovo/live_activity_tokens');
   static final _registered = <String>{};
   static final _activityTokens = <String, String>{};
+
+  /// Dernier prénom de livreur connu, par commande : une resynchronisation
+  /// sans prénom ne doit pas l'effacer de l'île.
+  static final _livreurs = <String, String>{};
   static StreamSubscription<dynamic>? _subscription;
   static StreamSubscription<AuthState>? _authSubscription;
   static StreamSubscription<String>? _fcmSubscription;
@@ -50,6 +54,15 @@ class TovoLiveActivity {
         // Le chronomètre de l'île part de là et tourne tout seul.
         if (placedAt != null)
           'placedAt': placedAt.millisecondsSinceEpoch / 1000,
+        // « Arrive dans 17:42 » : un compte à rebours que l'île fait
+        // défiler seule. 18 min pour un livreur (il vient, c'est tout),
+        // 35 pour un repas, qui doit d'abord être préparé.
+        if (placedAt != null)
+          'etaAt':
+              placedAt
+                  .add(Duration(minutes: courier ? 18 : 35))
+                  .millisecondsSinceEpoch /
+              1000,
         'mode': ?mode,
         'driver': ?_prenom(driver),
       });
@@ -70,6 +83,8 @@ class TovoLiveActivity {
     String? driver,
   }) async {
     if (!Platform.isIOS || orderId.isEmpty) return;
+    final prenom = _prenom(driver) ?? _livreurs[orderId];
+    if (prenom != null) _livreurs[orderId] = prenom;
     final finished = const {'delivered', 'cancelled'}.contains(status);
     if (finished) {
       final token = _activityTokens.remove(orderId);
@@ -79,7 +94,7 @@ class TovoLiveActivity {
       await _methods.invokeMethod<bool>(finished ? 'end' : 'sync', {
         'orderId': orderId,
         'status': status,
-        'driver': ?_prenom(driver),
+        'driver': ?prenom,
       });
     } on PlatformException catch (error) {
       debugPrint('[live activity] ${error.message}');
