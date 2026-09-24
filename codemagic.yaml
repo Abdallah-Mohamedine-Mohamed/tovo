@@ -10,8 +10,13 @@
 # App Store Connect — ce que ce pipeline ne fait pas et ne peut pas faire :
 # `submit_to_app_store` est explicitement à `false`.
 #
-# UN SEUL BUNDLE EXISTE CÔTÉ iOS : com.tovoapp.UserApp, celui de l'app
-# publiée. Contrairement à Android où trois flavors cohabitent
+# DEUX IDENTIFIANTS À SIGNER : com.tovoapp.UserApp, l'app publiée, et
+# com.tovoapp.UserApp.TovoOrderWidget, son extension (Live Activity du suivi
+# de commande). Chacun a besoin de son profil App Store. Le second doit
+# être enregistré une fois sur developer.apple.com > Identifiers : Codemagic
+# crée les profils, jamais les identifiants.
+#
+# UNE SEULE APP côté iOS, en revanche. Contrairement à Android où trois flavors cohabitent
 # (client / livreur / boutique), le projet iOS n'a qu'un schéma. Livreur et
 # boutique demanderaient chacun un nouveau bundle, une nouvelle fiche App
 # Store et de nouveaux profils — c'est un autre chantier.
@@ -82,6 +87,12 @@ workflows:
       # identities > iOS certificates > « Generate certificate ». Codemagic
       # crée le certificat chez Apple ET garde la clé privée. Ces deux lignes
       # lui disent alors quoi signer ; il s'occupe du profil.
+      #
+      # L'EXTENSION SUIT LE MÊME BLOC. Codemagic récupère aussi les profils
+      # des identifiants qui COMMENCENT par celui-ci — donc
+      # com.tovoapp.UserApp.TovoOrderWidget — à condition qu'il soit
+      # enregistré chez Apple. Sinon : « "TovoOrderWidget" requires a
+      # provisioning profile » au moment d'archiver (build du 24/09/2026).
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.tovoapp.UserApp
@@ -189,6 +200,17 @@ workflows:
           # build continuait trois étapes de plus avant d’échouer.
           if ! grep -q "provisioningProfiles" /Users/builder/export_options.plist 2>/dev/null; then
             echo "export_options.plist sans profil : la signature n'a pas pris." >&2
+            exit 1
+          fi
+
+          # L'extension aussi, et on le dit ICI plutôt que dix minutes plus
+          # tard, noyé dans le journal d'archive.
+          WIDGET_ID="$BUNDLE_ID.TovoOrderWidget"
+          if ! grep -q "$WIDGET_ID" /Users/builder/export_options.plist; then
+            echo "Aucun profil pour $WIDGET_ID (le widget Live Activity)." >&2
+            echo "À faire une fois : developer.apple.com > Certificates, IDs & Profiles >" >&2
+            echo "Identifiers > « + » > App IDs > App, Bundle ID explicite $WIDGET_ID," >&2
+            echo "aucune capacité à cocher. Puis relancer le build : Codemagic créera le profil." >&2
             exit 1
           fi
 
