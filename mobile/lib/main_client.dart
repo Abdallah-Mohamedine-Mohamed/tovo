@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'components/register_all.dart';
 import 'core/api.dart';
 import 'core/config.dart';
+import 'core/location.dart';
 import 'core/push.dart';
 import 'core/read_cache.dart';
 import 'core/theme.dart';
@@ -42,7 +43,11 @@ Future<void> main() async {
 
   runApp(const TovoClientApp());
   WidgetsBinding.instance.addPostFrameCallback(
-    (_) => unawaited(TovoPush.initialiser()),
+    (_) {
+      unawaited(TovoPush.initialiser());
+      // Sans fenêtre d'autorisation : seulement si elle est déjà accordée.
+      TovoLocation.prechauffer();
+    },
   );
 }
 

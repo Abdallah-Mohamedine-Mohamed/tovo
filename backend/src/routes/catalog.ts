@@ -351,6 +351,50 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(envelope(message, boutiques.map(merchantCard)));
   });
 
+  /**
+   * Toutes les boutiques — la carte « Explorer les boutiques » de l'accueil.
+   *
+   * Elle ouvrait l'écran d'exploration sans catégorie, et ce mode ne savait
+   * lister des boutiques QUE pour une catégorie : il retombait sur les
+   * produits. Le client demandait des enseignes et recevait des articles.
+   *
+   * Ouvertes d'abord, puis les mieux notées. `is_open` suffit ici : c'est
+   * l'interrupteur du boutiquier, et interroger les horaires de chaque
+   * enseigne une par une ralentirait l'ouverture de l'écran pour un tri.
+   */
+  app.get('/merchants', async (request, reply) => {
+    const { data, error } = await db(request)
+      .from('merchants')
+      .select('id, name, description, logo_url, address_hint, is_open, rating, prep_time_min')
+      .eq('is_approved', true)
+      .order('is_open', { ascending: false })
+      .order('rating', { ascending: false })
+      .order('name')
+      .limit(200);
+
+    if (error) {
+      const failure = toHttpFailure(error);
+      return reply.code(failure.status).send(failure.body);
+    }
+
+    const boutiques = ((data ?? []) as Record<string, unknown>[]).map((m) => ({
+      id: m['id'] as string,
+      name: m['name'] as string,
+      description: (m['description'] as string | null) ?? null,
+      logo_url: (m['logo_url'] as string | null) ?? null,
+      address_hint: (m['address_hint'] as string | null) ?? '',
+      is_open: (m['is_open'] as boolean) ?? false,
+      rating: Number(m['rating'] ?? 5),
+      prep_time_min: (m['prep_time_min'] as number) ?? 20,
+      distance_m: null,
+    }));
+    const ouvertes = boutiques.filter((b) => b.is_open).length;
+    return reply.send(envelope(
+      ouvertes > 0 ? `${ouvertes} boutique${ouvertes > 1 ? 's' : ''} ouverte${ouvertes > 1 ? 's' : ''} en ce moment` : 'Tout est fermé pour l’instant',
+      boutiques.map(merchantCard),
+    ));
+  });
+
   app.get('/categories/:categoryId/products', async (request, reply) => {
     const params = z.object({ categoryId: z.string().uuid() }).safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'identifiant invalide' });

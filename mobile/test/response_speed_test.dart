@@ -109,6 +109,16 @@ void main() {
             ),
             (_) async => null,
           );
+          // Flux de son, pour les enregistreurs qui l'écoutent : une
+          // seconde de PCM 16 kHz, comme si le client avait parlé.
+          messenger.setMockStreamHandler(
+            EventChannel(
+              'com.llfbandit.record/eventsRecord/${arguments['recorderId']}',
+            ),
+            MockStreamHandler.inline(
+              onListen: (_, sink) => sink.success(Uint8List(32000)),
+            ),
+          );
         }
         if (call.method == 'hasPermission') return true;
         if (call.method == 'start') {
@@ -386,7 +396,17 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.text('Poulet mémorisé'), findsOneWidget);
-    await tester.ensureVisible(find.text('Réessayer'));
+    // Sous la grille : pas encore construit tant qu'on n'y descend pas.
+    await tester.scrollUntilVisible(
+      find.text('Réessayer'),
+      300,
+      scrollable: find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     await tester.tap(find.text('Réessayer'));
     await tester.pump();
     await tester.pump();
@@ -570,8 +590,15 @@ void main() {
       final api = TovoApi(
         tokenProvider: () => null,
         client: MockClient((request) async {
+          // Plus de voix en direct : la note entière part une fois finie.
+          expect(request.url.path, isNot('/transcriptions/session'));
           if (request.url.path == '/transcriptions') {
             transcriptionCount++;
+            // En AAC : dix fois plus léger que le WAV sur le réseau.
+            expect(
+              (jsonDecode(request.body) as Map)['audio']['mime'],
+              'audio/mp4',
+            );
             return jsonResponse({'transcript': 'Je veux du poulet'});
           }
           if (request.url.path == '/chat') {

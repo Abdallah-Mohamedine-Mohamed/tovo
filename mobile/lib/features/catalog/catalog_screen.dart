@@ -6,8 +6,9 @@ import '../../components/registry.dart';
 import '../../core/api.dart';
 import '../../core/theme.dart';
 import '../../core/catalog_image.dart';
+import '../../components/widgets/product_carousel.dart';
 import '../../components/widgets/read_placeholder.dart';
-import 'product_screen.dart';
+import 'product_sheet.dart';
 import 'cart_screen.dart';
 
 class CatalogScreen extends StatefulWidget {
@@ -19,6 +20,7 @@ class CatalogScreen extends StatefulWidget {
     this.categoryId,
     this.query = '',
     this.directory = false,
+    this.conversationId,
   });
 
   final TovoApi api;
@@ -27,6 +29,9 @@ class CatalogScreen extends StatefulWidget {
   final String? categoryId;
   final String query;
   final bool directory;
+
+  /// La conversation d'où vient le client, pour y inscrire la commande.
+  final String? conversationId;
 
   @override
   State<CatalogScreen> createState() => _CatalogScreenState();
@@ -45,7 +50,6 @@ class _CatalogScreenState extends State<CatalogScreen> {
   int? _next;
   int _total = 0;
   int _generation = 0;
-  int _cartTotal = 0;
   TovoComponent? _cartPreview;
   bool _hasCart = false;
   bool _loading = true;
@@ -73,8 +77,13 @@ class _CatalogScreenState extends State<CatalogScreen> {
   }
 
   Future<void> _start() async {
-    if (widget.directory && widget.categoryId != null) {
-      final path = '/categories/${widget.categoryId}/merchants';
+    if (widget.directory) {
+      // Sans catégorie (carte « Explorer les boutiques » de l'accueil) :
+      // TOUTES les boutiques. Ce mode exigeait une catégorie et, sans elle,
+      // retombait sur les produits.
+      final path = widget.categoryId != null
+          ? '/categories/${widget.categoryId}/merchants'
+          : '/merchants';
       final request = widget.api.get(path);
       final cached = await widget.api.cachedGet(path);
       if (!mounted) return;
@@ -208,7 +217,6 @@ class _CatalogScreenState extends State<CatalogScreen> {
         .firstOrNull;
     setState(() {
       _cartPreview = component;
-      _cartTotal = component?.money('total') ?? 0;
       _hasCart = component?.list('items').isNotEmpty ?? false;
     });
   }
@@ -216,7 +224,11 @@ class _CatalogScreenState extends State<CatalogScreen> {
   Future<void> _openMerchant(String id) async {
     final order = await Navigator.of(context).push<TovoResponse>(
       MaterialPageRoute(
-        builder: (_) => CatalogScreen(api: widget.api, merchantId: id),
+        builder: (_) => CatalogScreen(
+          api: widget.api,
+          merchantId: id,
+          conversationId: widget.conversationId,
+        ),
       ),
     );
     if (!mounted) return;
@@ -229,14 +241,11 @@ class _CatalogScreenState extends State<CatalogScreen> {
 
   Future<void> _openProduct(String id) async {
     final matching = _items.where((item) => item['id'] == id);
-    await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => ProductScreen(
-          api: widget.api,
-          productId: id,
-          initialProduct: matching.isEmpty ? const {} : matching.first,
-        ),
-      ),
+    await showProductSheet(
+      context,
+      api: widget.api,
+      productId: id,
+      initialProduct: matching.isEmpty ? const {} : matching.first,
     );
     if (mounted) await _loadCart();
   }
@@ -244,7 +253,11 @@ class _CatalogScreenState extends State<CatalogScreen> {
   Future<void> _openCart() async {
     final order = await Navigator.of(context).push<TovoResponse>(
       MaterialPageRoute(
-        builder: (_) => CartScreen(api: widget.api, initialCart: _cartPreview),
+        builder: (_) => CartScreen(
+          api: widget.api,
+          initialCart: _cartPreview,
+          conversationId: widget.conversationId,
+        ),
       ),
     );
     if (!mounted) return;
@@ -388,29 +401,15 @@ class _CatalogScreenState extends State<CatalogScreen> {
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => Navigator.of(context).pop(),
         ),
+        actions: [
+          if (_hasCart)
+            IconButton(
+              tooltip: 'Panier',
+              onPressed: _openCart,
+              icon: const Icon(Icons.shopping_bag_outlined),
+            ),
+        ],
       ),
-      bottomNavigationBar: _hasCart
-          ? SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
-                child: FilledButton(
-                  onPressed: _openCart,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.shopping_bag_outlined, size: 19),
-                        const SizedBox(width: 10),
-                        const Expanded(child: Text('Voir mon panier')),
-                        Text(Money.format(_cartTotal)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            )
-          : null,
       body: RefreshIndicator(
         onRefresh: () => _directory ? _start() : _load(reset: true),
         child: CustomScrollView(
@@ -580,19 +579,36 @@ class _CatalogScreenState extends State<CatalogScreen> {
                 ),
               )
             else
+              // La même grille que dans le fil : deux colonnes, photo
+              // d'abord. Le « + » ouvre la fiche, qui gère les options et
+              // l'ajout au panier d'Explorer.
               SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                sliver: SliverList.builder(
-                  itemCount: _items.length,
-                  itemBuilder: (_, index) => _CatalogProduct(
-                    product: _items[index],
-                    onTap: () => _openProduct(_items[index]['id'] as String),
-                    onMerchant: widget.merchantId == null
-                        ? () => _openMerchant(
-                            _items[index]['merchant_id'] as String,
-                          )
-                        : null,
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                sliver: SliverGrid.builder(
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 14,
+                    mainAxisSpacing: 22,
+                    mainAxisExtent: hauteurTuileProduit(
+                      context,
+                      (MediaQuery.sizeOf(context).width - 40 - 14) / 2,
+                    ),
                   ),
+                  itemCount: _items.length,
+                  itemBuilder: (_, index) {
+                    final produit = _items[index];
+                    void ouvrir() => _openProduct(produit['id'] as String);
+                    return ProductTile(
+                      data: produit,
+                      onOpen: ouvrir,
+                      onAdd: ouvrir,
+                      afficherBoutique: widget.merchantId == null,
+                      onMerchant: widget.merchantId == null
+                          ? () =>
+                                _openMerchant(produit['merchant_id'] as String)
+                          : null,
+                    );
+                  },
                 ),
               ),
             if (_error != null)
@@ -715,150 +731,6 @@ class _SectionTab extends StatelessWidget {
           ),
         ),
       ),
-    ),
-  );
-}
-
-class _CatalogProduct extends StatelessWidget {
-  const _CatalogProduct({
-    required this.product,
-    required this.onTap,
-    this.onMerchant,
-  });
-  final Map<String, dynamic> product;
-  final VoidCallback onTap;
-  final VoidCallback? onMerchant;
-  @override
-  Widget build(BuildContext context) {
-    final photo = product['image_url'] as String?;
-    return Material(
-      color: Colors.white,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 102),
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: Color(0xFFEEF0F0))),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${product['name']}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        height: 1.25,
-                        fontWeight: FontWeight.w600,
-                        color: TovoTheme.ink,
-                      ),
-                    ),
-                    if (onMerchant != null)
-                      InkWell(
-                        onTap: onMerchant,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 7),
-                          child: Text(
-                            '${product['merchant_name']} ›',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: TovoTheme.inkDoux,
-                            ),
-                          ),
-                        ),
-                      ),
-                    if ((product['description'] as String? ?? '').isNotEmpty &&
-                        '${product['description']}'.trim().toLowerCase() !=
-                            '${product['name']}'.trim().toLowerCase())
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Text(
-                          product['description'] as String,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            height: 1.45,
-                            color: TovoTheme.inkDoux,
-                          ),
-                        ),
-                      ),
-                    if (product['requires_options'] == true)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 6),
-                        child: Text(
-                          'En option · à personnaliser',
-                          style: TextStyle(fontSize: 11, color: TovoTheme.teal),
-                        ),
-                      ),
-                    if (product['merchant_open'] == false)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 6),
-                        child: Text(
-                          'Boutique fermée',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: TovoTheme.inkDoux,
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 12),
-                    Text(
-                      Money.format((product['price'] as num).toInt()),
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: TovoTheme.ink,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 20),
-              if (photo != null && photo.isNotEmpty)
-                SizedBox(
-                  width: 108,
-                  height: 112,
-                  child: Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: CatalogImage(
-                          photo,
-                          width: 108,
-                          height: 108,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                        ),
-                      ),
-                      Positioned(right: 4, bottom: 0, child: _productButton()),
-                    ],
-                  ),
-                )
-              else
-                _productButton(),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _productButton() => Semantics(
-    label: 'Voir ${product['name']} et choisir les options',
-    child: Container(
-      width: 42,
-      height: 42,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: TovoTheme.line),
-      ),
-      child: const Icon(Icons.add_rounded, size: 21, color: TovoTheme.ink),
     ),
   );
 }

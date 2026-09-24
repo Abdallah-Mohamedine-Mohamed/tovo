@@ -24,10 +24,15 @@ class CartScreen extends StatefulWidget {
     required this.api,
     this.initialAddressId,
     this.initialCart,
+    this.conversationId,
   });
   final TovoApi api;
   final String? initialAddressId;
   final TovoComponent? initialCart;
+
+  /// La conversation d'où vient le client : la commande y est inscrite,
+  /// et son suivi y sera encore quand il la rouvrira.
+  final String? conversationId;
 
   @override
   State<CartScreen> createState() => _CartScreenState();
@@ -39,15 +44,19 @@ class _CartScreenState extends State<CartScreen> {
   String? _error;
   int _step = 0;
   List<Map<String, dynamic>> _addresses = const [];
+  bool _addressesLoading = true;
   String? _addressId;
   _DeliveryPoint? _currentPoint;
   final _hint = TextEditingController();
+  final _scroll = ScrollController();
+  final _quoteKey = GlobalKey();
   String _payment = 'cash';
   String? _orderId;
 
   @override
   void dispose() {
     _hint.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -65,9 +74,13 @@ class _CartScreenState extends State<CartScreen> {
         }
       }
     }
-    if (_currentPoint != null && _hint.text.trim().isNotEmpty) {
+    // Position GPS prise : elle suffit. Le repère aide le livreur mais ne
+    // doit pas bloquer la commande — il appelle le client si besoin. Exiger
+    // le repère laissait le client devant une erreur et un bouton grisé.
+    if (_currentPoint != null) {
+      final repere = _hint.text.trim();
       return _DeliveryPoint(
-        _hint.text.trim(),
+        repere.isEmpty ? 'Position du client (le livreur appellera)' : repere,
         _currentPoint!.lat,
         _currentPoint!.lng,
       );
@@ -75,29 +88,34 @@ class _CartScreenState extends State<CartScreen> {
     return null;
   }
 
-  Future<void> _chooseDelivery() async {
-    if (_busy) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
+  Future<void> _loadAddresses() async {
     final response = await widget.api.get('/addresses');
     if (!mounted) return;
     setState(() {
-      _busy = false;
-      _addresses = response.ok ? response.list('addresses') : const [];
-      _addressId =
-          _addresses
-                  .where((address) => address['id'] == widget.initialAddressId)
-                  .firstOrNull?['id']
-              as String?;
-      _addressId ??=
-          _addresses
-                  .where((address) => address['is_default'] == true)
-                  .firstOrNull?['id']
-              as String?;
-      _addressId ??= _addresses.firstOrNull?['id'] as String?;
-      _step = 1;
+      _addressesLoading = false;
+      _addresses = response.ok
+          ? response
+                .list('addresses')
+                .where(
+                  (address) => address['lat'] is num && address['lng'] is num,
+                )
+                .toList()
+          : const [];
+      if (_currentPoint == null && _addressId == null) {
+        _addressId =
+            _addresses
+                    .where(
+                      (address) => address['id'] == widget.initialAddressId,
+                    )
+                    .firstOrNull?['id']
+                as String?;
+        _addressId ??=
+            _addresses
+                    .where((address) => address['is_default'] == true)
+                    .firstOrNull?['id']
+                as String?;
+        _addressId ??= _addresses.firstOrNull?['id'] as String?;
+      }
     });
   }
 
@@ -106,7 +124,10 @@ class _CartScreenState extends State<CartScreen> {
       _busy = true;
       _error = null;
     });
-    final position = await TovoLocation.current(requestPermission: true);
+    // Déjà connue depuis l'ouverture de l'app : aucune attente GPS.
+    final position =
+        TovoLocation.recente ??
+        await TovoLocation.current(requestPermission: true);
     if (!mounted) return;
     setState(() {
       _busy = false;
@@ -120,6 +141,7 @@ class _CartScreenState extends State<CartScreen> {
           position.latitude,
           position.longitude,
         );
+        _step = 0;
       }
     });
   }
@@ -161,6 +183,26 @@ class _CartScreenState extends State<CartScreen> {
       _cart = cart;
       _step = 2;
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final quoteContext = _quoteKey.currentContext;
+      if (quoteContext != null) {
+        unawaited(
+          Scrollable.ensureVisible(
+            quoteContext,
+            duration: const Duration(milliseconds: 300),
+            alignment: 0.2,
+          ),
+        );
+      } else if (_scroll.hasClients) {
+        unawaited(
+          _scroll.animateTo(
+            _scroll.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          ),
+        );
+      }
+    });
   }
 
   Future<void> _placeOrder() async {
@@ -177,6 +219,8 @@ class _CartScreenState extends State<CartScreen> {
       'dropoff_hint': destination.hint,
       'dropoff': {'lat': destination.lat, 'lng': destination.lng},
       'payment_method': _payment,
+      if (widget.conversationId != null)
+        'conversation_id': widget.conversationId,
     });
     if (!mounted) return;
     if (response.ok) {
@@ -189,6 +233,13 @@ class _CartScreenState extends State<CartScreen> {
       _busy = false;
       _error = response.content;
     });
+  }
+
+  /// Une étiquette qui dit quelque chose (« Maison », « Bureau »), pas
+  /// l'étiquette par défaut.
+  static bool _etiquetteParlante(Object? label) {
+    final texte = '${label ?? ''}'.trim().toLowerCase();
+    return texte.isNotEmpty && texte != 'adresse';
   }
 
   static String _newOrderId() {
@@ -214,6 +265,7 @@ class _CartScreenState extends State<CartScreen> {
     super.initState();
     _cart = widget.initialCart;
     _load();
+    _loadAddresses();
   }
 
   Future<void> _receive(Future<TovoResponse> request) async {
@@ -226,6 +278,7 @@ class _CartScreenState extends State<CartScreen> {
         return;
       }
       _error = null;
+      _step = 0;
       final carts = response.components.where(
         (component) => component.type == 'cart_summary',
       );
@@ -251,130 +304,23 @@ class _CartScreenState extends State<CartScreen> {
   @override
   Widget build(BuildContext context) {
     final items = _cart?.list('items') ?? [];
-    final canCheckout =
-        !_busy && _error == null && _cart?.flag('can_checkout') == true;
+    // Une erreur ne grise pas le bouton : elle s'affiche, le client corrige et
+    // repart. Griser laissait un cul-de-sac (capture du 24/09).
+    final canCheckout = !_busy && _cart?.flag('can_checkout') == true;
     return PopScope(
-      canPop: _step == 0 && !_busy,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _step > 0 && !_busy) {
-          setState(() {
-            _step--;
-            _error = null;
-          });
-        }
-      },
+      canPop: !_busy,
       child: Scaffold(
         backgroundColor: Colors.white,
         appBar: AppBar(
-          title: Text(
-            _step == 0
-                ? 'Votre panier'
-                : _step == 1
-                ? 'Livraison'
-                : 'Vérification',
-          ),
+          title: const Text('Votre commande'),
           leading: IconButton(
-            tooltip: _step == 0
-                ? 'Retour aux produits'
-                : _step == 1
-                ? 'Retour au panier'
-                : 'Retour à la livraison',
+            tooltip: 'Retour aux produits',
             onPressed: _busy && _cart != null
                 ? null
-                : () {
-                    if (_step > 0) {
-                      setState(() {
-                        _step--;
-                        _error = null;
-                      });
-                    } else {
-                      Navigator.pop(context);
-                    }
-                  },
+                : () => Navigator.pop(context),
             icon: const Icon(Icons.arrow_back_rounded, color: TovoTheme.ink),
           ),
         ),
-        bottomNavigationBar: items.isEmpty
-            ? null
-            : SafeArea(
-                top: false,
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    border: Border(top: BorderSide(color: TovoTheme.line)),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              _step == 2 ? 'Total à payer' : 'Avant livraison',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: TovoTheme.inkDoux,
-                              ),
-                            ),
-                          ),
-                          Text(
-                            Money.format(
-                              _step == 2
-                                  ? _cart!.money('total')
-                                  : _cart!.money('items_total') -
-                                        _cart!.money('discount'),
-                            ),
-                            style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (_cart!.str('blocked_reason').isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 10),
-                          child: Text(
-                            _cart!.str('blocked_reason'),
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: TovoTheme.danger,
-                            ),
-                          ),
-                        ),
-                      const SizedBox(height: 16),
-                      FilledButton(
-                        onPressed: !canCheckout
-                            ? null
-                            : _step == 0
-                            ? _chooseDelivery
-                            : _step == 1
-                            ? _review
-                            : _placeOrder,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  _step == 0
-                                      ? 'Choisir la livraison'
-                                      : _step == 1
-                                      ? 'Voir le récapitulatif'
-                                      : 'Confirmer la commande',
-                                ),
-                              ),
-                              const Icon(Icons.arrow_forward_rounded, size: 20),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
         body: Column(
           children: [
             if (_busy) const LinearProgressIndicator(minHeight: 2),
@@ -384,11 +330,11 @@ class _CartScreenState extends State<CartScreen> {
                   if (!_busy) await _load();
                 },
                 child: ListView(
+                  controller: _scroll,
                   physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 48),
                   children: [
-                    if (items.isNotEmpty) _progress(),
-                    if (_error != null)
+                    if (_error != null && items.isEmpty)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         child: Column(
@@ -397,10 +343,14 @@ class _CartScreenState extends State<CartScreen> {
                               _error!,
                               style: const TextStyle(color: TovoTheme.danger),
                             ),
-                            TextButton(
-                              onPressed: _busy ? null : _load,
-                              child: const Text('Réessayer'),
-                            ),
+                            // « Réessayer » recharge le panier : utile s'il n'a
+                            // pas pu se charger, trompeur pour une erreur de
+                            // saisie qu'il ne corrige pas.
+                            if (_cart == null)
+                              TextButton(
+                                onPressed: _busy ? null : _load,
+                                child: const Text('Réessayer'),
+                              ),
                           ],
                         ),
                       ),
@@ -435,7 +385,7 @@ class _CartScreenState extends State<CartScreen> {
                         ),
                       ),
                     ],
-                    if (items.isNotEmpty && _step == 0) ...[
+                    if (items.isNotEmpty) ...[
                       Text(
                         _cart!.str('merchant_name'),
                         style: const TextStyle(
@@ -445,6 +395,20 @@ class _CartScreenState extends State<CartScreen> {
                           letterSpacing: -0.7,
                         ),
                       ),
+                      if (_cart!.str('blocked_reason').isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          _cart!.str('blocked_reason'),
+                          style: const TextStyle(color: TovoTheme.danger),
+                        ),
+                      ],
+                      if (_error != null && _destination != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          _error!,
+                          style: const TextStyle(color: TovoTheme.danger),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       const Text(
                         'Votre sélection',
@@ -455,16 +419,7 @@ class _CartScreenState extends State<CartScreen> {
                       ),
                       const SizedBox(height: 8),
                       for (final item in items) _item(item),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton(
-                          onPressed: _busy
-                              ? null
-                              : () => Navigator.pop(context),
-                          child: const Text('Continuer mes achats'),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 28),
                       _amount(
                         'Articles',
                         Money.format(_cart!.money('items_total')),
@@ -474,19 +429,37 @@ class _CartScreenState extends State<CartScreen> {
                           'Réduction',
                           '−${Money.format(_cart!.money('discount'))}',
                         ),
-                      _amount('Livraison', 'À calculer'),
-                      const SizedBox(height: 14),
-                      const Text(
-                        'Les frais de livraison seront affichés après le choix de votre adresse, avant confirmation.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          height: 1.5,
-                          color: TovoTheme.inkDoux,
+                      if (_step != 2) _amount('Livraison', 'À calculer'),
+                      const SizedBox(height: 28),
+                      _deliveryForm(),
+                      if (_error != null && _destination == null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          _error!,
+                          style: const TextStyle(color: TovoTheme.danger),
+                        ),
+                      ],
+                      if (_step == 2) ...[
+                        const SizedBox(height: 28),
+                        KeyedSubtree(key: _quoteKey, child: _orderReview()),
+                      ],
+                      const SizedBox(height: 24),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: FilledButton(
+                          onPressed: !canCheckout
+                              ? null
+                              : _step == 2
+                              ? _placeOrder
+                              : _review,
+                          child: Text(
+                            _step == 2
+                                ? 'Confirmer la commande'
+                                : 'Voir le total avec livraison',
+                          ),
                         ),
                       ),
                     ],
-                    if (items.isNotEmpty && _step == 1) _deliveryForm(),
-                    if (items.isNotEmpty && _step == 2) _orderReview(items),
                   ],
                 ),
               ),
@@ -497,63 +470,55 @@ class _CartScreenState extends State<CartScreen> {
     );
   }
 
-  Widget _progress() => Padding(
-    padding: const EdgeInsets.only(bottom: 28),
-    child: Row(
-      children: [
-        for (var index = 0; index < 3; index++) ...[
-          if (index > 0) const Expanded(child: Divider()),
-          CircleAvatar(
-            radius: 14,
-            backgroundColor: index <= _step
-                ? TovoTheme.teal
-                : const Color(0xFFECEFEF),
-            child: Text(
-              '${index + 1}',
-              style: TextStyle(
-                color: index <= _step ? Colors.white : TovoTheme.inkDoux,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ],
-    ),
-  );
-
   Widget _deliveryForm() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       const Text(
-        'Où livrer ?',
-        style: TextStyle(fontSize: 27, fontWeight: FontWeight.w700),
+        'Livrer à',
+        style: TextStyle(fontSize: 21, fontWeight: FontWeight.w700),
       ),
-      const SizedBox(height: 8),
-      const Text(
-        'Choisissez une adresse. Nous calculerons les frais avant votre confirmation.',
-        style: TextStyle(color: TovoTheme.inkDoux, height: 1.4),
-      ),
-      const SizedBox(height: 20),
-      for (final address in _addresses)
-        Card(
-          child: ListTile(
-            leading: Icon(
-              _addressId == address['id']
-                  ? Icons.radio_button_checked
-                  : Icons.radio_button_off,
-              color: TovoTheme.teal,
-            ),
-            title: Text('${address['label'] ?? 'Adresse'}'),
-            subtitle: Text('${address['text_hint'] ?? ''}'),
-            onTap: () => setState(() {
-              _addressId = address['id'] as String?;
-              _currentPoint = null;
-              _error = null;
-            }),
+      const SizedBox(height: 12),
+      if (_addressesLoading)
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 12),
+          child: Text('Chargement des adresses…'),
+        ),
+      if (!_addressesLoading && _addresses.isEmpty)
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 8),
+          child: Text(
+            'Aucune adresse localisée. Utilisez votre position actuelle.',
+            style: TextStyle(fontSize: 13, color: TovoTheme.inkDoux),
           ),
         ),
-      OutlinedButton.icon(
+      for (final address in _addresses)
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(
+            _addressId == address['id']
+                ? Icons.radio_button_checked
+                : Icons.radio_button_off,
+            color: TovoTheme.teal,
+          ),
+          // Le lieu d'abord (« Yantala ») : toutes les adresses
+          // s'appelaient « Adresse », l'étiquette par défaut. On ne la
+          // montre que si le client lui a donné un vrai nom.
+          title: Text(
+            '${address['text_hint'] ?? ''}'.trim().isNotEmpty
+                ? '${address['text_hint']}'
+                : '${address['label'] ?? 'Adresse'}',
+          ),
+          subtitle: _etiquetteParlante(address['label'])
+              ? Text('${address['label']}')
+              : null,
+          onTap: () => setState(() {
+            _addressId = address['id'] as String?;
+            _currentPoint = null;
+            _error = null;
+            _step = 0;
+          }),
+        ),
+      TextButton.icon(
         onPressed: _busy ? null : _useLocation,
         icon: const Icon(Icons.my_location_rounded),
         label: const Text('Utiliser ma position actuelle'),
@@ -565,16 +530,17 @@ class _CartScreenState extends State<CartScreen> {
           onChanged: (_) => setState(() => _error = null),
           textCapitalization: TextCapitalization.sentences,
           decoration: const InputDecoration(
-            labelText: 'Repère pour le livreur',
+            labelText: 'Repère pour le livreur (facultatif)',
             hintText: 'Quartier, rue, bâtiment…',
-            border: OutlineInputBorder(),
+            border: InputBorder.none,
+            filled: true,
           ),
         ),
       ],
       const SizedBox(height: 28),
       const Text(
-        'Comment payer ?',
-        style: TextStyle(fontSize: 21, fontWeight: FontWeight.w700),
+        'Paiement',
+        style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
       ),
       const SizedBox(height: 8),
       ListTile(
@@ -601,44 +567,32 @@ class _CartScreenState extends State<CartScreen> {
     ],
   );
 
-  Widget _orderReview(List<Map<String, dynamic>> items) => Column(
+  Widget _orderReview() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       const Text(
-        'Tout est prêt.',
-        style: TextStyle(fontSize: 27, fontWeight: FontWeight.w700),
+        'Total avant confirmation',
+        style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
       ),
-      const SizedBox(height: 8),
-      const Text(
-        'Vérifiez les détails avant de passer commande.',
-        style: TextStyle(color: TovoTheme.inkDoux),
-      ),
-      const SizedBox(height: 24),
-      Text(
-        _cart!.str('merchant_name'),
-        style: const TextStyle(fontWeight: FontWeight.w700),
-      ),
-      const SizedBox(height: 8),
-      for (final item in items)
-        _amount(
-          '${item['quantity']} × ${item['product_name']}',
-          Money.format((item['line_total'] as num?)?.toInt() ?? 0),
-        ),
-      const Divider(height: 32),
+      const SizedBox(height: 12),
       _amount('Articles', Money.format(_cart!.money('items_total'))),
       if (_cart!.money('discount') > 0)
         _amount('Réduction', '−${Money.format(_cart!.money('discount'))}'),
       _amount('Livraison', Money.format(_cart!.money('delivery_fee'))),
-      const Divider(height: 32),
-      const SizedBox(height: 20),
-      const Text('Livrer à', style: TextStyle(fontWeight: FontWeight.w700)),
-      Text(_destination?.hint ?? ''),
-      const SizedBox(height: 12),
-      Text(_payment == 'cash' ? 'Espèces à la livraison' : 'Paiement mobile'),
-      const SizedBox(height: 18),
-      TextButton(
-        onPressed: _busy ? null : () => setState(() => _step = 1),
-        child: const Text('Modifier la livraison ou le paiement'),
+      const SizedBox(height: 10),
+      Row(
+        children: [
+          const Expanded(
+            child: Text(
+              'À payer',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          Text(
+            Money.format(_cart!.money('total')),
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+          ),
+        ],
       ),
     ],
   );

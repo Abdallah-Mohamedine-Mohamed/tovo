@@ -308,6 +308,45 @@ describe('API — parcours de commande', () => {
     expect(data.total).toBeGreaterThan(1000);
   });
 
+  it('une commande par bouton reste dans la conversation, carte livreur éteinte', async () => {
+    // Avant : rouvrir la conversation faisait disparaître le suivi, et la
+    // carte « Appeler un livreur » redevenait active.
+    const { data: conversation } = await admin
+      .from('conversations')
+      .insert({ user_id: client.id })
+      .select('id')
+      .single();
+    const conversationId = conversation!.id as string;
+    await admin.from('messages').insert({
+      conversation_id: conversationId,
+      role: 'assistant',
+      content: 'Un livreur vient chez vous.',
+      components: [{ type: 'courier_form', data: { callback_minutes: 7 } }],
+    });
+
+    const payload = {
+      type: 'courier',
+      client_order_id: randomUUID(),
+      pickup: { lat: 13.5137, lng: 2.1098 },
+      conversation_id: conversationId,
+    };
+    const res = await app.inject({ method: 'POST', url: '/orders', headers: auth(client), payload });
+    expect(res.statusCode).toBe(201);
+    // Rejouée après une coupure : toujours une seule inscription.
+    const rejeu = await app.inject({ method: 'POST', url: '/orders', headers: auth(client), payload });
+    expect(rejeu.statusCode).toBe(201);
+
+    const relue = await app.inject({
+      method: 'GET',
+      url: `/conversations/${conversationId}`,
+      headers: auth(client),
+    });
+    const messages = relue.json().messages as { role: string; components: { type: string; data: Record<string, unknown> }[] }[];
+    expect(messages.map((m) => m.role)).toEqual(['assistant', 'user', 'assistant']);
+    expect(messages[0]!.components[0]!.data.utilise).toBe(true);
+    expect(messages[2]!.components[0]!.type).toBe('order_tracking');
+  }, 30_000);
+
   it("la commande d'un tiers renvoie 404, pas 403", async () => {
     const intrus = await createUser('client');
 

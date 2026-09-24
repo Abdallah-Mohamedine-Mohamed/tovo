@@ -15,20 +15,19 @@ const List<String> _etapesCommandeVisibles = [
   'Livrée',
 ];
 
+/// Un livreur, trois moments qui comptent pour le client : il vient, il a
+/// le colis, c'est livré. « Recherche », « trouvé », « en route » étaient
+/// des états internes du dispatch, pas des choses à suivre.
 const List<String> _etapesColisVisibles = [
-  'Recherche du livreur',
-  'Livreur trouvé',
+  'Livreur en route',
   'Colis récupéré',
-  'En route',
   'Livré',
 ];
 
 int _etapeColisVisible(String statut) => switch (statut) {
-  'pending' || 'confirmed' || 'ready' => 0,
-  'assigned' => 1,
-  'picked_up' => 2,
-  'delivering' => 3,
-  'delivered' => 4,
+  'pending' || 'confirmed' || 'ready' || 'assigned' => 0,
+  'picked_up' || 'delivering' => 1,
+  'delivered' => 2,
   _ => -1,
 };
 
@@ -82,6 +81,8 @@ class _OrderTrackingState extends State<OrderTracking>
     with WidgetsBindingObserver {
   RealtimeChannel? _canalCommande;
   RealtimeChannel? _canalLivreur;
+  Timer? _verification;
+  bool _lectureEnCours = false;
 
   late String _statut;
   Map<String, dynamic>? _livreur;
@@ -102,6 +103,12 @@ class _OrderTrackingState extends State<OrderTracking>
     WidgetsBinding.instance.addObserver(this);
     _relire();
     _abonner();
+    if (_orderId.isNotEmpty && !_termine.contains(_statut)) {
+      _verification = Timer.periodic(
+        const Duration(seconds: 3),
+        (_) => unawaited(_relire()),
+      );
+    }
   }
 
   @override
@@ -124,7 +131,10 @@ class _OrderTrackingState extends State<OrderTracking>
   /// plan : c'est elle qui rattrape le passé, l'abonnement ne fait que
   /// suivre le présent.
   Future<void> _relire() async {
-    if (_orderId.isEmpty) return;
+    if (_orderId.isEmpty || _lectureEnCours || _termine.contains(_statut)) {
+      return;
+    }
+    _lectureEnCours = true;
 
     try {
       final etat = await Supabase.instance.client.rpc(
@@ -148,6 +158,8 @@ class _OrderTrackingState extends State<OrderTracking>
     } on Exception {
       // Réseau muet : la photo du message reste affichée, ce qui vaut mieux
       // qu'une carte vide. Le prochain retour au premier plan réessaiera.
+    } finally {
+      _lectureEnCours = false;
     }
   }
 
@@ -208,6 +220,8 @@ class _OrderTrackingState extends State<OrderTracking>
   }
 
   void _desabonner() {
+    _verification?.cancel();
+    _verification = null;
     if (_canalCommande == null && _canalLivreur == null) return;
     final client = Supabase.instance.client;
     if (_canalCommande != null) client.removeChannel(_canalCommande!);
@@ -228,13 +242,22 @@ class _OrderTrackingState extends State<OrderTracking>
     'cancelled': 'Annulée',
   };
 
+  /// « Moussa », pas « Moussa Issoufou » : c'est ainsi qu'on l'appelle.
+  String get _prenomLivreur {
+    final nom = ((_livreur?['name'] as String?) ?? '').trim();
+    return nom.isEmpty ? '' : nom.split(RegExp(r'\s+')).first;
+  }
+
   String _description(bool colis) {
     if (_statut == 'cancelled') return 'Cette commande ne sera pas livrée.';
     if (colis) {
+      final minutes =
+          (widget.component.data['callback_minutes'] as num?)?.toInt() ?? 7;
       return switch (_statut) {
-        'pending' || 'confirmed' || 'ready' =>
-          'Nous cherchons un livreur pour prendre en charge votre colis.',
-        'assigned' => 'Votre livreur va récupérer le colis.',
+        'pending' ||
+        'confirmed' ||
+        'ready' => 'Dans les $minutes minutes, pour convenir des détails.',
+        'assigned' => 'Il vient à votre position.',
         'picked_up' => 'Le colis a été récupéré par votre livreur.',
         'delivering' => 'Votre colis est en chemin vers sa destination.',
         'delivered' => 'Votre colis est arrivé à destination.',
@@ -270,8 +293,11 @@ class _OrderTrackingState extends State<OrderTracking>
         const {'pending', 'confirmed', 'preparing', 'ready'}.contains(_statut);
     final libelle = colis
         ? switch (_statut) {
-            'pending' || 'confirmed' || 'ready' => 'Recherche d’un livreur',
-            'assigned' => 'Livreur trouvé',
+            'pending' || 'confirmed' || 'ready' => 'Un livreur va vous appeler',
+            'assigned' =>
+              _prenomLivreur.isEmpty
+                  ? 'Votre livreur arrive'
+                  : '$_prenomLivreur arrive',
             'picked_up' => 'Colis récupéré',
             'delivering' => 'Colis en route',
             'delivered' => 'Colis livré',
@@ -280,12 +306,15 @@ class _OrderTrackingState extends State<OrderTracking>
           }
         : _libelles[_statut] ?? _statut;
 
+    final destination =
+        ((widget.component.map('dropoff')['hint'] as String?) ?? '').trim();
     final details = [
       if (widget.component.str('merchant_name').isNotEmpty)
         widget.component.str('merchant_name'),
-      if (((widget.component.map('dropoff')['hint'] as String?) ?? '')
-          .isNotEmpty)
-        widget.component.map('dropoff')['hint'] as String,
+      if (destination.isNotEmpty)
+        destination
+      else if (colis)
+        'Destination à préciser au livreur',
       if (widget.component.money('total') > 0)
         Money.format(widget.component.money('total')),
     ];
@@ -332,20 +361,13 @@ class _OrderTrackingState extends State<OrderTracking>
             ),
           ),
           if (!annulee) ...[
-            const SizedBox(height: 28),
-            for (var index = 0; index < etapes.length; index++)
-              _EtapeSuivi(
-                libelle: etapes[index],
-                terminee: index < courante,
-                active: index == courante,
-                ligneTerminee: index < courante,
-                derniere: index == etapes.length - 1,
-              ),
+            const SizedBox(height: 18),
+            _BarreEtapes(etapes: etapes, courante: courante),
           ],
-          if (_livreur != null && !annulee) ...[
+          if (_livreur != null && !annulee && _statut != 'delivered') ...[
             const SizedBox(height: 18),
             _BlocLivreur(
-              livreur: _livreur!,
+              prenom: _prenomLivreur,
               positionRecue: _dernierePosition != null,
               onAppeler: () => widget.onInteraction(
                 TovoInteraction('call_driver', {
@@ -399,97 +421,45 @@ class _OrderTrackingState extends State<OrderTracking>
   }
 }
 
-class _EtapeSuivi extends StatelessWidget {
-  const _EtapeSuivi({
-    required this.libelle,
-    required this.terminee,
-    required this.active,
-    required this.ligneTerminee,
-    required this.derniere,
-  });
+/// La progression sur une ligne : un segment par étape, puis la suivante.
+///
+/// Cinq ou six étapes empilées occupaient l'écran pour redire ce que le
+/// titre dit déjà. Deux lignes suffisent : où on en est, et ce qui vient.
+class _BarreEtapes extends StatelessWidget {
+  const _BarreEtapes({required this.etapes, required this.courante});
 
-  final String libelle;
-  final bool terminee;
-  final bool active;
-  final bool ligneTerminee;
-  final bool derniere;
+  final List<String> etapes;
+  final int courante;
 
   @override
   Widget build(BuildContext context) {
-    final couleur = active
-        ? TovoTheme.teal
-        : terminee
-        ? TovoTheme.inkDoux
-        : TovoTheme.muted;
-
-    return SizedBox(
-      height: derniere ? 30 : 46,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 22,
-            child: Column(
-              children: [
-                AnimatedContainer(
+    final suivante = courante + 1 < etapes.length ? etapes[courante + 1] : null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            for (var index = 0; index < etapes.length; index++) ...[
+              if (index > 0) const SizedBox(width: 4),
+              Expanded(
+                child: AnimatedContainer(
                   duration: TovoTheme.normal,
-                  width: active ? 20 : 18,
-                  height: active ? 20 : 18,
+                  height: 4,
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: active ? TovoTheme.teal : Colors.transparent,
-                    border: Border.all(
-                      color: active || terminee
-                          ? TovoTheme.teal
-                          : TovoTheme.line,
-                      width: active ? 0 : 1.5,
-                    ),
+                    color: index <= courante ? TovoTheme.teal : TovoTheme.line,
+                    borderRadius: BorderRadius.circular(2),
                   ),
-                  child: terminee
-                      ? const Icon(Icons.check, size: 12, color: TovoTheme.teal)
-                      : active
-                      ? const Center(
-                          child: SizedBox(
-                            width: 5,
-                            height: 5,
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        )
-                      : null,
-                ),
-                if (!derniere)
-                  Expanded(
-                    child: AnimatedContainer(
-                      duration: TovoTheme.normal,
-                      width: 1.5,
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      color: ligneTerminee ? TovoTheme.teal : TovoTheme.line,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 1),
-              child: Text(
-                libelle,
-                style: TextStyle(
-                  fontSize: active ? 15 : 14,
-                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                  color: couleur,
                 ),
               ),
-            ),
-          ),
-        ],
-      ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          suivante == null ? 'Terminé' : 'Ensuite : $suivante',
+          style: const TextStyle(fontSize: 12.5, color: TovoTheme.inkDoux),
+        ),
+      ],
     );
   }
 }
@@ -557,50 +527,59 @@ class _BlocNotation extends StatelessWidget {
   }
 }
 
+/// Le livreur, et un vrai bouton pour l'appeler.
+///
+/// Une petite icône de téléphone en bout de ligne passait inaperçue : c'est
+/// pourtant LE geste attendu une fois le livreur connu.
 class _BlocLivreur extends StatelessWidget {
   const _BlocLivreur({
-    required this.livreur,
+    required this.prenom,
     required this.positionRecue,
     required this.onAppeler,
   });
 
-  final Map<String, dynamic> livreur;
+  final String prenom;
   final bool positionRecue;
   final VoidCallback onAppeler;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Icon(Icons.two_wheeler_outlined, size: 23, color: TovoTheme.ink),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                (livreur['name'] as String?) ?? 'Votre livreur',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              Text(
+        Row(
+          children: [
+            const Icon(
+              Icons.two_wheeler_outlined,
+              size: 20,
+              color: TovoTheme.inkDoux,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
                 // La carte viendra avec l'intégration cartographique. En
                 // attendant, dire simplement si la position arrive vaut
                 // mieux qu'un cadre vide.
                 positionRecue
-                    ? 'Position mise à jour'
-                    : 'En attente de position',
-                style: const TextStyle(fontSize: 12, color: TovoTheme.inkDoux),
+                    ? 'Position du livreur mise à jour'
+                    : 'Position du livreur en attente',
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  color: TovoTheme.inkDoux,
+                ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-        IconButton(
+        const SizedBox(height: 10),
+        FilledButton.icon(
           onPressed: onAppeler,
-          tooltip: 'Appeler le livreur',
-          icon: const Icon(Icons.call_outlined, color: TovoTheme.ink, size: 21),
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          icon: const Icon(Icons.call, size: 19),
+          label: Text(
+            prenom.isEmpty ? 'Appeler le livreur' : 'Appeler $prenom',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+          ),
         ),
       ],
     );

@@ -3,6 +3,15 @@ import Fastify from 'fastify';
 import { transcribe } from '../../src/services/transcription.js';
 import { chatRoutes } from '../../src/routes/chat.js';
 
+// Ce fichier teste le dernier recours (Gemini) et la route : sans ces clés,
+// aucun appel ne part vraiment chez Microsoft ou OpenAI pendant les tests.
+// La cascade elle-même est testée dans transcription-cascade.test.ts.
+vi.hoisted(() => {
+  delete process.env.OPENROUTER_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.AZURE_SPEECH_KEY;
+});
+
 const generate = vi.hoisted(() => vi.fn());
 vi.mock('../../src/ai/llmClient.js', () => ({
   llmClient: () => ({ model: 'test', generate }),

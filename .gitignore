@@ -33,3 +33,6 @@ coverage/
 
 # Généré par npm run staging:sql
 supabase/staging/
+
+# Sons du banc voix : fabriqués par banc-stt.ts, pas du code.
+backend/scripts/voix/sons/

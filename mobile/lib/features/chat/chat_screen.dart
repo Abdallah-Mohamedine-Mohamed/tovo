@@ -24,7 +24,7 @@ import 'conversations_drawer.dart';
 import 'conversation_chrome.dart';
 import 'photo_capture_sheet.dart';
 import '../catalog/catalog_screen.dart';
-import '../catalog/product_screen.dart';
+import '../catalog/product_sheet.dart';
 import '../catalog/cart_screen.dart';
 
 /// Le fil conversationnel.
@@ -91,11 +91,6 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _reponseCommencee = false;
   String? _busyLabel;
   int? _focusedTourIndex;
-  int? _selectedProductTourIndex;
-  String? _selectedProductId;
-  Map<String, dynamic>? _selectedProduct;
-  bool _productAdded = false;
-  final _productAnchorKey = GlobalKey();
   final _latestResponseKey = GlobalKey();
   String? _conversationId;
   int _navigation = 0;
@@ -113,6 +108,7 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _idCommandeEnCours;
 
   bool _enregistreLaVoix = false;
+
   DateTime? _debutParole;
   Timer? _minuterieParole;
 
@@ -171,7 +167,6 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _minuterieParole?.cancel();
-    unawaited(VoixTovo.annuler());
     unawaited(VoixTovo.liberer());
     _scroll.dispose();
     _saisie.dispose();
@@ -709,6 +704,8 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     if (!mounted || generation != _voiceGeneration) return;
+    // La note ENTIÈRE, en AAC (léger sur le réseau), transcrite une fois
+    // finie : plus juste que le mot-à-mot en direct (banc du 24/09).
     final autorise = await VoixTovo.demarrer();
     if (!mounted || generation != _voiceGeneration) {
       await VoixTovo.annuler();
@@ -758,6 +755,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
+    unawaited(HapticFeedback.lightImpact());
     final audio = await VoixTovo.arreter();
     if (!mounted || generation != _voiceGeneration) return;
     if (audio == null) {
@@ -766,10 +764,30 @@ class _ChatScreenState extends State<ChatScreen> {
       );
       return;
     }
-
-    unawaited(HapticFeedback.lightImpact());
+    // Le serveur choisit le modèle (MAI-Transcribe, avec un filet) : le
+    // téléphone n'envoie que le son, compressé.
     _pendingAudio = {'mime': audio.mime, 'data': audio.data};
     unawaited(_transcribeVoice());
+  }
+
+  /// Place la transcription dans la saisie, et l'envoie tout de suite si le
+  /// client n'avait rien commencé d'autre (texte tapé, photo, historique).
+  void _appliquerTranscription(String transcript) {
+    final autoSend =
+        transcript.trim().isNotEmpty &&
+        _saisie.text.trim().isEmpty &&
+        _photoDraft == null &&
+        !_loadingHistory;
+    setState(() {
+      _saisie.text = [
+        _saisie.text.trim(),
+        transcript.trim(),
+      ].where((part) => part.isNotEmpty).join(' ');
+      _saisie.selection = TextSelection.collapsed(offset: _saisie.text.length);
+      _voiceDraft = !autoSend;
+      _pendingAudio = null;
+    });
+    if (autoSend) _envoyer();
   }
 
   Future<void> _transcribeVoice() async {
@@ -784,38 +802,25 @@ class _ChatScreenState extends State<ChatScreen> {
     });
     if (!mounted || navigation != _navigation) return;
     final transcript = response.raw['transcript'];
-    final autoSend =
-        response.ok &&
-        transcript is String &&
-        transcript.trim().isNotEmpty &&
-        _saisie.text.trim().isEmpty &&
-        _photoDraft == null &&
-        !_loadingHistory;
+    if (response.ok && transcript is String && transcript.trim().isNotEmpty) {
+      setState(() => _transcribing = false);
+      _appliquerTranscription(transcript);
+      return;
+    }
     setState(() {
       _transcribing = false;
-      if (response.ok && transcript is String && transcript.trim().isNotEmpty) {
-        _saisie.text = [
-          _saisie.text.trim(),
-          transcript.trim(),
-        ].where((part) => part.isNotEmpty).join(' ');
-        _saisie.selection = TextSelection.collapsed(
-          offset: _saisie.text.length,
-        );
-        _voiceDraft = !autoSend;
-        _pendingAudio = null;
-      } else {
-        _voiceError = response.statusCode == 404
-            ? 'La transcription nécessite la mise à jour du serveur.'
-            : response.content;
-      }
+      _voiceError = response.statusCode == 404
+          ? 'La transcription nécessite la mise à jour du serveur.'
+          : response.content;
     });
-    if (autoSend) _envoyer();
   }
 
   Future<void> _annulerLaParole() async {
     _voiceGeneration++;
     _minuterieParole?.cancel();
-    if (mounted) setState(() => _enregistreLaVoix = false);
+    if (mounted) {
+      setState(() => _enregistreLaVoix = false);
+    }
     await VoixTovo.annuler();
   }
 
@@ -881,21 +886,6 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  void _montrerLaFiche() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final productContext = _productAnchorKey.currentContext;
-      if (productContext == null) return;
-      unawaited(
-        Scrollable.ensureVisible(
-          productContext,
-          duration: const Duration(milliseconds: 420),
-          curve: TovoTheme.courbe,
-          alignment: 0.08,
-        ),
-      );
-    });
-  }
-
   // ------------------------------------------------------------------
   // Interactions
   // ------------------------------------------------------------------
@@ -946,19 +936,10 @@ class _ChatScreenState extends State<ChatScreen> {
         );
 
       case 'select_product':
-        if (sourceTourIndex == null) {
-          _ouvrirProduit(
-            '${p['product_id']}',
-            p['product'] as Map<String, dynamic>?,
-          );
-        } else {
-          setState(() {
-            _selectedProductTourIndex = sourceTourIndex;
-            _selectedProductId = '${p['product_id']}';
-            _selectedProduct = p['product'] as Map<String, dynamic>?;
-            _productAdded = false;
-          });
-        }
+        _ouvrirProduit(
+          '${p['product_id']}',
+          p['product'] as Map<String, dynamic>?,
+        );
 
       case 'add_to_cart':
         _appeler(
@@ -1242,6 +1223,8 @@ class _ChatScreenState extends State<ChatScreen> {
       final response = await widget.api.post('/orders', {
         'type': 'courier',
         'client_order_id': _idCommandeEnCours,
+        // Pour que le suivi soit encore là quand on rouvre la conversation.
+        if (_conversationId != null) 'conversation_id': _conversationId,
         'pickup_hint': depart!['hint'],
         'pickup': {'lat': depart['lat'], 'lng': depart['lng']},
         'dropoff_hint': p['dropoff_hint'] ?? arrivee?['hint'],
@@ -1251,11 +1234,40 @@ class _ChatScreenState extends State<ChatScreen> {
         'parcel': p['parcel'] ?? 'small',
         'payment_method': p['payment_method'] ?? 'cash',
       });
-      if (response.ok) unawaited(TovoPush.enregistrer('client'));
+      if (response.ok) {
+        unawaited(TovoPush.enregistrer('client'));
+        _eteindreCarteLivreur();
+      }
       return response;
     });
 
     _idCommandeEnCours = null;
+  }
+
+  /// La carte « Appeler un livreur » qui a servi ne doit plus pouvoir
+  /// resservir : elle passe à « Livreur demandé ». Le serveur fait de même
+  /// dans la conversation enregistrée, pour la réouverture.
+  void _eteindreCarteLivreur() {
+    for (var i = _tours.length - 1; i >= 0; i--) {
+      final tour = _tours[i];
+      final index = tour.composants.indexWhere(
+        (c) => c.type == 'courier_form' && c.data['utilise'] != true,
+      );
+      if (index < 0) continue;
+      final composants = [...tour.composants];
+      composants[index] = TovoComponent(
+        type: 'courier_form',
+        data: {...composants[index].data, 'utilise': true},
+      );
+      _tours[i] = _Tour(
+        deLAssistant: tour.deLAssistant,
+        contenu: tour.contenu,
+        composants: composants,
+        enErreur: tour.enErreur,
+        photoLocale: tour.photoLocale,
+      );
+      return;
+    }
   }
 
   /// Lance le téléchargement des photos dès que les résultats arrivent.
@@ -1346,10 +1358,6 @@ class _ChatScreenState extends State<ChatScreen> {
       _homeVisible = false;
     }
     _closeFocusedResults();
-    _selectedProductTourIndex = null;
-    _selectedProductId = null;
-    _selectedProduct = null;
-    _productAdded = false;
     FocusScope.of(context).unfocus();
     _navigation++;
     _voiceDraft = false;
@@ -1384,14 +1392,11 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _ouvrirProduit(String id, Map<String, dynamic>? product) async {
-    await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => ProductScreen(
-          api: widget.api,
-          productId: id,
-          initialProduct: product ?? const {},
-        ),
-      ),
+    await showProductSheet(
+      context,
+      api: widget.api,
+      productId: id,
+      initialProduct: product ?? const {},
     );
   }
 
@@ -1407,6 +1412,7 @@ class _ChatScreenState extends State<ChatScreen> {
           api: widget.api,
           initialAddressId: initialAddressId,
           initialCart: cartPreview,
+          conversationId: _conversationId,
         ),
       ),
     );
@@ -1424,6 +1430,7 @@ class _ChatScreenState extends State<ChatScreen> {
       MaterialPageRoute(
         builder: (_) => CatalogScreen(
           api: widget.api,
+          conversationId: _conversationId,
           merchantId: merchantId,
           merchantIds: merchantIds,
           categoryId: categoryId,
@@ -1469,10 +1476,6 @@ class _ChatScreenState extends State<ChatScreen> {
       _charge = false;
       _busyLabel = null;
       _focusedTourIndex = null;
-      _selectedProductTourIndex = null;
-      _selectedProductId = null;
-      _selectedProduct = null;
-      _productAdded = false;
       _conversationId = id;
       _transcribing = false;
       _voiceDraft = false;
@@ -1514,10 +1517,6 @@ class _ChatScreenState extends State<ChatScreen> {
       _charge = false;
       _busyLabel = null;
       _focusedTourIndex = null;
-      _selectedProductTourIndex = null;
-      _selectedProductId = null;
-      _selectedProduct = null;
-      _productAdded = false;
       _saisie.clear();
       _transcribing = false;
       _voiceDraft = false;
@@ -1693,13 +1692,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 controller: _scroll,
                                 keyboardDismissBehavior:
                                     ScrollViewKeyboardDismissBehavior.onDrag,
-                                padding: EdgeInsets.only(
-                                  bottom: _selectedProductId != null
-                                      ? MediaQuery.sizeOf(context).height * 0.20
-                                      : _productAdded
-                                      ? 80
-                                      : 18,
-                                ),
+                                padding: const EdgeInsets.only(bottom: 18),
                                 itemCount: _tours.length,
                                 itemBuilder: (context, i) {
                                   final tourIndex = i;
@@ -1727,49 +1720,6 @@ class _ChatScreenState extends State<ChatScreen> {
                                               sourceTourIndex: tourIndex,
                                             ),
                                         anime: tourIndex == _tours.length - 1,
-                                        shoppingStep:
-                                            _hasDiscoveryResults(
-                                              _tours[tourIndex].composants,
-                                            )
-                                            ? _selectedProductTourIndex ==
-                                                      tourIndex
-                                                  ? _productAdded
-                                                        ? 2
-                                                        : 1
-                                                  : 0
-                                            : null,
-                                        productDetail:
-                                            _selectedProductTourIndex ==
-                                                    tourIndex &&
-                                                _selectedProductId != null
-                                            ? Container(
-                                                key: _productAnchorKey,
-                                                child: ProductScreen(
-                                                  key: ValueKey(
-                                                    _selectedProductId,
-                                                  ),
-                                                  api: widget.api,
-                                                  productId:
-                                                      _selectedProductId!,
-                                                  initialProduct:
-                                                      _selectedProduct ??
-                                                      const {},
-                                                  embedded: true,
-                                                  onClose: () => setState(() {
-                                                    _selectedProductTourIndex =
-                                                        null;
-                                                    _selectedProductId = null;
-                                                    _selectedProduct = null;
-                                                    _productAdded = false;
-                                                  }),
-                                                  onAdded: () => setState(
-                                                    () => _productAdded = true,
-                                                  ),
-                                                ),
-                                              )
-                                            : null,
-                                        selectedProductId: _selectedProductId,
-                                        onProductExpanded: _montrerLaFiche,
                                         scanne:
                                             _charge &&
                                             tourIndex == _tours.length - 1 &&
@@ -1815,23 +1765,6 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                       ),
                     ),
-                    if (_productAdded)
-                      Positioned(
-                        bottom: 12,
-                        left: 16,
-                        right: 16,
-                        child: Center(
-                          child: FilledButton.icon(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: TovoTheme.teal,
-                              foregroundColor: Colors.white,
-                            ),
-                            onPressed: _ouvrirPanier,
-                            icon: const Icon(Icons.shopping_bag_outlined),
-                            label: const Text('Voir mon panier'),
-                          ),
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -1922,18 +1855,10 @@ class _TourVue extends StatefulWidget {
     required this.onInteraction,
     this.anime = false,
     this.scanne = false,
-    this.shoppingStep,
-    this.productDetail,
-    this.selectedProductId,
-    this.onProductExpanded,
   });
 
   final _Tour tour;
   final InteractionCallback onInteraction;
-  final int? shoppingStep;
-  final Widget? productDetail;
-  final String? selectedProductId;
-  final VoidCallback? onProductExpanded;
 
   /// Le message vient d'arriver : il glisse et se révèle. Les précédents
   /// s'affichent directement, sinon la liste frémirait à chaque défilement.
@@ -2086,11 +2011,6 @@ class _TourVueState extends State<_TourVue> {
                 ),
               ),
             ),
-          if (widget.shoppingStep != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 18),
-              child: _ShoppingProgress(step: widget.shoppingStep!),
-            ),
           for (var index = 0; index < widgets.length; index++)
             ViewportReveal(
               key: ValueKey('component-$index'),
@@ -2101,62 +2021,6 @@ class _TourVueState extends State<_TourVue> {
                 child: widgets[index],
               ),
             ),
-          TweenAnimationBuilder<double>(
-            key: ValueKey(widget.selectedProductId),
-            tween: Tween(begin: 0, end: widget.productDetail == null ? 0 : 1),
-            duration: MediaQuery.disableAnimationsOf(context)
-                ? Duration.zero
-                : const Duration(milliseconds: 600),
-            curve: TovoTheme.courbe,
-            onEnd: widget.productDetail == null
-                ? null
-                : widget.onProductExpanded,
-            builder: (context, progress, child) => ClipRect(
-              child: Align(
-                alignment: Alignment.topCenter,
-                heightFactor: progress,
-                child: child,
-              ),
-            ),
-            child: widget.productDetail == null
-                ? const SizedBox.shrink()
-                : ViewportReveal(
-                    key: ValueKey(widget.selectedProductId),
-                    duration: const Duration(milliseconds: 600),
-                    offset: 16,
-                    child: widget.productDetail!,
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ShoppingProgress extends StatelessWidget {
-  const _ShoppingProgress({required this.step});
-
-  final int step;
-
-  @override
-  Widget build(BuildContext context) {
-    const labels = ['Recherche', 'Choix', 'Commande'];
-    return Semantics(
-      label: 'Étape ${step + 1} sur 3 : ${labels[step]}',
-      child: Row(
-        children: [
-          for (var index = 0; index < labels.length; index++) ...[
-            if (index > 0)
-              const Expanded(child: Divider(color: TovoTheme.line)),
-            Text(
-              labels[index],
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: index == step ? FontWeight.w700 : FontWeight.w400,
-                color: index == step ? TovoTheme.teal : TovoTheme.muted,
-              ),
-            ),
-          ],
         ],
       ),
     );

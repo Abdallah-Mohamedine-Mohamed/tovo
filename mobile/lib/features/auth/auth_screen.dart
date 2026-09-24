@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/theme.dart';
+import 'phone_country.dart';
 
 /// Connexion par téléphone.
 ///
@@ -35,6 +36,7 @@ enum _Etape { numero, code }
 class _AuthScreenState extends State<AuthScreen> {
   final _numero = TextEditingController();
   final _code = TextEditingController();
+  PhoneCountry _pays = phoneCountries.first;
 
   _Etape _etape = _Etape.numero;
 
@@ -42,16 +44,6 @@ class _AuthScreenState extends State<AuthScreen> {
   String? _erreur;
   int _secondesAvantRenvoi = 0;
   Timer? _resendTimer;
-
-  /// Le Niger est en +227. On le préremplit plutôt que d'obliger chacun à le
-  /// taper, tout en le laissant modifiable pour les numéros étrangers.
-  static const String _indicatifParDefaut = '+227';
-
-  @override
-  void initState() {
-    super.initState();
-    _numero.text = _indicatifParDefaut;
-  }
 
   @override
   void dispose() {
@@ -61,17 +53,24 @@ class _AuthScreenState extends State<AuthScreen> {
     super.dispose();
   }
 
-  String get _numeroComplet {
-    final brut = _numero.text.replaceAll(RegExp(r'[^\d+]'), '');
-    return brut.startsWith('+') ? brut : '$_indicatifParDefaut$brut';
-  }
+  String get _numeroComplet => _pays.fullNumber(_numero.text);
 
-  bool get _numeroValide {
-    final numero = _numeroComplet;
-    if (numero.startsWith('+227')) {
-      return RegExp(r'^\+227\d{8}$').hasMatch(numero);
-    }
-    return RegExp(r'^\+[1-9]\d{7,14}$').hasMatch(numero);
+  bool get _numeroValide => _pays.accepts(_numero.text);
+
+  Future<void> _choisirPays() async {
+    FocusScope.of(context).unfocus();
+    final country = await showModalBottomSheet<PhoneCountry>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => PhoneCountrySheet(selected: _pays),
+    );
+    if (!mounted || country == null) return;
+    setState(() {
+      _pays = country;
+      _erreur = null;
+    });
   }
 
   Future<void> _envoyerCode() async {
@@ -167,39 +166,76 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isClient = widget.titre == 'Tovo';
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     return Scaffold(
       backgroundColor: TovoTheme.canvas,
       body: SafeArea(
-        child: Stack(
-          children: [
-            Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(28, 72, 28, 40),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final showArtwork =
+                isClient &&
+                _etape == _Etape.numero &&
+                !keyboardOpen &&
+                constraints.maxHeight >= 700;
+            return SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(28, keyboardOpen ? 24 : 44, 28, 40),
+              child: Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 420),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
-                    mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (Navigator.of(context).canPop()) ...[
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: IconButton(
+                            tooltip: 'Retour',
+                            onPressed: () => Navigator.of(context).pop(),
+                            icon: const Icon(Icons.arrow_back_rounded),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      if (showArtwork) ...[
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(22),
+                          child: Image.asset(
+                            'assets/branding/accueil-niamey.webp',
+                            height: (constraints.maxHeight * 0.25).clamp(
+                              140.0,
+                              220.0,
+                            ),
+                            fit: BoxFit.cover,
+                            alignment: Alignment.center,
+                          ),
+                        ),
+                        const SizedBox(height: 30),
+                      ],
                       Text(
-                        _etape == _Etape.numero
+                        isClient && _etape == _Etape.numero
+                            ? 'Tout commence par une envie.'
+                            : _etape == _Etape.numero
                             ? 'Bienvenue sur ${widget.titre}'
                             : 'Vérifiez votre numéro',
                         style: const TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: -0.7,
+                          fontSize: 29,
+                          height: 1.15,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.9,
                           color: TovoTheme.ink,
                         ),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
                       Text(
-                        _etape == _Etape.numero
+                        isClient && _etape == _Etape.numero
+                            ? 'Un repas, des courses, un colis : dites-nous ce qu’il vous faut. Tovo s’en occupe.'
+                            : _etape == _Etape.numero
                             ? widget.sousTitre
                             : 'Saisissez le code reçu pour continuer.',
                         style: const TextStyle(
-                          fontSize: 15,
-                          height: 1.5,
+                          fontSize: 16,
+                          height: 1.45,
                           color: TovoTheme.inkDoux,
                         ),
                       ),
@@ -215,55 +251,89 @@ class _AuthScreenState extends State<AuthScreen> {
                           style: const TextStyle(color: TovoTheme.danger),
                         ),
                       ],
+                      if (isClient && _etape == _Etape.numero) ...[
+                        const SizedBox(height: 18),
+                        const Text(
+                          'Votre numéro protège vos commandes et vous permet de suivre votre livreur. Aucun mot de passe à retenir.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.45,
+                            color: TovoTheme.inkDoux,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ),
-            ),
-            if (Navigator.of(context).canPop())
-              Positioned(
-                left: 16,
-                top: 8,
-                child: IconButton(
-                  tooltip: 'Retour',
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.arrow_back_rounded),
-                ),
-              ),
-          ],
+            );
+          },
         ),
       ),
     );
   }
 
   List<Widget> _etapeNumero() => [
-    const Text('Votre numéro de téléphone'),
+    const Text('Votre numéro'),
     const SizedBox(height: 10),
-    TextField(
-      key: const ValueKey('auth-phone'),
-      controller: _numero,
-      keyboardType: TextInputType.phone,
-      autofillHints: const [AutofillHints.telephoneNumber],
-      autofocus: false,
-      textInputAction: TextInputAction.done,
-      onSubmitted: (_) => _envoyerCode(),
-      // Chiffres, « + » et espaces. Le « \d » compte : sans lui, la
-      // classe n'autorise que la lettre d, le plus et l'espace — le champ
-      // refuse alors tout chiffre, et personne ne peut se connecter.
-      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d+ ]'))],
-      decoration: _decoration('+227 90 00 00 00').copyWith(
-        prefixIcon: const Icon(Icons.phone_rounded, color: TovoTheme.teal),
-      ),
-      style: const TextStyle(
-        fontSize: 19,
-        letterSpacing: 1,
-        fontWeight: FontWeight.w600,
-      ),
+    Row(
+      children: [
+        Semantics(
+          button: true,
+          label: 'Pays : ${_pays.name}, indicatif ${_pays.dialCode}',
+          child: Material(
+            color: const Color(0xFFF2F3F1),
+            borderRadius: BorderRadius.circular(18),
+            child: InkWell(
+              key: const ValueKey('auth-country'),
+              onTap: _occupe ? null : _choisirPays,
+              borderRadius: BorderRadius.circular(18),
+              child: SizedBox(
+                height: 56,
+                width: 132,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(_pays.flag, style: const TextStyle(fontSize: 21)),
+                    const SizedBox(width: 6),
+                    Text(
+                      _pays.dialCode,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: TextField(
+            key: const ValueKey('auth-phone'),
+            controller: _numero,
+            keyboardType: TextInputType.phone,
+            autofillHints: const [AutofillHints.telephoneNumberNational],
+            autofocus: false,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _envoyerCode(),
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: _decoration(
+              _pays.isoCode == 'NE' ? '90 00 00 00' : 'Numéro',
+            ),
+            style: const TextStyle(
+              fontSize: 18,
+              letterSpacing: 0.3,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
     ),
     const SizedBox(height: 16),
     FilledButton(
       style: FilledButton.styleFrom(
-        minimumSize: const Size.fromHeight(50),
+        minimumSize: const Size.fromHeight(54),
         backgroundColor: TovoTheme.teal,
         shape: const StadiumBorder(),
       ),
@@ -339,10 +409,18 @@ class _AuthScreenState extends State<AuthScreen> {
   InputDecoration _decoration(String hint) => InputDecoration(
     hintText: hint,
     filled: true,
-    fillColor: TovoTheme.tealMist,
+    fillColor: const Color(0xFFF2F3F1),
     contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
     border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
+      borderRadius: BorderRadius.circular(18),
+      borderSide: BorderSide.none,
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(18),
+      borderSide: BorderSide.none,
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(18),
       borderSide: BorderSide.none,
     ),
   );

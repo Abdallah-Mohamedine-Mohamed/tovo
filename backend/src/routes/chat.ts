@@ -14,11 +14,13 @@ import {
   requeteProduitUtilisateur,
 } from '../ai/intents.js';
 import { signaler } from '../lib/observability.js';
-import { transcribe } from '../services/transcription.js';
+import { env } from '../config/env.js';
+import { comparerRoutesMai, transcrire } from '../services/transcription.js';
 import { chatStream } from '../lib/chatStream.js';
 import { consommer, messageLimite } from '../services/rateLimit.js';
 import { commanderUnLivreur } from '../services/livreur.js';
 import { ombreJev, type Intention } from '../ai/jev.js';
+import { ouvrirSessionVoix, vocabulaire } from '../services/voixDirecte.js';
 import { decider, indication, intentionChoisie } from '../ai/aiguillage.js';
 import { aiguiller, cascadeActive } from '../ai/cascade.js';
 import { rechercheProduitRapide } from '../ai/orchestrator.js';
@@ -165,8 +167,36 @@ function libelleLisible(action: string, payload: Record<string, unknown>): strin
 }
 
 export async function chatRoutes(app: FastifyInstance): Promise<void> {
-  app.post('/transcriptions', { preHandler: app.requireAuth }, async (request, reply) => {
-    const body = z.object({ audio: audioSchema }).safeParse(request.body);
+  /**
+   * Voix en direct : jeton temporaire pour parler à Gemini Live depuis le
+   * téléphone (voir services/voixDirecte.ts). Compté comme une transcription
+   * dans la limite de débit. 503 : l'app bascule sur POST /transcriptions.
+   */
+  app.post('/transcriptions/session', { preHandler: app.requireAuth }, async (request, reply) => {
+    const limite = await consommer('transcription', request.user!.id);
+    if (!limite.ok) {
+      return reply
+        .code(429)
+        .header('retry-after', String(limite.reessayerDans))
+        .send({ error: messageLimite(limite.reessayerDans) });
+    }
+    try {
+      const session = await ouvrirSessionVoix(request.supabase!);
+      if (!session) return reply.code(503).send({ error: 'La voix en direct est indisponible.' });
+      return reply.send(session);
+    } catch (cause) {
+      request.log.error({ cause: cause instanceof Error ? cause.message : cause }, 'jeton de voix impossible');
+      return reply.code(503).send({ error: 'La voix en direct est indisponible.' });
+    }
+  });
+
+  // Plus large que l'audio du chat : c'est aussi le SECOURS de la voix en
+  // direct, qui renvoie alors le son brut (WAV 16 kHz, ~32 Ko/s) — une
+  // minute pèse ~2 Mo, ~2,6 Mo en base64.
+  app.post('/transcriptions', { preHandler: app.requireAuth, bodyLimit: 4 * 1024 * 1024 }, async (request, reply) => {
+    const body = z.object({
+      audio: audioSchema.extend({ data: z.string().min(1).max(2_800_000) }),
+    }).safeParse(request.body);
     if (!body.success) return reply.code(400).send({ error: 'enregistrement invalide' });
     const limite = await consommer('transcription', request.user!.id);
     if (!limite.ok) {
@@ -177,9 +207,25 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     }
     const started = performance.now();
     try {
-      const transcript = await transcribe(body.data.audio);
-      request.log.info({ duration_ms: Math.round(performance.now() - started) }, 'transcription terminee');
+      // Plats locaux et noms des boutiques : MAI les écrit juste avec la liste.
+      const mots = await vocabulaire(request.supabase!).catch(() => []);
+      const { texte: transcript, fournisseur } = await transcrire(body.data.audio, mots);
+      // Qui a répondu, et en combien de temps : c'est ce qui dira, en
+      // production, si le secours sert souvent et s'il faut changer de route.
+      request.log.info(
+        { duration_ms: Math.round(performance.now() - started), fournisseur, octets: body.data.audio.data.length },
+        'transcription terminee',
+      );
       if (!transcript) return reply.code(422).send({ error: 'Je n’ai pas distingué de paroles. Réessayez dans un endroit plus calme.' });
+      // Ombre : APRÈS la réponse, la même note par les deux routes vers MAI,
+      // pour les comparer depuis Railway. Le client n'attend rien.
+      if (Math.random() < env.TRANSCRIPTION_OMBRE) {
+        void comparerRoutesMai(body.data.audio, mots)
+          .then((comparaison) => {
+            if (comparaison) request.log.info(comparaison, 'transcription ombre');
+          })
+          .catch(() => {});
+      }
       return reply.send({ transcript });
     } catch {
       return reply.code(503).send({ error: 'La transcription est indisponible. Réessayez ou écrivez votre demande.' });

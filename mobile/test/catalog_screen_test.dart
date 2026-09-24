@@ -262,12 +262,29 @@ void main() {
     await open(tester);
     await tester.tap(find.text('Poulet grillé 0'));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Retour à la carte'), findsOneWidget);
+    expect(find.byTooltip('Fermer la fiche'), findsOneWidget);
     await tester.tap(find.text('Ajouter au panier'));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Retour à la carte'), findsNothing);
-    expect(find.text('Voir mon panier'), findsOneWidget);
+    expect(find.byTooltip('Fermer la fiche'), findsNothing);
+    expect(find.byTooltip('Panier'), findsOneWidget);
+    expect(find.text('Voir mon panier'), findsNothing);
     expect(find.text('53 produits'), findsOneWidget);
+  });
+
+  testWidgets('la fiche flottante se ferme sans quitter le catalogue', (
+    tester,
+  ) async {
+    await open(tester);
+    await tester.tap(find.text('Poulet grillé 0'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Fermer la fiche'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Fermer la fiche'));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Fermer la fiche'), findsNothing);
+    expect(find.text('53 produits'), findsOneWidget);
+    expect(find.text('Poulet grillé 0'), findsOneWidget);
   });
 
   testWidgets('aperçu ouvre le catalogue en conservant tous ses filtres', (

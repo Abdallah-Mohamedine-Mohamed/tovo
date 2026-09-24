@@ -18,6 +18,9 @@ const MOTS_RECHERCHE_VIDES = new Set([
   'rechercher', 'soit', 'souhaite', 'svp', 'toutes', 'tous', 'trouve',
   'trouver', 'tu', 'un', 'une', 'veut', 'veux', 'voir', 'voudrais', 'vous',
   'y', 'acheter', 'article', 'articles', 'mais', 'c', 'ca', 'cela',
+  // Liaisons d'une relance : « Et les tacos ? » cherchait « et tacos », et
+  // l'affichait tel quel en titre.
+  'et', 'alors', 'aussi', 'sinon', 'plutot', 'encore',
 ]);
 
 /**

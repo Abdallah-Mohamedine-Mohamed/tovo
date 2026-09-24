@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { toHttpFailure } from '../lib/errors.js';
@@ -71,7 +72,74 @@ const courierSchema = z.object({
   pickup_contact: facultatif(30),
 });
 
-const createOrderSchema = z.discriminatedUnion('type', [deliverySchema, courierSchema]);
+/**
+ * La conversation d'où part la commande. Facultative : le panier ouvert
+ * depuis le catalogue n'en a pas toujours une.
+ */
+const avecConversation = { conversation_id: z.string().uuid().nullable().default(null) };
+
+const createOrderSchema = z.discriminatedUnion('type', [
+  deliverySchema.extend(avecConversation),
+  courierSchema.extend(avecConversation),
+]);
+
+/**
+ * Inscrit la commande dans la conversation d'où elle part.
+ *
+ * Sans ça, une commande passée par un bouton n'existait que sur l'écran :
+ * en rouvrant la conversation, le suivi avait disparu et la carte
+ * « Appeler un livreur » était de nouveau là, active, comme si rien
+ * n'avait été commandé. On écrit donc le geste et le suivi, et on éteint
+ * la carte livreur qui a servi.
+ *
+ * client_message_id = client_order_id : l'index unique
+ * (conversation_id, client_message_id) fait qu'une requête rejouée après
+ * une coupure n'inscrit pas deux fois la même commande.
+ */
+async function inscrireDansLaConversation(
+  db: SupabaseClient,
+  conversationId: string,
+  clientOrderId: string,
+  geste: string,
+  reponse: { content: string; components: unknown[] },
+  eteindre: string | null,
+): Promise<void> {
+  const { error } = await db.from('messages').insert({
+    conversation_id: conversationId,
+    role: 'user',
+    content: geste,
+    client_message_id: clientOrderId,
+  });
+  // Déjà inscrite (requête rejouée), ou conversation d'un autre (RLS).
+  if (error) return;
+  await db.from('messages').insert({
+    conversation_id: conversationId,
+    role: 'assistant',
+    content: reponse.content,
+    components: reponse.components,
+  });
+
+  if (!eteindre) return;
+  const { data } = await db
+    .from('messages')
+    .select('id, components')
+    .eq('conversation_id', conversationId)
+    .eq('role', 'assistant')
+    .order('created_at', { ascending: false })
+    .limit(10);
+  for (const m of (data ?? []) as { id: string; components: unknown }[]) {
+    const composants = Array.isArray(m.components) ? m.components : [];
+    const index = composants.findIndex(
+      (c) => (c as { type?: string })?.type === eteindre && !(c as { data?: { utilise?: boolean } }).data?.utilise,
+    );
+    if (index < 0) continue;
+    const c = composants[index] as { data?: Record<string, unknown> };
+    const modifies = [...composants];
+    modifies[index] = { ...c, data: { ...(c.data ?? {}), utilise: true } };
+    await db.from('messages').update({ components: modifies }).eq('id', m.id);
+    return;
+  }
+}
 
 export async function orderRoutes(app: FastifyInstance): Promise<void> {
   app.post('/orders', { preHandler: app.requireAuth }, async (request, reply) => {
@@ -177,16 +245,29 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
           `avec le code ${codeAchat} depuis MYNITA, ou payer à la livraison.`
         : 'Commande enregistrée. Je vous tiens au courant.';
 
-    return reply
-      .code(201)
-      .send(
-        envelope(message, [
-          orderTracking({
-            ...(suivi.data as Record<string, unknown>),
-            ...(codeAchat ? { payment_code: codeAchat } : {}),
-          }),
-        ]),
-      );
+    const reponse = envelope(message, [
+      orderTracking({
+        ...(suivi.data as Record<string, unknown>),
+        ...(codeAchat ? { payment_code: codeAchat } : {}),
+      }),
+    ]);
+
+    if (body.data.conversation_id) {
+      await inscrireDansLaConversation(
+        db,
+        body.data.conversation_id,
+        body.data.client_order_id,
+        body.data.type === 'courier' ? 'Appeler un livreur' : 'Commander',
+        reponse,
+        body.data.type === 'courier' ? 'courier_form' : null,
+      ).catch((cause) => {
+        // La commande est passée : ne pas l'inscrire n'est pas une raison
+        // de la présenter comme ratée.
+        request.log.error({ cause, orderId }, 'commande non inscrite dans la conversation');
+      });
+    }
+
+    return reply.code(201).send(reponse);
   });
 
   app.get('/orders/:orderId', { preHandler: app.requireAuth }, async (request, reply) => {

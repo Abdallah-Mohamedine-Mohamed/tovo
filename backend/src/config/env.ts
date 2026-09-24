@@ -76,6 +76,26 @@ const schema = z.object({
   // 23/09 : 0,7 s de médiane certains moments, 4,9 s à d'autres.
   JEV_DELAI_MS: z.coerce.number().int().positive().default(1200),
 
+  // Transcription des notes vocales (services/transcription.ts).
+  // Principal : Microsoft MAI-Transcribe-2, le meilleur sur les vraies notes
+  // de Niamey (banc du 24/09 : 10-11/11, ~1 s). Par OpenRouter (défaut, le
+  // plus rapide mesuré depuis Niamey) ou directement chez Azure.
+  TRANSCRIPTION_MAI_VIA: z.enum(['openrouter', 'azure']).default('openrouter'),
+  AZURE_SPEECH_KEY: vide(z.string()),
+  AZURE_SPEECH_REGION: z.string().default('eastus'),
+  // Filet de sécurité : OpenAI gpt-transcribe, lancé seulement si le
+  // principal n'a pas répondu dans ce délai, échoue ou rend du vide.
+  OPENAI_API_KEY: vide(z.string()),
+  // 1,5 s : sous ce seuil, MAI finissait souvent par gagner quand même, et
+  // OpenAI était payé pour rien (banc du 24/09, depuis Niamey). À régler sur
+  // les temps mesurés depuis Railway (journal « transcription terminee »).
+  TRANSCRIPTION_SECOURS_MS: z.coerce.number().int().positive().default(1500),
+  // Mode « ombre » : part des notes (0 à 1) ÉGALEMENT envoyées, en
+  // arrière-plan, par les DEUX routes vers MAI (OpenRouter et Azure), pour
+  // comparer leurs temps sur la même note au même moment. 0 = arrêté.
+  // Exige OPENROUTER_API_KEY et AZURE_SPEECH_KEY. Coût : ~0,0002 $ par note.
+  TRANSCRIPTION_OMBRE: z.coerce.number().min(0).max(1).default(0),
+
   // Classifieur d'intentions LOCAL (ai/classifieur.ts) : première marche de
   // la cascade, ~20 ms, sans réseau. Charge ~120 Mo de modèle au démarrage
   // (en arrière-plan) et ~300 Mo de mémoire.

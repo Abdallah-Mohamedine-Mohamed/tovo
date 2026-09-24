@@ -48,9 +48,22 @@ void main() {
     expect(gestes.single.payload['payment_method'], 'cash');
     expect(gestes.single.payload.containsKey('dropoff'), isFalse);
 
-    // Un second tap ne fait pas venir deux livreurs.
-    await tester.tap(find.text('Appeler un livreur'));
-    expect(gestes, hasLength(1));
+    // La carte s'éteint : plus de bouton, donc pas de second livreur.
+    expect(find.text('Appeler un livreur'), findsNothing);
+    expect(find.textContaining('Livreur demandé', findRichText: true), findsOneWidget);
+  });
+
+  testWidgets('rouverte après la commande, la carte reste éteinte', (
+    tester,
+  ) async {
+    await _afficher(tester, {
+      'pickup': {'lat': 13.51, 'lng': 2.11},
+      'callback_minutes': 7,
+      'utilise': true,
+    });
+    expect(find.text('Appeler un livreur'), findsNothing);
+    expect(find.byType(FilledButton), findsNothing);
+    expect(find.textContaining('Livreur demandé', findRichText: true), findsOneWidget);
   });
 
   testWidgets('ce que le client a dit est repris, détails ouverts', (
@@ -74,7 +87,16 @@ void main() {
     tester,
   ) async {
     await _afficher(tester, const {});
+    // La position est cherchée d'office, sans geste du client…
+    expect(find.text('Recherche…'), findsOneWidget);
+    // Le GPS est absent du banc d'essai : la recherche échoue pour de vrai.
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+    // … et si elle est introuvable, le bouton reste là, sans message.
     expect(find.text('Ma position'), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing);
     final bouton = tester.widget<FilledButton>(find.byType(FilledButton));
     expect(bouton.onPressed, isNull);
   });

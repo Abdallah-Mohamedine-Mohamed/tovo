@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:geolocator/geolocator.dart';
 
 /// Position de livraison.
@@ -29,10 +31,11 @@ class TovoLocation {
   /// centre-ville quelqu'un qui habite Talladjé est pire que de lui demander
   /// d'activer sa localisation.
   static Future<Position?> current({bool requestPermission = false}) async {
-    if (!await ensurePermission(requestPermission: requestPermission)) return null;
-
     try {
-      return await Geolocator.getCurrentPosition(
+      if (!await ensurePermission(requestPermission: requestPermission)) {
+        return null;
+      }
+      final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
           // Sur réseau et GPS instables, mieux vaut une position approximative
@@ -40,8 +43,41 @@ class TovoLocation {
           timeLimit: Duration(seconds: 12),
         ),
       );
+      _retenir(position);
+      return position;
     } on Exception {
-      return requestPermission ? null : await Geolocator.getLastKnownPosition();
+      try {
+        return requestPermission
+            ? null
+            : await Geolocator.getLastKnownPosition();
+      } on Exception {
+        return null;
+      }
     }
   }
+
+  static Position? _derniere;
+  static DateTime? _le;
+
+  static void _retenir(Position position) {
+    _derniere = position;
+    _le = DateTime.now();
+  }
+
+  /// La position obtenue il y a moins de dix minutes, sans attendre.
+  ///
+  /// Un fix GPS prend plusieurs secondes ; le client qui demande un livreur
+  /// n'a pas bougé depuis l'ouverture de l'application.
+  static Position? get recente {
+    final le = _le;
+    if (le == null || DateTime.now().difference(le).inMinutes >= 10) {
+      return null;
+    }
+    return _derniere;
+  }
+
+  /// À l'ouverture de l'application : prend la position en arrière-plan,
+  /// SANS demander l'autorisation (aucune fenêtre au démarrage). Si elle est
+  /// déjà accordée, la carte livreur et le panier l'ont tout de suite.
+  static void prechauffer() => unawaited(current());
 }

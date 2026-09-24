@@ -129,7 +129,7 @@ describe('Flux de commande — panier et passage de commande', () => {
     });
 
     expect(error).not.toBeNull();
-    expect(error?.message).toContain('autre boutique');
+    expect(error?.message).toContain('une boutique à la fois');
   });
 
   it('deux ajouts identiques incrémentent la même ligne', async () => {

@@ -172,9 +172,6 @@ class _ProductScreenState extends State<ProductScreen> {
     if (!mounted) return;
     setState(() => _adding = false);
     if (response.ok) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Ajouté à votre panier')));
       if (widget.embedded) {
         widget.onAdded?.call();
       } else {
@@ -228,58 +225,111 @@ class _ProductScreenState extends State<ProductScreen> {
                 Text(_error ?? 'Produit indisponible.'),
                 TextButton(onPressed: _load, child: const Text('Réessayer')),
               ],
-              if (photo.isNotEmpty) ...[
-                Semantics(
-                  button: true,
-                  label: 'Agrandir la photo',
-                  child: InkWell(
-                    onTap: () => _showPhoto(photo),
-                    borderRadius: BorderRadius.circular(24),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(24),
-                      child: CatalogImage(
-                        photo,
-                        height: (MediaQuery.sizeOf(context).width - 40).clamp(
-                          180,
-                          widget.embedded ? 240 : 420,
+              if (widget.embedded) ...[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (photo.isNotEmpty) ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: CatalogImage(
+                          photo,
+                          width: 86,
+                          height: 86,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                         ),
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                      const SizedBox(width: 16),
+                    ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          if ((product['merchant_name'] as String?)
+                                  ?.isNotEmpty ==
+                              true)
+                            Text(
+                              product['merchant_name'] as String,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: TovoTheme.inkDoux,
+                              ),
+                            ),
+                          const SizedBox(height: 8),
+                          Text(
+                            Money.format(_unitPrice * _quantity),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ] else ...[
+                if (photo.isNotEmpty) ...[
+                  Semantics(
+                    button: true,
+                    label: 'Agrandir la photo',
+                    child: InkWell(
+                      onTap: () => _showPhoto(photo),
+                      borderRadius: BorderRadius.circular(24),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(24),
+                        child: CatalogImage(
+                          photo,
+                          height: (MediaQuery.sizeOf(context).width - 40).clamp(
+                            180,
+                            widget.embedded ? 240 : 420,
+                          ),
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 24),
-              ],
-              Text(
-                name,
-                style: const TextStyle(
-                  fontSize: 28,
-                  height: 1.12,
-                  letterSpacing: -0.9,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              if ((product['merchant_name'] as String?)?.isNotEmpty ==
-                  true) ...[
-                const SizedBox(height: 6),
+                  const SizedBox(height: 24),
+                ],
                 Text(
-                  product['merchant_name'] as String,
+                  name,
                   style: const TextStyle(
-                    fontSize: 13,
-                    color: TovoTheme.inkDoux,
+                    fontSize: 28,
+                    height: 1.12,
+                    letterSpacing: -0.9,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if ((product['merchant_name'] as String?)?.isNotEmpty ==
+                    true) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    product['merchant_name'] as String,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: TovoTheme.inkDoux,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Text(
+                  Money.format(_unitPrice * _quantity),
+                  style: const TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
-              const SizedBox(height: 12),
-              Text(
-                Money.format(_unitPrice * _quantity),
-                style: const TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
               if (description.isNotEmpty &&
                   description.trim().toLowerCase() !=
                       name.trim().toLowerCase()) ...[
@@ -301,36 +351,30 @@ class _ProductScreenState extends State<ProductScreen> {
             ],
           );
     if (widget.embedded) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: ColoredBox(
-          color: Colors.white,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 16, 0),
-                child: Row(
-                  children: [
-                    IconButton(
-                      tooltip: 'Fermer la fiche',
-                      onPressed: _adding ? null : widget.onClose,
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                    Expanded(
-                      child: Text(
-                        product['merchant_name'] as String? ?? 'Le produit',
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ],
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 16, 0),
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: 'Fermer la fiche',
+                  onPressed: _adding ? null : widget.onClose,
+                  icon: const Icon(Icons.close_rounded),
                 ),
-              ),
-              body,
-              if (_component != null) _footer(),
-            ],
+                Expanded(
+                  child: Text(
+                    product['merchant_name'] as String? ?? 'Le produit',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
+          body,
+          if (_component != null) _footer(),
+        ],
       );
     }
     return PopScope(

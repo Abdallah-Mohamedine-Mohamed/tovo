@@ -33,66 +33,68 @@ class AssistantActivityDock extends StatelessWidget {
     return SafeArea(
       top: false,
       minimum: const EdgeInsets.fromLTRB(18, 12, 18, 18),
-      child: Row(
-        children: [
-          if (onCancel != null)
-            ConversationControl(
-              symbol: ConversationSymbol.close,
-              label: listening
-                  ? 'Annuler le vocal'
-                  : 'Annuler la transcription',
-              onPressed: onCancel,
-            )
-          else
-            const SizedBox(width: 44),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Center(
-              child: ConversationSurface(
-                child: Padding(
-                  padding: const EdgeInsets.all(3.5),
-                  child: Material(
-                    color: const Color(0xFF1B1921),
-                    borderRadius: BorderRadius.circular(30),
-                    child: Semantics(
-                      button: onPrimary != null,
-                      liveRegion: true,
-                      child: Tooltip(
-                        message: listening
-                            ? 'Arrêter et transcrire'
-                            : (label ?? _defaultLabel),
-                        child: InkWell(
-                          onTap: onPrimary,
-                          borderRadius: BorderRadius.circular(30),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (listening)
-                                  const Icon(
-                                    Icons.stop_circle_outlined,
+      child: _barre(listening),
+    );
+  }
+
+  Widget _barre(bool listening) {
+    return Row(
+      children: [
+        if (onCancel != null)
+          ConversationControl(
+            symbol: ConversationSymbol.close,
+            label: listening ? 'Annuler le vocal' : 'Annuler la transcription',
+            onPressed: onCancel,
+          )
+        else
+          const SizedBox(width: 44),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Center(
+            child: ConversationSurface(
+              child: Padding(
+                padding: const EdgeInsets.all(3.5),
+                child: Material(
+                  color: const Color(0xFF1B1921),
+                  borderRadius: BorderRadius.circular(30),
+                  child: Semantics(
+                    button: onPrimary != null,
+                    liveRegion: true,
+                    child: Tooltip(
+                      message: listening
+                          ? 'Arrêter et transcrire'
+                          : (label ?? _defaultLabel),
+                      child: InkWell(
+                        onTap: onPrimary,
+                        borderRadius: BorderRadius.circular(30),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (listening)
+                                const Icon(
+                                  Icons.stop_circle_outlined,
+                                  color: Colors.white,
+                                  size: 22,
+                                )
+                              else
+                                const _ActivityWave(),
+                              const SizedBox(width: 10),
+                              Flexible(
+                                child: Text(
+                                  label ?? _defaultLabel,
+                                  style: const TextStyle(
                                     color: Colors.white,
-                                    size: 22,
-                                  )
-                                else
-                                  const _ActivityWave(),
-                                const SizedBox(width: 10),
-                                Flexible(
-                                  child: Text(
-                                    label ?? _defaultLabel,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -102,9 +104,9 @@ class AssistantActivityDock extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 56),
-        ],
-      ),
+        ),
+        const SizedBox(width: 56),
+      ],
     );
   }
 }

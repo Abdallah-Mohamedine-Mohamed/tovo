@@ -46,7 +46,24 @@ class _CourierFormState extends State<CourierForm> {
       _destination.text.isNotEmpty || _destinataire.text.isNotEmpty;
   String _paiement = 'cash';
   bool _localisation = false;
-  bool _envoye = false;
+  late bool _envoye = widget.component.data['utilise'] == true;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_envoye || (_lat != null && _lng != null)) return;
+    // Le client a demandé un livreur : chercher sa position est la suite
+    // logique, pas un geste de plus à lui demander. Déjà connue depuis
+    // l'ouverture de l'app, elle est là tout de suite.
+    final recente = TovoLocation.recente;
+    if (recente != null) {
+      _lat = recente.latitude;
+      _lng = recente.longitude;
+    } else {
+      _localisation = true;
+      _prendreMaPosition(discret: true);
+    }
+  }
 
   @override
   void dispose() {
@@ -56,8 +73,10 @@ class _CourierFormState extends State<CourierForm> {
     super.dispose();
   }
 
-  Future<void> _prendreMaPosition() async {
-    setState(() => _localisation = true);
+  /// [discret] : lancée d'office à l'ouverture ; en cas d'échec, le bouton
+  /// « Ma position » reste là, sans message qui surgit.
+  Future<void> _prendreMaPosition({bool discret = false}) async {
+    if (!_localisation) setState(() => _localisation = true);
     final position = await TovoLocation.current(requestPermission: true);
     if (!mounted) return;
     setState(() {
@@ -67,7 +86,7 @@ class _CourierFormState extends State<CourierForm> {
         _lng = position.longitude;
       }
     });
-    if (position == null) {
+    if (position == null && !discret) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -99,6 +118,39 @@ class _CourierFormState extends State<CourierForm> {
     );
   }
 
+  /// Après la demande : une ligne, plus de bouton. Le suivi, juste en
+  /// dessous dans la conversation, prend le relais.
+  Widget _demande(int minutes) => Container(
+    decoration: BoxDecoration(
+      color: TovoTheme.bloc,
+      borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
+    ),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    child: Row(
+      children: [
+        const Icon(Icons.check_circle, size: 20, color: TovoTheme.teal),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text.rich(
+            TextSpan(
+              children: [
+                const TextSpan(
+                  text: 'Livreur demandé',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                TextSpan(
+                  text: ' · il vous appelle dans les $minutes minutes',
+                  style: const TextStyle(color: TovoTheme.muted),
+                ),
+              ],
+            ),
+            style: const TextStyle(fontSize: 13.5),
+          ),
+        ),
+      ],
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final estimation = widget.component.map('estimate');
@@ -109,6 +161,10 @@ class _CourierFormState extends State<CourierForm> {
         (widget.component.data['callback_minutes'] as num?)?.toInt() ?? 7;
     final mobileMoney = widget.component.data['mobile_money'] == true;
     final positionConnue = _lat != null && _lng != null;
+
+    if (_envoye || widget.component.data['utilise'] == true) {
+      return _demande(minutes);
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -157,7 +213,7 @@ class _CourierFormState extends State<CourierForm> {
               ),
               if (!positionConnue)
                 TextButton(
-                  onPressed: _localisation ? null : _prendreMaPosition,
+                  onPressed: _localisation ? null : () => _prendreMaPosition(),
                   child: Text(_localisation ? 'Recherche…' : 'Ma position'),
                 ),
             ],

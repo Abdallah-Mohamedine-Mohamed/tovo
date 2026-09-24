@@ -148,6 +148,15 @@ void main() {
     }
   }
 
+  Future<void> montrerBouton(WidgetTester tester, String label) async {
+    await tester.scrollUntilVisible(
+      find.text(label),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pump();
+  }
+
   testWidgets(
     'panier visible immédiatement mais commande bloquée jusqu’à vérification',
     (tester) async {
@@ -159,10 +168,11 @@ void main() {
       await open(tester, initialCart: preview, settle: false);
       expect(find.text('Tacos aux boulettes'), findsOneWidget);
       expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      await montrerBouton(tester, 'Voir le total avec livraison');
       expect(
         tester
             .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Choisir la livraison'),
+              find.widgetWithText(FilledButton, 'Voir le total avec livraison'),
             )
             .onPressed,
         isNull,
@@ -170,11 +180,12 @@ void main() {
 
       pendingCart!.complete(cart());
       await tester.pumpAndSettle();
+      await montrerBouton(tester, 'Voir le total avec livraison');
       expect(find.byType(LinearProgressIndicator), findsNothing);
       expect(
         tester
             .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Choisir la livraison'),
+              find.widgetWithText(FilledButton, 'Voir le total avec livraison'),
             )
             .onPressed,
         isNotNull,
@@ -183,28 +194,40 @@ void main() {
   );
 
   testWidgets(
-    'livraison, récapitulatif et confirmation restent dans le panier',
+    'adresse, prix vérifié et confirmation restent dans un seul flux',
     (tester) async {
       await open(tester);
-      await tester.tap(find.text('Choisir la livraison'));
-      await tester.pumpAndSettle();
-      expect(find.text('Où livrer ?'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Livrer à'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text('Livrer à'), findsOneWidget);
       expect(find.text('Maison'), findsOneWidget);
       expect(
         requests.where((request) => request.url.path == '/orders'),
         isEmpty,
       );
 
-      await tester.tap(find.text('Voir le récapitulatif'));
+      await tester.scrollUntilVisible(
+        find.text('Voir le total avec livraison'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('Voir le total avec livraison'));
       await tester.pumpAndSettle();
-      expect(find.text('Tout est prêt.'), findsOneWidget);
+      expect(find.text('Total avant confirmation'), findsOneWidget);
       expect(find.text(Money.format(600)), findsOneWidget);
-      expect(find.text('Yantala, maison bleue'), findsOneWidget);
       expect(
         requests.where((request) => request.url.path == '/orders'),
         isEmpty,
       );
 
+      await tester.scrollUntilVisible(
+        find.text('Confirmer la commande'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(find.text('Confirmer la commande'));
       await tester.pumpAndSettle();
       final orders = requests
@@ -220,6 +243,12 @@ void main() {
     'quantité et prix serveur, livraison jamais présentée comme gratuite',
     (tester) async {
       await open(tester, scale: 1.4);
+      // En grande police, le total est sous la ligne de flottaison.
+      await tester.scrollUntilVisible(
+        find.text('À calculer'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('À calculer'), findsOneWidget);
       expect(find.text(Money.format(0)), findsNothing);
       await tester.ensureVisible(
@@ -228,7 +257,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.byTooltip('Ajouter un Tacos aux boulettes'));
       await tester.pumpAndSettle();
-      expect(find.text(Money.format(6200)), findsNWidgets(3));
+      expect(find.text(Money.format(6200)), findsNWidgets(2));
       expect(tester.takeException(), isNull);
     },
   );
@@ -240,7 +269,7 @@ void main() {
     await tester.tap(find.byTooltip('Retirer Tacos aux boulettes'));
     await tester.pumpAndSettle();
     expect(find.text('Votre panier est encore vide.'), findsOneWidget);
-    expect(find.text('Choisir la livraison'), findsNothing);
+    expect(find.text('Voir le total avec livraison'), findsNothing);
   });
 
   testWidgets('boutique fermée : livraison bloquée avec raison lisible', (
@@ -249,17 +278,18 @@ void main() {
     blocked = true;
     await open(tester);
     expect(find.text('La boutique est fermée'), findsOneWidget);
+    await montrerBouton(tester, 'Voir le total avec livraison');
     expect(
       tester
           .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Choisir la livraison'),
+            find.widgetWithText(FilledButton, 'Voir le total avec livraison'),
           )
           .onPressed,
       isNull,
     );
   });
 
-  testWidgets('échec conserve le panier et réessayer recharge les vrais prix', (
+  testWidgets('échec : le panier serveur reste utilisable, pas de cul-de-sac', (
     tester,
   ) async {
     await open(tester);
@@ -267,18 +297,29 @@ void main() {
     await tester.tap(find.byTooltip('Ajouter un Tacos aux boulettes'));
     await tester.pumpAndSettle();
     expect(find.text('Hors ligne'), findsOneWidget);
+    // Le panier affiché est le dernier validé par le serveur (quantité 1) :
+    // on peut continuer, le serveur revérifie tout à la commande.
     expect(quantity, 1);
+    await montrerBouton(tester, 'Voir le total avec livraison');
     expect(
       tester
           .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Choisir la livraison'),
+            find.widgetWithText(FilledButton, 'Voir le total avec livraison'),
           )
           .onPressed,
-      isNull,
+      isNotNull,
     );
+    // Rien à « réessayer » : le panier est là. Un nouvel appui suffit.
+    expect(find.text('Réessayer'), findsNothing);
     failure = false;
-    await tester.tap(find.text('Réessayer'));
+    await tester.ensureVisible(
+      find.byTooltip('Ajouter un Tacos aux boulettes'),
+    );
+    await tester.drag(find.byType(ListView), const Offset(0, 180));
     await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Ajouter un Tacos aux boulettes'));
+    await tester.pumpAndSettle();
+    expect(quantity, 2);
     expect(find.text('Hors ligne'), findsNothing);
   });
 
@@ -298,6 +339,6 @@ void main() {
     quantity = 2;
     pending!.complete(cart());
     await tester.pumpAndSettle();
-    expect(find.text(Money.format(6200)), findsNWidgets(3));
+    expect(find.text(Money.format(6200)), findsNWidgets(2));
   });
 }
