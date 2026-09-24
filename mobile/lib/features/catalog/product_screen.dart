@@ -230,14 +230,25 @@ class _ProductScreenState extends State<ProductScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (photo.isNotEmpty) ...[
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: CatalogImage(
-                          photo,
-                          width: 86,
-                          height: 86,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      // Petite dans le panneau, mais on doit pouvoir la voir
+                      // en grand : c'est souvent elle qui décide l'achat.
+                      Semantics(
+                        button: true,
+                        label: 'Agrandir la photo',
+                        child: InkWell(
+                          onTap: () => _showPhoto(photo),
+                          borderRadius: BorderRadius.circular(14),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: CatalogImage(
+                              photo,
+                              width: 86,
+                              height: 86,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) =>
+                                  const SizedBox.shrink(),
+                            ),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 16),

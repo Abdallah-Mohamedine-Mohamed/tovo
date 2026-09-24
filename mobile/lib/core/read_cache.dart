@@ -33,6 +33,9 @@ class TovoReadCache {
       path == '/categories' ||
       path == '/catalog/products' ||
       path == '/conversations' ||
+      // Les adresses du client : le panier s'ouvre sur l'adresse habituelle
+      // sans attendre le réseau (elles changent rarement, et sont relues).
+      path == '/addresses' ||
       path.startsWith('/conversations/') ||
       path.startsWith('/products/') ||
       RegExp(r'^/categories/[^/]+/merchants$').hasMatch(path);

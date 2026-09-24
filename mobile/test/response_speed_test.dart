@@ -506,11 +506,15 @@ void main() {
   });
 
   testWidgets(
-    'la fiche produit se déploie dans la discussion sans changer d’écran',
+    'la fiche produit s’ouvre sur la discussion, et l’ajout se fait sans bruit',
     (tester) async {
+      var ajouts = 0;
       final api = TovoApi(
         tokenProvider: () => null,
         client: MockClient((request) async {
+          if (request.url.path == '/cart/items' && request.method == 'POST') {
+            ajouts++;
+          }
           if (request.url.path == '/chat') {
             return jsonResponse({
               'content': 'Voici un plat.',
@@ -574,9 +578,13 @@ void main() {
       await tester.ensureVisible(find.text('Ajouter au panier'));
       await tester.pump();
       await tester.tap(find.text('Ajouter au panier'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('Voir mon panier'), findsOneWidget);
+      await tester.pumpAndSettle();
+      // Ajouté, et le panneau se referme : pas de bandeau « Ajouté au
+      // panier » ni de « Voir mon panier », jugés bruyants par le client.
+      expect(ajouts, 1);
+      expect(find.byType(ProductScreen), findsNothing);
+      expect(find.byType(ChatScreen), findsOneWidget);
+      expect(find.text('Voir mon panier'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },

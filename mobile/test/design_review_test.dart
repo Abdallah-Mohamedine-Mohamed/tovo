@@ -459,7 +459,9 @@ void main() {
   visualTest('boutique : vrais produits, catégories et panier', (tester) async {
     await open(tester, CatalogScreen(api: api, merchantId: 'garba'));
     expect(find.text('GARBA D\'OR'), findsOneWidget);
-    expect(find.text('Voir mon panier'), findsOneWidget);
+    // Le panier : une icône discrète en haut, plus de grand bandeau en bas.
+    expect(find.byTooltip('Panier'), findsOneWidget);
+    expect(find.text('Voir mon panier'), findsNothing);
     await capture(tester, '03-boutique');
     await tester.tap(find.byTooltip('Toutes les catégories'));
     await tester.pumpAndSettle();
@@ -482,12 +484,19 @@ void main() {
     expect(find.byType(ProductScreen), findsOneWidget);
     expect(find.text('Ajouter au panier').hitTestable(), findsOneWidget);
     await capture(tester, '05-produit');
-    await tester.tap(find.bySemanticsLabel('Agrandir la photo'));
+    // Dans le panneau, la photo est une vignette, toujours agrandissable.
+    await tester.tap(
+      find.byWidgetPredicate(
+        (w) => w is Semantics && w.properties.label == 'Agrandir la photo',
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.byType(InteractiveViewer), findsOneWidget);
     await tester.tap(find.byTooltip('Fermer la photo'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Retour à la carte'));
+    // La fiche est un panneau posé sur la carte : on le ferme, la carte
+    // n'a jamais été quittée.
+    await tester.tap(find.byTooltip('Fermer la fiche'));
     await tester.pumpAndSettle();
     expect(find.text('6 produits'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -498,30 +507,40 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Mon panier'));
     await tester.pumpAndSettle();
-    await tester.runAsync(
-      () async => Future<void>.delayed(const Duration(milliseconds: 300)),
-    );
-    await tester.pumpAndSettle();
+    // Panier et devis sont de vraies requêtes (simulées) : on leur laisse
+    // le temps. Aucun geste n'est demandé au client pour avoir le total.
+    for (var i = 0; i < 3; i++) {
+      await tester.runAsync(
+        () async => Future<void>.delayed(const Duration(milliseconds: 150)),
+      );
+      await tester.pumpAndSettle();
+    }
     await capture(tester, '06-panier');
-    await tester.tap(find.text('Choisir la livraison'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Maison'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Voir le récapitulatif'));
-    await tester.pumpAndSettle();
   }
 
-  visualTest('panier : les frais sont confirmés avant toute commande', (
+  /// Le bouton de commande : le seul de l'écran, toujours visible.
+  Finder boutonCommander() => find.descendant(
+    of: find.byType(CartScreen),
+    matching: find.byType(FilledButton),
+  );
+
+  visualTest('panier : le total est connu avant la commande, en un geste', (
     tester,
   ) async {
     conversation = true;
     await open(tester, ChatScreen(api: api));
     await checkout(tester);
+    // Le total est sur le bouton ET dans le récapitulatif.
+    expect(find.text('Commander · ${Money.format(7500)}'), findsOneWidget);
     expect(find.text(Money.format(7500)), findsOneWidget);
     expect(find.text('Bobiel, porte bleue'), findsOneWidget);
     expect(orderPosts, 0);
     await capture(tester, '07-confirmation');
-    await tester.tap(find.text('Confirmer la commande'));
+    await tester.tap(boutonCommander());
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () async => Future<void>.delayed(const Duration(milliseconds: 150)),
+    );
     await tester.pumpAndSettle();
     expect(orderPosts, 1);
     expect(orderBody['payment_method'], 'cash');
@@ -532,18 +551,21 @@ void main() {
     quoteFails = true;
     await open(tester, ChatScreen(api: api));
     await checkout(tester);
-    expect(find.text('Confirmer la commande'), findsNothing);
+    expect(find.textContaining('Commander'), findsNothing);
     expect(orderPosts, 0);
     expect(find.text('Impossible de calculer la livraison'), findsOneWidget);
   });
 
-  visualTest('confirmation annulée : aucune commande ne part', (tester) async {
+  visualTest('le client repart sans commander : rien ne part', (tester) async {
     await open(tester, ChatScreen(api: api));
     await checkout(tester);
-    await tester.tap(find.byTooltip('Retour à la livraison'));
+    // Le total est affiché, le client change d'avis et repart : rien ne
+    // part tant qu'il n'a pas appuyé sur « Commander ».
+    expect(find.textContaining('Commander ·'), findsOneWidget);
+    await tester.tap(find.byTooltip('Retour aux produits'));
     await tester.pumpAndSettle();
     expect(orderPosts, 0);
-    expect(find.text('Confirmer la commande'), findsNothing);
+    expect(find.byType(CartScreen), findsNothing);
   });
 
   visualTest('planche du parcours enseigne, produit et panier', (tester) async {

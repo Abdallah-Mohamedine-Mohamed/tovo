@@ -23,12 +23,15 @@ void main() {
   var quantity = 1;
   var blocked = false;
   var failure = false;
-  Completer<http.Response>? pending;
-  Completer<http.Response>? pendingCart;
+  var quoteFails = false;
+  Completer<http.Response>? pendingPatch;
+  Completer<http.Response>? pendingQuote;
   final requests = <http.Request>[];
   late TovoApi api;
 
-  http.Response cart() => http.Response(
+  /// Le panier tel que le serveur le renvoie ; avec une position, il porte
+  /// les frais de livraison (600 F), comme le vrai.
+  http.Response cart({bool devis = false}) => http.Response(
     jsonEncode({
       'components': quantity == 0
           ? []
@@ -47,8 +50,8 @@ void main() {
                     },
                   ],
                   'items_total': quantity * 3100,
-                  'delivery_fee': 0,
-                  'total': quantity * 3100,
+                  'delivery_fee': devis ? 600 : 0,
+                  'total': quantity * 3100 + (devis ? 600 : 0),
                   'can_checkout': !blocked,
                   'blocked_reason': blocked ? 'La boutique est fermée' : null,
                 },
@@ -63,8 +66,9 @@ void main() {
     quantity = 1;
     blocked = false;
     failure = false;
-    pending = null;
-    pendingCart = null;
+    quoteFails = false;
+    pendingPatch = null;
+    pendingQuote = null;
     requests.clear();
     api = TovoApi(
       tokenProvider: () => null,
@@ -96,22 +100,20 @@ void main() {
         }
         if (request.url.path == '/cart' &&
             request.url.queryParameters.containsKey('lat')) {
-          final data = jsonDecode(cart().body) as Map<String, dynamic>;
-          final summary =
-              (data['components'] as List).first['data']
-                  as Map<String, dynamic>;
-          summary['delivery_fee'] = 600;
-          summary['total'] = quantity * 3100 + 600;
-          return http.Response(jsonEncode(data), 200);
-        }
-        if (request.url.path == '/cart' &&
-            request.method == 'GET' &&
-            pendingCart != null) {
-          return pendingCart!.future;
+          if (pendingQuote != null) return pendingQuote!.future;
+          if (quoteFails) {
+            return http.Response(
+              '{"error":"Impossible de calculer la livraison"}',
+              503,
+            );
+          }
+          return cart(devis: true);
         }
         if (request.method == 'PATCH') {
-          if (pending != null) return pending!.future;
-          quantity = jsonDecode(request.body)['quantity'] as int;
+          if (pendingPatch != null) return pendingPatch!.future;
+          final corps = jsonDecode(request.body) as Map<String, dynamic>;
+          quantity = corps['quantity'] as int;
+          return cart(devis: corps.containsKey('lat'));
         }
         if (request.method == 'DELETE') quantity = 0;
         return cart();
@@ -148,116 +150,119 @@ void main() {
     }
   }
 
-  Future<void> montrerBouton(WidgetTester tester, String label) async {
-    await tester.scrollUntilVisible(
-      find.text(label),
-      200,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pump();
-  }
+  FilledButton bouton(WidgetTester tester) =>
+      tester.widget<FilledButton>(find.byType(FilledButton));
+
+  // Pendant le fondu d'un libellé à l'autre, l'ancien et le nouveau
+  // coexistent : le nouveau est le dernier.
+  String libelle(WidgetTester tester) =>
+      tester
+          .widget<Text>(
+            find
+                .descendant(
+                  of: find.byType(FilledButton),
+                  matching: find.byType(Text),
+                )
+                .last,
+          )
+          .data ??
+      '';
+
+  TovoComponent apercu() => TovoComponent.fromJson(
+    (jsonDecode(cart().body) as Map<String, dynamic>)['components'][0]
+        as Map<String, dynamic>,
+  );
 
   testWidgets(
-    'panier visible immédiatement mais commande bloquée jusqu’à vérification',
+    'le panier de la discussion s’affiche aussitôt ; on ne commande qu’une fois le total connu',
     (tester) async {
-      pendingCart = Completer<http.Response>();
-      final preview = TovoComponent.fromJson(
-        (jsonDecode(cart().body) as Map<String, dynamic>)['components'][0]
-            as Map<String, dynamic>,
-      );
-      await open(tester, initialCart: preview, settle: false);
+      pendingQuote = Completer<http.Response>();
+      await open(tester, initialCart: apercu(), settle: false);
+      await tester.pump();
+      // Rien à attendre pour VOIR : les articles sont là tout de suite.
       expect(find.text('Tacos aux boulettes'), findsOneWidget);
-      expect(find.byType(LinearProgressIndicator), findsOneWidget);
-      await montrerBouton(tester, 'Voir le total avec livraison');
-      expect(
-        tester
-            .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Voir le total avec livraison'),
-            )
-            .onPressed,
-        isNull,
-      );
+      expect(find.text('Yantala, maison bleue'), findsOneWidget);
+      // Le total se calcule : le bouton le dit, sans « 0 F » trompeur.
+      expect(libelle(tester), 'Calcul du total…');
+      expect(bouton(tester).onPressed, isNull);
+      expect(find.text(Money.format(0)), findsNothing);
 
-      pendingCart!.complete(cart());
+      pendingQuote!.complete(cart(devis: true));
       await tester.pumpAndSettle();
-      await montrerBouton(tester, 'Voir le total avec livraison');
-      expect(find.byType(LinearProgressIndicator), findsNothing);
-      expect(
-        tester
-            .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Voir le total avec livraison'),
-            )
-            .onPressed,
-        isNotNull,
-      );
+      expect(libelle(tester), 'Commander · ${Money.format(3700)}');
+      expect(bouton(tester).onPressed, isNotNull);
     },
   );
 
   testWidgets(
-    'adresse, prix vérifié et confirmation restent dans un seul flux',
+    'un seul geste : le prix est sur le bouton, la commande part',
     (tester) async {
       await open(tester);
-      await tester.scrollUntilVisible(
-        find.text('Livrer à'),
-        200,
-        scrollable: find.byType(Scrollable).first,
-      );
-      expect(find.text('Livrer à'), findsOneWidget);
-      expect(find.text('Maison'), findsOneWidget);
+      // Un seul devis : panier ET livraison dans la même requête.
       expect(
-        requests.where((request) => request.url.path == '/orders'),
-        isEmpty,
+        requests.where(
+          (r) => r.url.path == '/cart' && r.url.queryParameters['lat'] != null,
+        ),
+        hasLength(1),
       );
-
-      await tester.scrollUntilVisible(
-        find.text('Voir le total avec livraison'),
-        200,
-        scrollable: find.byType(Scrollable).first,
-      );
-      await tester.tap(find.text('Voir le total avec livraison'));
-      await tester.pumpAndSettle();
-      expect(find.text('Total avant confirmation'), findsOneWidget);
       expect(find.text(Money.format(600)), findsOneWidget);
-      expect(
-        requests.where((request) => request.url.path == '/orders'),
-        isEmpty,
-      );
+      expect(libelle(tester), 'Commander · ${Money.format(3700)}');
+      expect(requests.where((r) => r.url.path == '/orders'), isEmpty);
 
-      await tester.scrollUntilVisible(
-        find.text('Confirmer la commande'),
-        200,
-        scrollable: find.byType(Scrollable).first,
-      );
-      await tester.tap(find.text('Confirmer la commande'));
+      await tester.tap(find.byType(FilledButton));
       await tester.pumpAndSettle();
-      final orders = requests
-          .where((request) => request.url.path == '/orders')
+      final commandes = requests
+          .where((r) => r.url.path == '/orders')
           .toList();
-      expect(orders, hasLength(1));
-      final body = jsonDecode(orders.single.body) as Map<String, dynamic>;
-      expect(body['dropoff_hint'], 'Yantala, maison bleue');
-      expect(body['payment_method'], 'cash');
+      expect(commandes, hasLength(1));
+      final corps = jsonDecode(commandes.single.body) as Map<String, dynamic>;
+      expect(corps['dropoff_hint'], 'Yantala, maison bleue');
+      expect(corps['payment_method'], 'cash');
     },
   );
+
+  testWidgets('le paiement se choisit d’un geste, sans liste à cocher', (
+    tester,
+  ) async {
+    await open(tester);
+    await tester.tap(find.text('Nita'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    final corps =
+        jsonDecode(
+              requests.singleWhere((r) => r.url.path == '/orders').body,
+            )
+            as Map<String, dynamic>;
+    expect(corps['payment_method'], 'mobile_money');
+  });
+
   testWidgets(
-    'quantité et prix serveur, livraison jamais présentée comme gratuite',
+    'la quantité change aussitôt, et la livraison est recalculée avec',
     (tester) async {
       await open(tester, scale: 1.4);
-      // En grande police, le total est sous la ligne de flottaison.
-      await tester.scrollUntilVisible(
-        find.text('À calculer'),
-        200,
-        scrollable: find.byType(Scrollable).first,
-      );
-      expect(find.text('À calculer'), findsOneWidget);
-      expect(find.text(Money.format(0)), findsNothing);
-      await tester.ensureVisible(
-        find.byTooltip('Ajouter un Tacos aux boulettes'),
-      );
-      await tester.pump();
+      pendingPatch = Completer<http.Response>();
       await tester.tap(find.byTooltip('Ajouter un Tacos aux boulettes'));
+      await tester.pump();
+      // Affiché sans attendre le serveur…
+      expect(find.text('2'), findsOneWidget);
+      expect(find.text(Money.format(6200)), findsWidgets);
+      // … et un second appui pendant l'envoi ne crée pas de doublon.
+      await tester.tap(
+        find.byTooltip('Ajouter un Tacos aux boulettes'),
+        warnIfMissed: false,
+      );
+      final envois = requests.where((r) => r.method == 'PATCH').toList();
+      expect(envois, hasLength(1));
+      // La position part avec la quantité : un seul aller-retour.
+      expect(
+        (jsonDecode(envois.single.body) as Map<String, dynamic>)['lat'],
+        13.5,
+      );
+      quantity = 2;
+      pendingPatch!.complete(cart(devis: true));
       await tester.pumpAndSettle();
-      expect(find.text(Money.format(6200)), findsNWidgets(2));
+      expect(libelle(tester), 'Commander · ${Money.format(6800)}');
       expect(tester.takeException(), isNull);
     },
   );
@@ -269,76 +274,64 @@ void main() {
     await tester.tap(find.byTooltip('Retirer Tacos aux boulettes'));
     await tester.pumpAndSettle();
     expect(find.text('Votre panier est encore vide.'), findsOneWidget);
-    expect(find.text('Voir le total avec livraison'), findsNothing);
+    expect(find.byType(FilledButton), findsNothing);
   });
 
-  testWidgets('boutique fermée : livraison bloquée avec raison lisible', (
+  testWidgets('boutique fermée : raison lisible au-dessus du bouton, bloqué', (
     tester,
   ) async {
     blocked = true;
     await open(tester);
     expect(find.text('La boutique est fermée'), findsOneWidget);
-    await montrerBouton(tester, 'Voir le total avec livraison');
-    expect(
-      tester
-          .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Voir le total avec livraison'),
-          )
-          .onPressed,
-      isNull,
-    );
+    expect(bouton(tester).onPressed, isNull);
   });
 
-  testWidgets('échec : le panier serveur reste utilisable, pas de cul-de-sac', (
+  testWidgets('échec d’une quantité : on revient au panier connu, sans impasse', (
     tester,
   ) async {
     await open(tester);
     failure = true;
     await tester.tap(find.byTooltip('Ajouter un Tacos aux boulettes'));
     await tester.pumpAndSettle();
+    // L'erreur s'affiche près des articles, et le panier redevient celui
+    // que le serveur connaît : quantité 1, toujours commandable.
     expect(find.text('Hors ligne'), findsOneWidget);
-    // Le panier affiché est le dernier validé par le serveur (quantité 1) :
-    // on peut continuer, le serveur revérifie tout à la commande.
-    expect(quantity, 1);
-    await montrerBouton(tester, 'Voir le total avec livraison');
-    expect(
-      tester
-          .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Voir le total avec livraison'),
-          )
-          .onPressed,
-      isNotNull,
-    );
-    // Rien à « réessayer » : le panier est là. Un nouvel appui suffit.
-    expect(find.text('Réessayer'), findsNothing);
+    expect(find.text('1'), findsOneWidget);
+    expect(bouton(tester).onPressed, isNotNull);
     failure = false;
-    await tester.ensureVisible(
-      find.byTooltip('Ajouter un Tacos aux boulettes'),
-    );
-    await tester.drag(find.byType(ListView), const Offset(0, 180));
-    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Ajouter un Tacos aux boulettes'));
     await tester.pumpAndSettle();
     expect(quantity, 2);
     expect(find.text('Hors ligne'), findsNothing);
   });
 
-  testWidgets('réseau lent : pas de doublon ni total optimiste', (
+  testWidgets('devis impossible : message au-dessus du bouton, qui réessaie', (
+    tester,
+  ) async {
+    quoteFails = true;
+    await open(tester, initialCart: apercu());
+    expect(find.text('Impossible de calculer la livraison'), findsOneWidget);
+    expect(libelle(tester), 'Réessayer');
+    expect(requests.where((r) => r.url.path == '/orders'), isEmpty);
+
+    quoteFails = false;
+    await tester.tap(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    expect(find.text('Impossible de calculer la livraison'), findsNothing);
+    expect(libelle(tester), 'Commander · ${Money.format(3700)}');
+  });
+
+  testWidgets('changer d’adresse : une feuille, un geste, le total suit', (
     tester,
   ) async {
     await open(tester);
-    pending = Completer<http.Response>();
-    await tester.tap(find.byTooltip('Ajouter un Tacos aux boulettes'));
-    await tester.pump();
-    await tester.tap(find.byTooltip('Ajouter un Tacos aux boulettes'));
-    expect(
-      requests.where((request) => request.method == 'PATCH'),
-      hasLength(1),
-    );
-    expect(find.text(Money.format(6200)), findsNothing);
-    quantity = 2;
-    pending!.complete(cart());
+    await tester.tap(find.text('Changer'));
     await tester.pumpAndSettle();
-    expect(find.text(Money.format(6200)), findsNWidgets(2));
+    expect(find.text('Où livrer ?'), findsOneWidget);
+    expect(find.text('Ma position actuelle'), findsOneWidget);
+    await tester.tap(find.text('Yantala, maison bleue').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Où livrer ?'), findsNothing);
+    expect(libelle(tester), 'Commander · ${Money.format(3700)}');
   });
 }
