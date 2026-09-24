@@ -182,6 +182,38 @@ workflows:
       # `xcode-project build-ipa` attend par défaut et qui manquait.
       - name: Appliquer la signature au projet
         script: |
+          # LE PROFIL DU WIDGET, À LA MAIN. `ios_signing` ne télécharge que
+          # le profil de l'identifiant EXACT (build du 24/09/2026 : un seul
+          # fichier installé, rien pour com.tovoapp.UserApp.TovoOrderWidget).
+          # On le récupère par son nom, via la même API que le numéro de
+          # build, et on l'installe là où `use-profiles` le cherchera.
+          PROFIL_WIDGET="Tovo Widget App Store"
+          app-store-connect profiles list --json > /tmp/profils.json
+          python3 - "$PROFIL_WIDGET" <<'PY'
+          import base64, json, os, sys
+          nom = sys.argv[1]
+          donnees = json.load(open('/tmp/profils.json'))
+          if isinstance(donnees, dict):
+              donnees = donnees.get('data', [])
+          def attr(p):
+              return p.get('attributes', p)
+          trouves = [p for p in donnees
+                     if attr(p).get('name') == nom and attr(p).get('profileState', 'ACTIVE') == 'ACTIVE']
+          if not trouves:
+              print(f"Profil « {nom} » introuvable ou inactif. Profils vus :", file=sys.stderr)
+              for p in donnees:
+                  a = attr(p)
+                  print(f"  - {a.get('name')} [{a.get('profileType')}, {a.get('profileState')}]", file=sys.stderr)
+              sys.exit(1)
+          a = attr(trouves[0])
+          dossier = os.path.expanduser('~/Library/MobileDevice/Provisioning Profiles')
+          os.makedirs(dossier, exist_ok=True)
+          chemin = os.path.join(dossier, f"{a['uuid']}.mobileprovision")
+          with open(chemin, 'wb') as f:
+              f.write(base64.b64decode(a['profileContent']))
+          print(f"Profil du widget installé : {nom} -> {chemin}")
+          PY
+
           xcode-project use-profiles --project ios/Runner.xcodeproj
 
           echo "===== profils trouvés ====="
