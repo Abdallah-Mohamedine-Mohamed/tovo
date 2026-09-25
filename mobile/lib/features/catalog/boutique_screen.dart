@@ -14,6 +14,7 @@ import '../../core/theme.dart';
 import 'cart_screen.dart';
 import 'catalog_screen.dart';
 import 'product_sheet.dart';
+import 'rayons_screen.dart';
 
 /// La page d'une boutique, inspirée de Glovo : sa photo, son logo, ce qu'il
 /// faut savoir en une ligne, puis TOUTE la carte, rayon après rayon.
@@ -529,63 +530,111 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
 
   String _nomRayon(int i) => enPhrase('${_rayons[i]['name'] ?? ''}');
 
-  /// Un rayon, EN ENTIER : son nom, puis tous ses produits, deux par ligne.
-  ///
-  /// Il n'en montrait que quatre, avec une flèche « Tout voir » : on croyait
-  /// que c'était toute la carte (retour du client, 25/09). Comme chez Glovo
-  /// ou Uber Eats, la page porte maintenant la carte entière ; la barre des
-  /// rayons, épinglée en haut, sert à y sauter. Plus de « 8 produits » ni de
-  /// flèche : le nom du rayon suffit.
+  /// Au-delà, la flèche mène à tout le rayon.
+  static const _apercu = 4;
+
+  /// Un rayon : son nom, puis ses 4 premiers produits EN LIGNE, qu'on fait
+  /// défiler du doigt ; au-delà de 4, une flèche ouvre tout le rayon — sur
+  /// un écran où l'on passe d'un rayon à l'autre en glissant (demande du
+  /// client, 25/09). La carte laisse deviner la suivante au bord droit :
+  /// on comprend qu'il y a de quoi faire défiler.
   Widget _rayon(int i) {
     final rayon = _rayons[i];
     final items = (rayon['items'] as List? ?? const [])
         .whereType<Map<String, dynamic>>()
         .toList();
+    final montres = items.take(_apercu).toList();
+    final plus = items.length > _apercu;
+    final largeur = (MediaQuery.sizeOf(context).width - 40 - 14) / 2 * 0.92;
     return Padding(
       key: _cle(i),
-      padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+      padding: const EdgeInsets.only(top: 28),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            _rayons.length == 1 ? 'La carte' : _nomRayon(i),
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.4,
-              color: TovoTheme.ink,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _rayons.length == 1 ? 'La carte' : _nomRayon(i),
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.4,
+                      color: TovoTheme.ink,
+                    ),
+                  ),
+                ),
+                if (plus)
+                  Semantics(
+                    button: true,
+                    label: 'Tout voir, ${_nomRayon(i)}',
+                    excludeSemantics: true,
+                    child: Material(
+                      color: const Color(0xFFF4F5F5),
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: () => _toutVoir(i),
+                        child: const SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: Icon(
+                            Icons.arrow_forward_rounded,
+                            size: 20,
+                            color: TovoTheme.ink,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
-          const SizedBox(height: 16),
-          for (var ligne = 0; ligne < items.length; ligne += 2)
-            Padding(
-              padding: EdgeInsets.only(top: ligne == 0 ? 0 : 22),
-              child: IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (var colonne = 0; colonne < 2; colonne++) ...[
-                      if (colonne == 1) const SizedBox(width: 14),
-                      Expanded(
-                        child: ligne + colonne < items.length
-                            ? ProductTile(
-                                data: items[ligne + colonne],
-                                afficherBoutique: false,
-                                onOpen: () =>
-                                    _ouvrirProduit(items[ligne + colonne]),
-                                onAdd: () =>
-                                    _ouvrirProduit(items[ligne + colonne]),
-                              )
-                            : const SizedBox.shrink(),
+          const SizedBox(height: 14),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var k = 0; k < montres.length; k++) ...[
+                    if (k > 0) const SizedBox(width: 14),
+                    SizedBox(
+                      width: largeur,
+                      child: ProductTile(
+                        data: montres[k],
+                        afficherBoutique: false,
+                        onOpen: () => _ouvrirProduit(montres[k]),
+                        onAdd: () => _ouvrirProduit(montres[k]),
                       ),
-                    ],
+                    ),
                   ],
-                ),
+                ],
               ),
             ),
+          ),
         ],
       ),
     );
+  }
+
+  /// Tout le rayon [i], et les autres à portée de glissement.
+  Future<void> _toutVoir(int i) async {
+    final commande = await Navigator.of(context).push<TovoResponse>(
+      MaterialPageRoute(
+        builder: (_) => RayonsScreen(
+          api: widget.api,
+          rayons: _rayons,
+          depart: i,
+          conversationId: widget.conversationId,
+        ),
+      ),
+    );
+    if (mounted && commande != null) Navigator.of(context).pop(commande);
   }
 
   Widget _echec() => Padding(

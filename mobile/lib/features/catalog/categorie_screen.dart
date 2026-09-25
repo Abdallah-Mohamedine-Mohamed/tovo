@@ -403,26 +403,15 @@ class _CategorieScreenState extends State<CategorieScreen> {
                 borderRadius: BorderRadius.circular(18),
                 child: AspectRatio(
                   aspectRatio: 16 / 8,
+                  // La photo seule, entière : le logo n'est plus posé dans
+                  // son coin (il la mangeait, et jurait avec elle — retour du
+                  // client, 25/09). Il passe à côté du nom, dessous.
                   child: couverture.isNotEmpty
-                      ? Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            CatalogImage(
-                              couverture,
-                              fit: BoxFit.cover,
-                              decodeWidth: 900,
-                              errorBuilder: (_, __, ___) => vide,
-                            ),
-                            // Le logo dans une encoche, coin bas droit :
-                            // un liseré blanc, couleur de la page, le
-                            // découpe dans la photo (croquis du client).
-                            if (logo.isNotEmpty)
-                              Positioned(
-                                right: 0,
-                                bottom: 0,
-                                child: _Encoche(logo: logo),
-                              ),
-                          ],
+                      ? CatalogImage(
+                          couverture,
+                          fit: BoxFit.cover,
+                          decodeWidth: 900,
+                          errorBuilder: (_, __, ___) => vide,
                         )
                       : logo.isNotEmpty
                       ? ColoredBox(
@@ -445,39 +434,58 @@ class _CategorieScreenState extends State<CategorieScreen> {
                       : vide,
                 ),
               ),
-              const SizedBox(height: 10),
-              Text(
-                enPhrase(b['name'] as String?),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontFamily: TovoTheme.policeNoms,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: TovoTheme.ink,
-                ),
-              ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 12),
               Row(
                 children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    margin: const EdgeInsets.only(right: 7),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: ouverte ? TovoTheme.success : TovoTheme.inkDoux,
-                    ),
-                  ),
+                  // Le logo seulement s'il y a une photo : sans photo, c'est
+                  // déjà lui qui occupe la place de la photo.
+                  if (logo.isNotEmpty && couverture.isNotEmpty) ...[
+                    _Logo(logo: logo),
+                    const SizedBox(width: 12),
+                  ],
                   Expanded(
-                    child: Text(
-                      infos.join('  ·  '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: TovoTheme.inkDoux,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          enPhrase(b['name'] as String?),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontFamily: TovoTheme.policeNoms,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: TovoTheme.ink,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Container(
+                              width: 6,
+                              height: 6,
+                              margin: const EdgeInsets.only(right: 7),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: ouverte
+                                    ? TovoTheme.success
+                                    : TovoTheme.inkDoux,
+                              ),
+                            ),
+                            Expanded(
+                              child: Text(
+                                infos.join('  ·  '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: TovoTheme.inkDoux,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -510,27 +518,28 @@ class _CategorieScreenState extends State<CategorieScreen> {
   );
 }
 
-/// Le logo d'une boutique logé dans le coin bas droit de sa photo. Ses
-/// bords droit et bas prolongent ceux de la carte (le coin arrondi de la
-/// carte le découpe) ; son coin haut gauche est simplement arrondi — pas de
-/// liseré blanc autour (demande du client, 25/09).
-class _Encoche extends StatelessWidget {
-  const _Encoche({required this.logo});
+/// Le logo d'une boutique, à côté de son nom : un petit carré arrondi, sur
+/// blanc, cerné d'un trait très fin pour qu'un logo blanc ne se perde pas.
+class _Logo extends StatelessWidget {
+  const _Logo({required this.logo});
 
   final String logo;
 
   @override
-  Widget build(BuildContext context) => ClipRRect(
-    borderRadius: const BorderRadius.only(topLeft: Radius.circular(14)),
-    child: SizedBox.square(
-      dimension: 58,
-      child: ColoredBox(
-        color: Colors.white,
-        child: CatalogImage(
-          logo,
-          fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-        ),
+  Widget build(BuildContext context) => Container(
+    width: 44,
+    height: 44,
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: const Color(0xFFE9EBEA)),
+    ),
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(11),
+      child: CatalogImage(
+        logo,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
       ),
     ),
   );

@@ -11,11 +11,12 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:tovo/core/api.dart';
 import 'package:tovo/core/catalog_image.dart';
+import 'package:tovo/core/noms.dart';
 import 'package:tovo/core/panier.dart';
 import 'package:tovo/components/widgets/product_carousel.dart';
 import 'package:tovo/core/theme.dart';
 import 'package:tovo/features/catalog/boutique_screen.dart';
-import 'package:tovo/features/catalog/catalog_screen.dart';
+import 'package:tovo/features/catalog/rayons_screen.dart';
 
 /// La page boutique, sur une vraie carte : Restaurant Albarka Food (base de
 /// dev, 24/09 — six de ses dix-neuf rayons, photos comprises).
@@ -200,30 +201,71 @@ void main() {
     await capturer(tester, '2-rayon');
   });
 
-  testVisuel('un gros rayon montre TOUS ses produits, sans flèche', (
-    tester,
-  ) async {
-    await ouvrir(tester);
-    final gros = (fixture['sections'] as List)
-        .cast<Map<String, dynamic>>()
-        .firstWhere((r) => (r['produits'] as num) > 6);
-    final items = (gros['items'] as List).cast<Map<String, dynamic>>();
-    // Plus de « Tout voir » ni de « N produits » : le nom du rayon suffit.
-    expect(find.bySemanticsLabel(RegExp('^Tout voir')), findsNothing);
-    expect(find.textContaining(RegExp(r'^\d+ produits?$')), findsNothing);
-    // Le DERNIER produit du rayon est sur la page, en faisant défiler.
-    final dernier = find.byWidgetPredicate(
-      (w) => w is ProductTile && w.data['id'] == items.last['id'],
-    );
-    await tester.scrollUntilVisible(
-      dernier,
-      400,
-      scrollable: find.byType(Scrollable).first,
-    );
-    expect(dernier, findsOneWidget);
-    expect(find.byType(CatalogScreen), findsNothing);
-    expect(tester.takeException(), isNull);
-  });
+  testVisuel(
+    'un gros rayon : 4 produits en ligne, la flèche ouvre tout, on glisse',
+    (tester) async {
+      await ouvrir(tester);
+      final rayons = (fixture['sections'] as List).cast<Map<String, dynamic>>();
+      final i = rayons.indexWhere((r) => (r['produits'] as num) > 4);
+      final gros = rayons[i];
+      final nom = '${gros['name']}';
+      // Le nom tel que la page l'écrit (en phrase).
+      final lisible = enPhrase(nom);
+      final items = (gros['items'] as List).cast<Map<String, dynamic>>();
+
+      // Le premier gros rayon est le premier de la page : sa flèche est la
+      // première. Elle est annoncée « Tout voir, <rayon> » aux lecteurs
+      // d'écran.
+      expect(i, 0);
+      expect(
+        // Le titre et la flèche forment une seule annonce : « <rayon>,
+        // Tout voir, <rayon> ».
+        find.bySemanticsLabel(RegExp('Tout voir, $lisible')),
+        findsOneWidget,
+      );
+      final bouton = find.byIcon(Icons.arrow_forward_rounded).first;
+      // Sur la page : les 4 premiers, pas le 5e.
+      bool tuile(Widget w, Object? id) =>
+          w is ProductTile && w.data['id'] == id;
+      expect(
+        find.byWidgetPredicate((w) => tuile(w, items[3]['id'])),
+        findsOneWidget,
+      );
+      expect(
+        find.byWidgetPredicate((w) => tuile(w, items[4]['id'])),
+        findsNothing,
+      );
+      await capturer(tester, '4-rayon-en-ligne');
+
+      // La flèche : tout le rayon, sur son onglet.
+      await tester.tap(bouton);
+      await tester.pumpAndSettle();
+      final ecran = tester.widget<RayonsScreen>(find.byType(RayonsScreen));
+      expect(ecran.depart, i);
+      expect(
+        find.byWidgetPredicate((w) => tuile(w, items[4]['id'])),
+        findsOneWidget,
+      );
+      await capturer(tester, '5-tout-le-rayon');
+
+      // Un glissement vers la gauche : le rayon suivant.
+      if (i + 1 < rayons.length) {
+        final suivant = (rayons[i + 1]['items'] as List)
+            .cast<Map<String, dynamic>>();
+        await tester.fling(
+          find.byType(TabBarView),
+          const Offset(-300, 0),
+          1000,
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.byWidgetPredicate((w) => tuile(w, suivant.first['id'])),
+          findsOneWidget,
+        );
+      }
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testVisuel('sans photo de couverture : pas de fausse image', (tester) async {
     sansCouverture = true;
