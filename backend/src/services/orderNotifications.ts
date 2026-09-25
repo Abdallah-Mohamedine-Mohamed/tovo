@@ -1,6 +1,7 @@
 import { serviceClient } from './supabase.js';
-import { sendPush, type PushMessage } from './notifications.js';
+import { sendData, sendPush, type PushMessage } from './notifications.js';
 import { updateLiveActivities } from './liveActivities.js';
+import { estimerArrivee } from './arrivee.js';
 import { filtreDeZone } from './zones.js';
 
 /**
@@ -85,6 +86,40 @@ export function messageClient(c: ContexteCommande): { titre: string; corps: stri
   }
 }
 
+/**
+ * L'étape en mots simples — les mêmes que la Live Activity et le suivi
+ * Android. Sert d'alerte à la Live Activity quand l'étape n'a pas de
+ * message à elle (« En cuisine », « Colis en route ») : sur l'iPhone, TOUTES
+ * les étapes ouvrent l'île (demande du client, 25/09).
+ */
+export function alerteEtape(statut: string, type: string, mode: string | null): { titre: string; corps: string } {
+  const colis = type === 'courier';
+  const recuperer = mode === 'recuperer';
+  const etapes: Record<string, string> = colis
+    ? {
+        pending: 'Recherche d’un livreur',
+        confirmed: 'Recherche d’un livreur',
+        ready: 'Recherche d’un livreur',
+        assigned: recuperer ? 'Livreur en route vers votre colis' : 'Livreur en chemin',
+        picked_up: 'Colis récupéré',
+        delivering: 'Colis en route',
+        delivered: recuperer ? 'Colis remis' : 'Colis livré',
+        cancelled: 'Course annulée',
+      }
+    : {
+        pending: 'Commande envoyée',
+        confirmed: 'Commande confirmée',
+        preparing: 'En cuisine',
+        ready: 'Commande prête',
+        assigned: 'Livreur trouvé',
+        picked_up: 'Commande récupérée',
+        delivering: 'En route vers vous',
+        delivered: 'Commande livrée',
+        cancelled: 'Commande annulée',
+      };
+  return { titre: 'Tovo', corps: etapes[statut] ?? 'Votre commande avance' };
+}
+
 /** Le prénom seul : « Moussa » plutôt que « Moussa Issoufou Mahamadou ». */
 function prenom(nom: string | null | undefined): string | null {
   const t = (nom ?? '').trim();
@@ -114,7 +149,7 @@ export async function notifierClient(orderId: string, statut: string): Promise<v
   const db = serviceClient();
   const { data: commande } = await db
     .from('orders')
-    .select('id, user_id, total, payment_method, type, driver_id, merchants(name), courier_details(mode)')
+    .select('id, user_id, total, payment_method, type, driver_id, placed_at, merchants(name), courier_details(mode)')
     .eq('id', orderId)
     .maybeSingle();
 
@@ -138,23 +173,62 @@ export async function notifierClient(orderId: string, statut: string): Promise<v
       })
     : null;
 
-  // La Live Activity d'abord : elle bouge même quand l'étape ne mérite pas
-  // de notification (« en cuisine », « prête »). Quand elle en mérite une,
-  // l'alerte passe PAR ELLE : l'île s'ouvre avec la phrase de l'étape.
+  // La Live Activity d'abord, et À CHAQUE ÉTAPE avec une alerte : l'île
+  // s'ouvre en grand avec la phrase de l'étape, même pour celles qui n'ont
+  // pas de notification à elles (« En cuisine », « Colis en route ») — sans
+  // alerte, l'île restait petite et l'étape semblait ne jamais arriver.
+  const alerte = modele
+    ?? (commande
+      ? alerteEtape(
+          statut,
+          commande.type as string,
+          une(commande.courier_details as { mode: string } | { mode: string }[] | null)?.mode ?? null,
+        )
+      : null);
   const servis = await updateLiveActivities(
     orderId,
     statut,
     livreur,
-    modele ? { titre: modele.titre, corps: modele.corps } : null,
+    alerte ? { titre: alerte.titre, corps: alerte.corps } : null,
   ).catch(() => new Set<string>());
-  if (!commande || !modele) return;
+  if (!commande) return;
 
-  // UNE SEULE ANNONCE PAR APPAREIL. Un iPhone qui affiche la Live Activity
-  // vient d'être prévenu par elle : pas de notification classique en plus
-  // (les deux se marchaient dessus sur l'île). Android, ou un iPhone aux
-  // Live Activities désactivées, la reçoit comme avant.
-  const tokens = (await jetons(commande.user_id as string, 'client'))
+  // UNE SEULE ANNONCE PAR APPAREIL.
+  //   - iPhone avec Live Activity : prévenu par elle (ci-dessus), rien de plus
+  //     — les deux se marchaient dessus sur l'île ;
+  //   - Android : SA notification de suivi, mise à jour sur place (message
+  //     silencieux, c'est l'app qui affiche), à chaque étape — même celles
+  //     qui ne sonnent pas ;
+  //   - iPhone aux Live Activities désactivées : la notification classique.
+  const tous = (await jetons(commande.user_id as string, 'client'))
     .filter((token) => !servis.has(token));
+  if (tous.length === 0) return;
+  const { data: plateformes } = await db
+    .from('push_tokens')
+    .select('token, platform')
+    .in('token', tous);
+  const android = new Set(
+    ((plateformes ?? []) as Array<{ token: string; platform: string }>)
+      .filter((p) => p.platform === 'android')
+      .map((p) => p.token),
+  );
+
+  if (android.size > 0) {
+    await suivreSurAndroid(db, [...android], {
+      orderId,
+      statut,
+      type: commande.type as string,
+      mode: une(commande.courier_details as { mode: string } | { mode: string }[] | null)?.mode ?? null,
+      livreur,
+      clientId: commande.user_id as string,
+      boutique: une(commande.merchants as { name: string } | { name: string }[] | null)?.name ?? null,
+      placeeLe: (commande.placed_at as string | null) ?? null,
+      alerte: modele != null,
+    }).catch(() => undefined);
+  }
+
+  if (!modele) return;
+  const tokens = tous.filter((token) => !android.has(token));
   if (tokens.length === 0) return;
 
   const messages: PushMessage[] = tokens.map((token) => ({
@@ -165,6 +239,50 @@ export async function notifierClient(orderId: string, statut: string): Promise<v
   }));
 
   const resultat = await sendPush(messages);
+  await purger(resultat.invalidTokens);
+}
+
+/**
+ * Le suivi sur Android : un message SILENCIEUX (données seules) que l'app
+ * transforme en sa notification de suivi — mise à jour sur place, « Live
+ * Update » sur Android 16. Tout ce qu'il faut pour l'écrire y est : l'étape,
+ * les prénoms, l'heure de la commande, l'arrivée estimée.
+ */
+async function suivreSurAndroid(
+  db: ReturnType<typeof serviceClient>,
+  tokens: string[],
+  e: {
+    orderId: string;
+    statut: string;
+    type: string;
+    mode: string | null;
+    livreur: string | null;
+    clientId: string;
+    boutique: string | null;
+    placeeLe: string | null;
+    alerte: boolean;
+  },
+): Promise<void> {
+  const [{ data: profil }, arrivee] = await Promise.all([
+    db.from('profiles').select('full_name').eq('id', e.clientId).maybeSingle(),
+    estimerArrivee(db, e.orderId, e.statut).catch(() => null),
+  ]);
+  const data: Record<string, string> = {
+    kind: 'suivi',
+    order_id: e.orderId,
+    status: e.statut,
+    type: e.type,
+    alerte: e.alerte ? '1' : '0',
+  };
+  if (e.mode) data.mode = e.mode;
+  if (e.livreur) data.driver = e.livreur;
+  const client = prenom(profil?.full_name as string | null);
+  if (client) data.client = client;
+  if (e.boutique) data.merchant_name = e.boutique;
+  if (e.placeeLe) data.placed_at = e.placeeLe;
+  if (arrivee) data.arrivee = String(arrivee);
+
+  const resultat = await sendData(tokens.map((token) => ({ token, data })));
   await purger(resultat.invalidTokens);
 }
 

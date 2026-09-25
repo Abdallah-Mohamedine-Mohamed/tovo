@@ -418,19 +418,16 @@ struct TovoOrderWidget: Widget {
           }
           .padding(.trailing, 4)
         }
+        // La phrase seule : l'étape en vert au-dessus la répétait (« Colis
+        // récupéré » puis « Colis récupéré, Awa ! »).
         DynamicIslandExpandedRegion(.center) {
-          VStack(alignment: .leading, spacing: 3) {
-            Text(p.etape)
-              .font(geist(12))
-              .foregroundColor(p.annule ? brume : menthe)
-            phrase(p)
-              .font(geist(15))
-              .lineLimit(2)
-              .minimumScaleFactor(0.8)
-          }
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .id(p.phrase)
-          .transition(.push(from: .bottom))
+          phrase(p)
+            .font(geist(16))
+            .lineLimit(2)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .id(p.phrase)
+            .transition(.push(from: .bottom))
         }
         DynamicIslandExpandedRegion(.bottom) {
           Segments(parcours: p, chrono: c)

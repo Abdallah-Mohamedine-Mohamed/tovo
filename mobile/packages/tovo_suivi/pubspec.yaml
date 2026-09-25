@@ -1,0 +1,22 @@
+name: tovo_suivi
+description: >-
+  Le suivi de commande sur Android : une notification unique, mise à jour sur
+  place, promue en « Live Update » sur Android 16 (pastille dans la barre
+  d'état, écran verrouillé). Module interne de l'app Tovo.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.2
+  flutter: ">=3.35.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.tovoapp.suivi
+        pluginClass: TovoSuiviPlugin

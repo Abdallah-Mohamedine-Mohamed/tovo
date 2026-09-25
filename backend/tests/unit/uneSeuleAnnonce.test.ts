@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Deux appareils du même client : un iPhone qui affiche la Live Activity,
-// et un téléphone Android.
+// Trois appareils du même client : un iPhone qui affiche la Live Activity,
+// un iPhone sans (Live Activities désactivées), un téléphone Android.
 const IPHONE = 'fcm-iphone';
+const IPHONE_SANS = 'fcm-iphone-sans';
 const ANDROID = 'fcm-android';
 
-const envoisClassiques: string[][] = [];
+const classiques: string[][] = [];
+const silencieux: Array<{ token: string; data: Record<string, string> }> = [];
 const alertesActivite: Array<{ statut: string; alerte: unknown }> = [];
 
 vi.mock('../../src/services/liveActivities.js', () => ({
@@ -14,16 +16,33 @@ vi.mock('../../src/services/liveActivities.js', () => ({
     return new Set([IPHONE]);
   }),
 }));
+vi.mock('../../src/services/arrivee.js', () => ({
+  estimerArrivee: vi.fn(async () => 1_790_000_000),
+}));
 vi.mock('../../src/services/notifications.js', () => ({
   sendPush: vi.fn(async (messages: Array<{ token: string }>) => {
-    envoisClassiques.push(messages.map((m) => m.token));
+    classiques.push(messages.map((m) => m.token));
+    return { invalidTokens: [] };
+  }),
+  sendData: vi.fn(async (messages: Array<{ token: string; data: Record<string, string> }>) => {
+    silencieux.push(...messages);
     return { invalidTokens: [] };
   }),
 }));
 
 const commande = {
   id: 'c1', user_id: 'u1', total: 3500, payment_method: 'cash', type: 'delivery',
-  driver_id: null, merchants: { name: 'Albarka Food' }, courier_details: null,
+  driver_id: null, placed_at: '2026-09-25T12:00:00Z',
+  merchants: { name: 'Albarka Food' }, courier_details: null,
+};
+const tables: Record<string, unknown> = {
+  orders: commande,
+  profiles: { full_name: 'Awa Issoufou' },
+  push_tokens: [
+    { token: IPHONE, platform: 'ios' },
+    { token: IPHONE_SANS, platform: 'ios' },
+    { token: ANDROID, platform: 'android' },
+  ],
 };
 const chaine = (donnees: unknown): unknown => new Proxy(() => undefined, {
   get: (_c, prop) => (prop === 'then'
@@ -32,8 +51,10 @@ const chaine = (donnees: unknown): unknown => new Proxy(() => undefined, {
 });
 vi.mock('../../src/services/supabase.js', () => ({
   serviceClient: () => ({
-    from: () => chaine(commande),
-    rpc: (nom: string) => chaine(nom === 'tokens_for' ? [{ token: IPHONE }, { token: ANDROID }] : []),
+    from: (table: string) => chaine(tables[table] ?? null),
+    rpc: (nom: string) => chaine(nom === 'tokens_for'
+      ? [{ token: IPHONE }, { token: IPHONE_SANS }, { token: ANDROID }]
+      : []),
   }),
 }));
 
@@ -41,16 +62,31 @@ import { notifierClient } from '../../src/services/orderNotifications.js';
 
 describe('une seule annonce par appareil', () => {
   beforeEach(() => {
-    envoisClassiques.length = 0;
+    classiques.length = 0;
+    silencieux.length = 0;
     alertesActivite.length = 0;
   });
 
-  it('l’iPhone est prévenu par sa Live Activity, Android par une notification', async () => {
+  it('chaque téléphone est prévenu une fois, à sa manière', async () => {
     await notifierClient('c1', 'confirmed');
-    // L'étape passe par la Live Activity, AVEC une alerte : l'île s'ouvre.
-    expect(alertesActivite).toHaveLength(1);
+    // iPhone à Live Activity : l'étape passe par elle, AVEC alerte.
     expect(alertesActivite[0]?.alerte).toMatchObject({ titre: expect.any(String), corps: expect.any(String) });
-    // La notification classique ne part que vers l'appareil sans activité.
-    expect(envoisClassiques).toEqual([[ANDROID]]);
+    // Android : sa notification de suivi, par message silencieux.
+    expect(silencieux.map((m) => m.token)).toEqual([ANDROID]);
+    expect(silencieux[0]?.data).toMatchObject({
+      kind: 'suivi', order_id: 'c1', status: 'confirmed', alerte: '1',
+      client: 'Awa', merchant_name: 'Albarka Food', arrivee: '1790000000',
+    });
+    // La notification classique : seulement l'iPhone sans Live Activity.
+    expect(classiques).toEqual([[IPHONE_SANS]]);
+  });
+
+  it('une étape silencieuse met quand même le suivi Android à jour', async () => {
+    await notifierClient('c1', 'preparing');
+    // L'île s'ouvre quand même, avec l'étape : toutes les étapes se voient.
+    expect(alertesActivite[0]?.alerte).toEqual({ titre: 'Tovo', corps: 'En cuisine' });
+    expect(silencieux.map((m) => m.token)).toEqual([ANDROID]);
+    expect(silencieux[0]?.data.alerte).toBe('0');
+    expect(classiques).toEqual([]);
   });
 });

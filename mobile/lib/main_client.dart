@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -9,6 +12,7 @@ import 'core/config.dart';
 import 'core/location.dart';
 import 'core/push.dart';
 import 'core/read_cache.dart';
+import 'core/suivi_commande.dart';
 import 'core/theme.dart';
 import 'features/auth/auth_gate.dart';
 import 'features/chat/chat_screen.dart';
@@ -22,10 +26,22 @@ import 'features/chat/chat_screen.dart';
 /// flutter run --flavor client -t lib/main_client.dart \
 ///   --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=... \
 ///   --dart-define=API_BASE_URL=...
+/// Android, app fermée ou en arrière-plan : le serveur envoie chaque étape
+/// de la commande en message silencieux, et c'est ICI que la notification
+/// de suivi se met à jour — sur place, sans en empiler une nouvelle.
+@pragma('vm:entry-point')
+Future<void> _suiviEnArrierePlan(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  await SuiviAndroid.afficher(message.data);
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   registerTovoComponents();
+  if (Platform.isAndroid) {
+    FirebaseMessaging.onBackgroundMessage(_suiviEnArrierePlan);
+  }
 
   if (!TovoConfig.isConfigured) {
     // Un écran d'erreur lisible plutôt qu'un plantage au premier appel
@@ -43,7 +59,16 @@ Future<void> main() async {
 
   runApp(const TovoClientApp());
   WidgetsBinding.instance.addPostFrameCallback((_) {
-    unawaited(TovoPush.initialiser());
+    unawaited(
+      TovoPush.initialiser().then((_) {
+        // App ouverte : le même suivi, mis à jour à la réception.
+        if (Platform.isAndroid && Firebase.apps.isNotEmpty) {
+          FirebaseMessaging.onMessage.listen(
+            (message) => unawaited(SuiviAndroid.afficher(message.data)),
+          );
+        }
+      }),
+    );
     // Sans fenêtre d'autorisation : seulement si elle est déjà accordée.
     TovoLocation.prechauffer();
   });

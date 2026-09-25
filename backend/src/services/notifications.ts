@@ -148,3 +148,37 @@ export async function sendPush(messages: PushMessage[]): Promise<PushResult> {
     simulated: false,
   };
 }
+
+/**
+ * Messages SANS notification (données seules), pour Android : c'est l'app
+ * qui affiche — et met à jour sur place — sa notification de suivi. Une
+ * notification classique, elle, s'empilerait à chaque étape.
+ *
+ * Priorité haute : Android réveille l'app même en veille pour la mettre à
+ * jour. Une heure de validité : au-delà, l'étape est dépassée.
+ */
+export async function sendData(messages: Array<{ token: string; data: Record<string, string> }>): Promise<PushResult> {
+  const valides = messages.filter((m) => m.token.length > 0);
+  const app = firebaseApp();
+  if (!app || valides.length === 0) {
+    return { sent: 0, failed: 0, invalidTokens: [], simulated: !app };
+  }
+  const reponse = await getMessaging(app).sendEach(
+    valides.map((message) => ({
+      token: message.token,
+      data: message.data,
+      android: { priority: 'high' as const, ttl: 60 * 60 * 1000 },
+    })),
+  );
+  const invalides: string[] = [];
+  reponse.responses.forEach((resultat, index) => {
+    const code = (resultat.error as { code?: string } | undefined)?.code ?? '';
+    if (
+      code === 'messaging/registration-token-not-registered' ||
+      code === 'messaging/invalid-registration-token'
+    ) {
+      invalides.push(valides[index]!.token);
+    }
+  });
+  return { sent: reponse.successCount, failed: reponse.failureCount, invalidTokens: invalides, simulated: false };
+}
