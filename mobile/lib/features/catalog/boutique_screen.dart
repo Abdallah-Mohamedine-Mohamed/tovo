@@ -342,73 +342,55 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
 
   static const _coin = 32.0;
 
+  /// La photo, puis la page blanche qui monte dessus. L'arrondi est celui de
+  /// la PAGE, en haut à droite : le bord bas de la photo file droit, puis
+  /// plonge vers le bas contre le bord de l'écran — la photo coule dans
+  /// l'arrondi (croquis du client, 25/09). Le logo reste à cheval sur la
+  /// ligne, à gauche, comme avant.
   Widget _enTete(String couverture) {
+    final basPhoto = 200 + _haut;
     return SizedBox(
-      height: 212 + _haut,
+      height: basPhoto + 36,
       child: Stack(
         children: [
-          Positioned.fill(
-            // Un rectangle, bord bas franc — sauf le coin bas GAUCHE, arrondi,
-            // celui où loge le logo (demande du client, 25/09).
-            child: ClipRRect(
-              borderRadius: const BorderRadius.only(
-                bottomLeft: Radius.circular(_coin),
-              ),
-              // Calée à GAUCHE : l'en-tête est plus haut que la couverture (2:1),
-              // l'image est donc rognée sur les côtés. Les couvertures portent
-              // le logo en haut à droite ; rogné au milieu, il finissait coupé
-              // en deux sous le bouton de recherche. Calé à gauche, il sort
-              // entier du cadre — le vrai logo est juste en dessous.
-              child: CatalogImage(
-                couverture,
-                fit: BoxFit.cover,
-                alignment: Alignment.centerLeft,
-                decodeWidth: 900,
-                errorBuilder: (_, __, ___) =>
-                    const ColoredBox(color: Color(0xFFF4F5F5)),
-              ),
-            ),
-          ),
-          Positioned(left: 16, right: 16, top: _haut + 8, child: _boutons()),
-          // Le logo, collé dans le coin : ses bords gauche et bas prolongent
-          // ceux de la photo, son coin bas épouse l'arrondi de la couverture.
-          // Un liseré blanc en haut et à droite le détache de l'image, comme
-          // une encoche découpée dans la photo.
-          Positioned(left: 0, bottom: 0, child: _logoEnCoin(76)),
-        ],
-      ),
-    );
-  }
-
-  Widget _logoEnCoin(double taille) {
-    final logo = _boutique['logo_url'] as String? ?? '';
-    if (logo.isEmpty) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.only(top: 4, right: 4),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topRight: Radius.circular(22),
-          bottomLeft: Radius.circular(_coin),
-        ),
-      ),
-      child: ClipRRect(
-        borderRadius: const BorderRadius.only(
-          topRight: Radius.circular(18),
-          bottomLeft: Radius.circular(_coin),
-        ),
-        child: SizedBox.square(
-          dimension: taille,
-          child: ColoredBox(
-            color: Colors.white,
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            // La photo descend sous la page de la hauteur de l'arrondi :
+            // c'est elle qu'on voit dans le coin.
+            height: basPhoto + _coin,
+            // Calée à GAUCHE : l'en-tête est plus haut que la couverture (2:1),
+            // l'image est donc rognée sur les côtés. Les couvertures portent
+            // le logo en haut à droite ; rogné au milieu, il finissait coupé
+            // en deux sous le bouton de recherche. Calé à gauche, il sort
+            // entier du cadre — le vrai logo est juste en dessous.
             child: CatalogImage(
-              logo,
-              fit: BoxFit.contain,
+              couverture,
+              fit: BoxFit.cover,
+              alignment: Alignment.centerLeft,
+              decodeWidth: 900,
               errorBuilder: (_, __, ___) =>
                   const ColoredBox(color: Color(0xFFF4F5F5)),
             ),
           ),
-        ),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: basPhoto,
+            bottom: 0,
+            child: const DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.only(
+                  topRight: Radius.circular(_coin),
+                ),
+              ),
+            ),
+          ),
+          Positioned(left: 16, right: 16, top: _haut + 8, child: _boutons()),
+          Positioned(left: 20, bottom: 0, child: _logo(72)),
+        ],
       ),
     );
   }

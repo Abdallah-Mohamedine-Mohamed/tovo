@@ -307,6 +307,7 @@ class _CategorieScreenState extends State<CategorieScreen> {
                 _IconeRayon(
                   libelle: enPhrase('${rayon['name']}'),
                   icone:
+                      Icones3d.categorie(rayon['slug'] as String?) ??
                       Icones3d.rayon('${rayon['name']}') ??
                       'assets/icons/3d/colis.png',
                   choisie: _rayon == rayon['name'],
@@ -403,11 +404,25 @@ class _CategorieScreenState extends State<CategorieScreen> {
                 child: AspectRatio(
                   aspectRatio: 16 / 8,
                   child: couverture.isNotEmpty
-                      ? CatalogImage(
-                          couverture,
-                          fit: BoxFit.cover,
-                          decodeWidth: 900,
-                          errorBuilder: (_, __, ___) => vide,
+                      ? Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            CatalogImage(
+                              couverture,
+                              fit: BoxFit.cover,
+                              decodeWidth: 900,
+                              errorBuilder: (_, __, ___) => vide,
+                            ),
+                            // Le logo dans une encoche, coin bas droit :
+                            // un liseré blanc, couleur de la page, le
+                            // découpe dans la photo (croquis du client).
+                            if (logo.isNotEmpty)
+                              Positioned(
+                                right: 0,
+                                bottom: 0,
+                                child: _Encoche(logo: logo),
+                              ),
+                          ],
                         )
                       : logo.isNotEmpty
                       ? ColoredBox(
@@ -491,6 +506,32 @@ class _CategorieScreenState extends State<CategorieScreen> {
           child: const Text('Réessayer'),
         ),
       ],
+    ),
+  );
+}
+
+/// Le logo d'une boutique logé dans le coin bas droit de sa photo. Ses
+/// bords droit et bas prolongent ceux de la carte (le coin arrondi de la
+/// carte le découpe) ; son coin haut gauche est simplement arrondi — pas de
+/// liseré blanc autour (demande du client, 25/09).
+class _Encoche extends StatelessWidget {
+  const _Encoche({required this.logo});
+
+  final String logo;
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: const BorderRadius.only(topLeft: Radius.circular(14)),
+    child: SizedBox.square(
+      dimension: 58,
+      child: ColoredBox(
+        color: Colors.white,
+        child: CatalogImage(
+          logo,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+        ),
+      ),
     ),
   );
 }

@@ -514,15 +514,48 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
   app.get('/boutiques', async (request, reply) => {
     try {
       const database = db(request);
-      const { data, error } = await database
-        .from('merchants')
-        .select('id, name, logo_url, cover_url, address_hint, is_open, rating, prep_time_min')
-        .eq('is_approved', true)
-        .order('is_open', { ascending: false })
-        .order('rating', { ascending: false })
-        .order('name')
-        .limit(200);
+      // La liste, les catégories de l'accueil, l'arbre des catégories et
+      // les produits partent ensemble : tout ne dépend que de la base.
+      const PAGE = 1000;
+      const [{ data, error }, navigables, arbre, ...pages] = await Promise.all([
+        database
+          .from('merchants')
+          .select('id, name, logo_url, cover_url, address_hint, is_open, rating, prep_time_min')
+          .eq('is_approved', true)
+          .order('is_open', { ascending: false })
+          .order('rating', { ascending: false })
+          .order('name')
+          .limit(200),
+        database.rpc('browsable_categories'),
+        database.from('categories').select('id, parent_id'),
+        ...[0, 1, 2, 3, 4].map((n) => database.from('products')
+          .select('merchant_id, category_id')
+          .eq('is_available', true)
+          .order('id').range(n * PAGE, n * PAGE + PAGE - 1)),
+      ]);
       if (error) throw error;
+
+      // LES FILTRES : les catégories de l'accueil (Restaurants, Marché,
+      // Beauté…). Une boutique appartient à une catégorie dès qu'un de ses
+      // produits y est rangé, directement ou dans une sous-catégorie — c'est
+      // la règle de la page catégorie (0020), valable aussi pour celles qui
+      // se parcourent par produits.
+      const categories = ((navigables.data ?? []) as Array<{ id: string; name: string; slug: string | null }>);
+      const racine = new Map<string, string>();
+      for (const c of (arbre.data ?? []) as Array<{ id: string; parent_id: string | null }>) {
+        racine.set(c.id, c.parent_id ?? c.id);
+      }
+      const nomCategorie = new Map(categories.map((c) => [c.id, c.name]));
+      const categoriesParBoutique = new Map<string, Set<string>>();
+      for (const page of pages) {
+        if (page.error) throw page.error;
+        for (const p of (page.data ?? []) as Array<{ merchant_id: string; category_id: string | null }>) {
+          const nom = p.category_id ? nomCategorie.get(racine.get(p.category_id) ?? p.category_id) : undefined;
+          if (!nom) continue;
+          if (!categoriesParBoutique.has(p.merchant_id)) categoriesParBoutique.set(p.merchant_id, new Set());
+          categoriesParBoutique.get(p.merchant_id)!.add(nom);
+        }
+      }
       const brutes = ((data ?? []) as Record<string, unknown>[]).map((m) => ({
         id: m['id'] as string,
         name: m['name'] as string,
@@ -532,7 +565,7 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
         is_open: (m['is_open'] as boolean) ?? false,
         prep_time_min: (m['prep_time_min'] as number | null) ?? null,
         distance_m: null,
-        rayons: [] as string[],
+        rayons: [...(categoriesParBoutique.get(m['id'] as string) ?? [])],
       }));
       // « Ouverte » = interrupteur ET horaires du jour ; les vraiment
       // ouvertes d'abord, l'ordre de la base ensuite.
@@ -540,7 +573,13 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
         .map((b, i) => ({ b, i }))
         .sort((x, y) => Number(y.b.is_open) - Number(x.b.is_open) || x.i - y.i)
         .map(({ b }) => b);
-      return reply.send({ category: { id: null, name: 'Toutes les boutiques' }, mode: 'merchants', merchants, rayons: [] });
+      // Dans l'ordre de l'accueil ; une catégorie sans boutique ne filtre rien.
+      const compte = new Map<string, number>();
+      for (const m of merchants) for (const r of m.rayons) compte.set(r, (compte.get(r) ?? 0) + 1);
+      const rayons = categories
+        .filter((c) => (compte.get(c.name) ?? 0) > 0)
+        .map((c) => ({ name: c.name, slug: c.slug, boutiques: compte.get(c.name)! }));
+      return reply.send({ category: { id: null, name: 'Toutes les boutiques' }, mode: 'merchants', merchants, rayons });
     } catch (error) {
       const failure = toHttpFailure(error);
       return reply.code(failure.status).send(failure.body);

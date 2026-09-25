@@ -388,7 +388,8 @@ void main() {
   ) async {
     await open(tester, ChatScreen(api: api));
     expect(find.text('Essayez quelque chose de nouveau'), findsOneWidget);
-    expect(find.text('Trouve-moi un bon repas à Niamey'), findsOneWidget);
+    // L'ordre voulu : le colis, les courses, puis les boutiques.
+    expect(find.text('Je voudrais envoyer un colis'), findsOneWidget);
     expect(find.byTooltip('Ajouter une photo'), findsOneWidget);
     expect(find.byTooltip('Écrire un message'), findsOneWidget);
     expect(find.byType(TextField), findsNothing);

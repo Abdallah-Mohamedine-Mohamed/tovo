@@ -225,6 +225,19 @@ void main() {
     );
     await open(tester, ChatScreen(api: api));
 
+    // Quatrième carte : pas encore construite, on fait défiler la rangée
+    // des suggestions jusqu'à elle.
+    await tester.scrollUntilVisible(
+      find.text('Trouve-moi un bon repas à Niamey'),
+      200,
+      scrollable: find
+          .ancestor(
+            of: find.text('Je voudrais envoyer un colis'),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Trouve-moi un bon repas à Niamey'));
     await tester.pump();
     expect(sent, ['Je cherche un bon restaurant à Niamey']);
@@ -249,6 +262,8 @@ void main() {
       );
       await open(tester, ChatScreen(api: api));
 
+      await tester.ensureVisible(find.text('Explorer les boutiques'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Explorer les boutiques'));
       await tester.pumpAndSettle();
 

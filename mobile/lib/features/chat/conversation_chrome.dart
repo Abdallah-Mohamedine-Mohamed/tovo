@@ -720,29 +720,20 @@ class ConversationHome extends StatelessWidget {
                       vertical: 4,
                     ),
                     scrollDirection: Axis.horizontal,
+                    // L'ordre voulu par le client (25/09) : le colis
+                    // d'abord, puis les courses, puis les boutiques.
                     children: [
                       entre(
                         4,
                         _HomePromptCard(
-                          title: 'Explorer les boutiques',
-                          asset: 'assets/branding/suggestion-shops.svg',
-                          onTap: onBrowseShops,
+                          title: 'Je voudrais envoyer un colis',
+                          asset: 'assets/branding/suggestion-parcel.svg',
+                          onTap: () => onSuggestion('Je veux envoyer un colis'),
                         ),
                       ),
                       const SizedBox(width: 10),
                       entre(
                         5,
-                        _HomePromptCard(
-                          title: 'Trouve-moi un bon repas à Niamey',
-                          asset: 'assets/branding/suggestion-meal.svg',
-                          onTap: () => onSuggestion(
-                            'Je cherche un bon restaurant à Niamey',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      entre(
-                        6,
                         _HomePromptCard(
                           title: 'Aide-moi à préparer mes courses',
                           asset: 'assets/branding/suggestion-grocery.svg',
@@ -752,11 +743,22 @@ class ConversationHome extends StatelessWidget {
                       ),
                       const SizedBox(width: 10),
                       entre(
+                        6,
+                        _HomePromptCard(
+                          title: 'Explorer les boutiques',
+                          asset: 'assets/branding/suggestion-shops.svg',
+                          onTap: onBrowseShops,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      entre(
                         7,
                         _HomePromptCard(
-                          title: 'Je voudrais envoyer un colis',
-                          asset: 'assets/branding/suggestion-parcel.svg',
-                          onTap: () => onSuggestion('Je veux envoyer un colis'),
+                          title: 'Trouve-moi un bon repas à Niamey',
+                          asset: 'assets/branding/suggestion-meal.svg',
+                          onTap: () => onSuggestion(
+                            'Je cherche un bon restaurant à Niamey',
+                          ),
                         ),
                       ),
                     ],

@@ -159,15 +159,32 @@ workflows:
       # migration UIScene. Un build précédent a montré que ces migrations
       # RÉÉCRIVENT project.pbxproj ; les faire avant la signature évite
       # qu'elles n'effacent ce qu'on vient d'y inscrire.
+      #
+      # TROIS ESSAIS. L'intégration Swift Package Manager télécharge les
+      # binaires de Firebase depuis dl.google.com ; le build du 25/09/2026 a
+      # échoué sur « The network connection was lost » en plein
+      # téléchargement de FirebaseFirestoreInternal.zip — une coupure réseau
+      # de la machine, pas une erreur du projet. Avant chaque nouvel essai,
+      # le dossier ios/ revient à l'état du dépôt : une migration interrompue
+      # ne doit pas servir de point de départ à la suivante.
       - name: Préparer le projet iOS
         script: |
-          flutter build ios --config-only --release --no-codesign \
-            -t lib/main_client.dart \
-            --build-name="$NOM_VERSION" \
-            --build-number="$NUMERO_BUILD" \
-            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
-            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
-            --dart-define=API_BASE_URL="$API_BASE_URL"
+          for essai in 1 2 3; do
+            if flutter build ios --config-only --release --no-codesign \
+              -t lib/main_client.dart \
+              --build-name="$NOM_VERSION" \
+              --build-number="$NUMERO_BUILD" \
+              --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+              --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
+              --dart-define=API_BASE_URL="$API_BASE_URL"; then
+              exit 0
+            fi
+            echo "Préparation iOS : essai $essai échoué."
+            [ "$essai" = 3 ] && exit 1
+            git checkout -- ios
+            git clean -fdq ios
+            sleep 20
+          done
 
       # LA SIGNATURE SE RÉAPPLIQUE ICI, APRÈS LES MIGRATIONS.
       #

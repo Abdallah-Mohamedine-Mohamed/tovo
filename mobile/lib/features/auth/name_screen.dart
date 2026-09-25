@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/theme.dart';
 import 'anneau_tovo.dart';
+import 'ecran_d_entree.dart';
 
 /// Le nom, demandé une fois et une seule.
 ///
@@ -79,149 +80,99 @@ class _DemandeDeNomState extends State<DemandeDeNom> {
     return premier[0].toUpperCase() + premier.substring(1);
   }
 
+  /// Même mise en page que la connexion, à la Glovo : l'anneau en haut —
+  /// le prénom s'y inscrit à mesure qu'on le tape —, la question et le champ
+  /// dans la feuille, « Continuer » tout en bas.
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.dark,
       child: Scaffold(
         backgroundColor: TovoTheme.canvas,
-        body: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final clavier = MediaQuery.viewInsetsOf(context).bottom > 0;
-              // Même composition que l'accueil : le formulaire en bas,
-              // l'anneau dans toute la place au-dessus.
-              final zone = constraints.maxHeight - 320;
-              final taille = (constraints.maxWidth - 24)
-                  .clamp(0.0, math.max(0.0, zone - 32))
-                  .clamp(0.0, clavier ? 200.0 : 400.0)
-                  .toDouble();
-              final avecAnneau = taille >= 120;
-              return SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 420),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        AnimatedContainer(
-                          duration: TovoTheme.normal,
-                          curve: TovoTheme.courbe,
-                          height: avecAnneau
-                              ? zone.clamp(taille + 32, double.infinity)
-                              : 16,
-                          alignment: Alignment.center,
-                          child: avecAnneau
-                              ? AnneauTovo(
-                                  taille: taille,
-                                  centre: _Salut(
-                                    prenom: _prenom,
-                                    taille: taille,
-                                  ),
-                                )
-                              : null,
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          // Coupé à la main : « appelez-vous » ne doit pas
-                          // se casser sur le trait d'union (Geist n'a pas
-                          // de trait d'union insécable).
-                          'Comment vous\nappelez-vous ?',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontFamily: TovoTheme.policeClient,
-                            fontSize: 28,
-                            height: 1.15,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: -0.8,
-                            color: TovoTheme.ink,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Votre livreur saura qui il cherche.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 16,
-                            height: 1.45,
-                            color: TovoTheme.inkDoux,
-                          ),
-                        ),
-                        const SizedBox(height: 28),
-                        TextField(
-                          controller: _nom,
-                          autofillHints: const [AutofillHints.name],
-                          textCapitalization: TextCapitalization.words,
-                          textInputAction: TextInputAction.done,
-                          onSubmitted: (_) => _enregistrer(),
-                          onChanged: (_) => setState(() => _erreur = null),
-                          cursorColor: TovoTheme.teal,
-                          style: const TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w500,
-                            color: TovoTheme.ink,
-                          ),
-                          decoration: InputDecoration(
-                            hintText: 'Prénom et nom',
-                            hintStyle: const TextStyle(color: TovoTheme.muted),
-                            filled: true,
-                            fillColor: const Color(0xFFF2F3F1),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 18,
-                              vertical: 17,
-                            ),
-                            border: _bord,
-                            enabledBorder: _bord,
-                            focusedBorder: _bord,
-                          ),
-                        ),
-                        if (_erreur != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 12),
-                            child: Text(
-                              _erreur!,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                color: TovoTheme.danger,
-                              ),
-                            ),
-                          ),
-                        const SizedBox(height: 16),
-                        FilledButton(
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size.fromHeight(56),
-                            backgroundColor: TovoTheme.teal,
-                            foregroundColor: Colors.white,
-                            disabledBackgroundColor: TovoTheme.teal,
-                            disabledForegroundColor: Colors.white,
-                            shape: const StadiumBorder(),
-                          ),
-                          onPressed: _occupe ? null : _enregistrer,
-                          child: Text(
-                            _occupe ? 'Un instant…' : 'Continuer',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+        body: EcranDEntree(
+          heros: (hauteur) => LayoutBuilder(
+            builder: (context, c) {
+              final taille = math.min(c.maxWidth * 0.8, hauteur * 0.94);
+              return AnneauTovo(
+                taille: taille,
+                centre: _Salut(prenom: _prenom, taille: taille),
               );
             },
+          ),
+          contenu: [
+            const Text(
+              // Coupé à la main : « appelez-vous » ne doit pas se casser
+              // sur le trait d'union (Geist n'a pas de trait d'union
+              // insécable).
+              'Comment vous\nappelez-vous ?',
+              textAlign: TextAlign.center,
+              style: styleTitreEntree,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Votre livreur saura qui il cherche',
+              textAlign: TextAlign.center,
+              style: styleSousTitreEntree,
+            ),
+            const SizedBox(height: 24),
+            TextField(
+              controller: _nom,
+              autofillHints: const [AutofillHints.name],
+              textCapitalization: TextCapitalization.words,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _enregistrer(),
+              onChanged: (_) => setState(() => _erreur = null),
+              cursorColor: TovoTheme.ink,
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w500,
+                color: TovoTheme.ink,
+              ),
+              decoration: InputDecoration(
+                hintText: 'Prénom et nom',
+                hintStyle: const TextStyle(color: TovoTheme.muted),
+                filled: false,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 21,
+                ),
+                border: BordsDeChamp.repos,
+                enabledBorder: _erreur == null
+                    ? BordsDeChamp.repos
+                    : BordsDeChamp.erreur,
+                focusedBorder: _erreur == null
+                    ? BordsDeChamp.focus
+                    : BordsDeChamp.erreur,
+              ),
+            ),
+            if (_erreur != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  _erreur!,
+                  style: const TextStyle(fontSize: 14, color: TovoTheme.danger),
+                ),
+              ),
+          ],
+          bouton: FilledButton(
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(50),
+              backgroundColor: TovoTheme.teal,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: TovoTheme.teal,
+              disabledForegroundColor: Colors.white,
+              shape: const StadiumBorder(),
+            ),
+            onPressed: _occupe ? null : _enregistrer,
+            child: Text(
+              _occupe ? 'Un instant…' : 'Continuer',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            ),
           ),
         ),
       ),
     );
   }
-
-  static final _bord = OutlineInputBorder(
-    borderRadius: BorderRadius.circular(16),
-    borderSide: BorderSide.none,
-  );
 }
 
 /// Le centre de l'anneau : « Bonjour », puis « Bonjour, Amina » à mesure

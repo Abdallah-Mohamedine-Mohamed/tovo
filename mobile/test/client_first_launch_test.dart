@@ -126,7 +126,7 @@ void main() {
     expect(find.byType(AnneauTovo), findsOneWidget);
     expect(find.text('Bienvenue'), findsOneWidget);
     expect(
-      find.text('Commençons par votre numéro de téléphone.'),
+      find.text('Commençons par votre numéro de téléphone'),
       findsOneWidget,
     );
     expect(find.byType(FondAnime), findsNothing);
@@ -145,10 +145,12 @@ void main() {
       contains(AutofillHints.telephoneNumberNational),
     );
     expect(champ.controller!.text, '');
+    // Cerné d'un trait, comme chez Glovo.
     expect(
-      (champ.decoration!.enabledBorder! as OutlineInputBorder).borderSide,
-      BorderSide.none,
+      (champ.decoration!.enabledBorder! as OutlineInputBorder).borderSide.color,
+      TovoTheme.ink,
     );
+    expect(find.text('Préfixe'), findsOneWidget);
     expect(find.text('+227'), findsOneWidget);
     await capturer(tester, '1-numero');
 
@@ -176,7 +178,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AnneauTovo), findsOneWidget);
 
-    tester.view.viewInsets = const FakeViewPadding(bottom: 600);
+    // Pixels physiques (x3) : un clavier de 260 points.
+    tester.view.viewInsets = const FakeViewPadding(bottom: 780);
     addTearDown(tester.view.resetViewInsets);
     await tester.pumpAndSettle();
     expect(find.byType(AnneauTovo), findsNothing);
@@ -229,7 +232,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Bienvenue'), findsOneWidget);
     expect(
-      find.text('Connectez-vous à Tovo Livreur avec votre numéro.'),
+      find.text('Connectez-vous à Tovo Livreur avec votre numéro'),
       findsOneWidget,
     );
   });

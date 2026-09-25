@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/theme.dart';
 import 'anneau_tovo.dart';
+import 'ecran_d_entree.dart';
 import 'phone_country.dart';
 
 /// Connexion par téléphone.
@@ -200,157 +201,144 @@ class _AuthScreenState extends State<AuthScreen> {
         },
         child: Scaffold(
           backgroundColor: TovoTheme.canvas,
-          body: SafeArea(
-            child: AnimatedSwitcher(
-              duration: TovoTheme.normal,
-              switchInCurve: TovoTheme.courbe,
-              switchOutCurve: TovoTheme.courbe,
-              transitionBuilder: (child, animation) => FadeTransition(
-                opacity: animation,
-                child: SlideTransition(
-                  position: Tween(
-                    begin: const Offset(0.04, 0),
-                    end: Offset.zero,
-                  ).animate(animation),
-                  child: child,
-                ),
+          body: AnimatedSwitcher(
+            duration: TovoTheme.normal,
+            switchInCurve: TovoTheme.courbe,
+            switchOutCurve: TovoTheme.courbe,
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween(
+                  begin: const Offset(0.04, 0),
+                  end: Offset.zero,
+                ).animate(animation),
+                child: child,
               ),
-              child: _etape == _Etape.numero
-                  ? KeyedSubtree(
-                      key: const ValueKey('etape-numero'),
-                      child: _ecranNumero(),
-                    )
-                  : KeyedSubtree(
-                      key: const ValueKey('etape-code'),
-                      child: _ecranCode(),
-                    ),
             ),
+            child: _etape == _Etape.numero
+                ? KeyedSubtree(
+                    key: const ValueKey('etape-numero'),
+                    child: _ecranNumero(),
+                  )
+                : KeyedSubtree(
+                    key: const ValueKey('etape-code'),
+                    child: SafeArea(child: _ecranCode()),
+                  ),
           ),
         ),
       ),
     );
   }
 
-  /// Le premier écran : l'anneau, « Bienvenue », le numéro, « Continuer ».
-  /// Rien d'autre — pas de canal à choisir, pas de mot de passe.
+  /// Le premier écran, à la Glovo : l'anneau en pleine largeur sur un fond
+  /// clair, une feuille arrondie qui monte dessus, « Bienvenue », les deux
+  /// champs, et « Continuer » tout en bas. Rien d'autre : pas de canal à
+  /// choisir, pas de mot de passe (demande du client, 25/09).
   Widget _ecranNumero() {
     final isClient = widget.titre == 'Tovo';
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final clavier = MediaQuery.viewInsetsOf(context).bottom > 0;
-        final retour = Navigator.of(context).canPop();
-        // Le formulaire est posé EN BAS, sous le pouce ; l'anneau occupe tout
-        // ce qui reste au-dessus, centré. Avant, le bloc entier flottait au
-        // milieu de l'écran, avec deux grands vides, et « Bienvenue » collé
-        // sous l'anneau (retour du client, 25/09). Clavier ouvert, l'anneau
-        // se fait petit, puis s'efface : le champ passe avant.
-        final zone =
-            constraints.maxHeight - _hauteurFormulaire - (retour ? 48 : 0);
-        final taille = (constraints.maxWidth - 24)
-            .clamp(0.0, math.max(0.0, zone - 32))
-            .clamp(0.0, clavier ? 170.0 : 400.0)
-            .toDouble();
-        final avecAnneau = taille >= 120;
-        return SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (retour)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: _Retour(
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                    ),
-                  AnimatedContainer(
-                    duration: TovoTheme.normal,
-                    curve: TovoTheme.courbe,
-                    height: avecAnneau
-                        ? zone.clamp(taille + 32, double.infinity)
-                        : 16,
-                    alignment: Alignment.center,
-                    child: avecAnneau ? AnneauTovo(taille: taille) : null,
-                  ),
-                  const Text(
-                    'Bienvenue',
-                    textAlign: TextAlign.center,
-                    style: _titre,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    isClient
-                        ? 'Commençons par votre numéro de téléphone.'
-                        : 'Connectez-vous à ${widget.titre} avec votre numéro.',
-                    textAlign: TextAlign.center,
-                    style: _sousTitre,
-                  ),
-                  const SizedBox(height: 28),
-                  _champNumero(),
-                  if (_erreur != null) _Erreur(_erreur!),
-                  const SizedBox(height: 16),
-                  _BoutonPrincipal(
-                    libelle: 'Continuer',
-                    occupe: _occupe,
-                    onPressed: _envoyerCode,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+    return EcranDEntree(
+      onRetour: Navigator.of(context).canPop()
+          ? () => Navigator.of(context).pop()
+          : null,
+      heros: (hauteur) => LayoutBuilder(
+        builder: (context, c) =>
+            AnneauTovo(taille: math.min(c.maxWidth * 0.8, hauteur * 0.94)),
+      ),
+      contenu: [
+        const Text(
+          'Bienvenue',
+          textAlign: TextAlign.center,
+          style: styleTitreEntree,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          isClient
+              ? 'Commençons par votre numéro de téléphone'
+              : 'Connectez-vous à ${widget.titre} avec votre numéro',
+          textAlign: TextAlign.center,
+          style: styleSousTitreEntree,
+        ),
+        const SizedBox(height: 24),
+        _champNumero(),
+        if (_erreur != null) _Erreur(_erreur!),
+      ],
+      bouton: _BoutonPrincipal(
+        libelle: 'Continuer',
+        occupe: _occupe,
+        onPressed: _envoyerCode,
+      ),
     );
   }
 
-  /// Titre, phrase, champ, bouton et marges : la place que l'anneau laisse.
-  static const _hauteurFormulaire = 290.0;
-
+  /// « Préfixe » et le numéro, deux champs cernés d'un trait, comme chez
+  /// Glovo.
   Widget _champNumero() => Row(
     children: [
       Semantics(
         button: true,
         label: 'Pays : ${_pays.name}, indicatif ${_pays.dialCode}',
         child: Material(
-          color: _gris,
-          borderRadius: BorderRadius.circular(16),
+          color: Colors.transparent,
           child: InkWell(
             key: const ValueKey('auth-country'),
             onTap: _occupe ? null : _choisirPays,
-            borderRadius: BorderRadius.circular(16),
-            child: SizedBox(
-              height: 56,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                child: Row(
-                  children: [
-                    Text(_pays.flag, style: const TextStyle(fontSize: 20)),
-                    const SizedBox(width: 8),
-                    Text(
-                      _pays.dialCode,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                        color: TovoTheme.ink,
-                      ),
-                    ),
-                    const SizedBox(width: 2),
-                    const Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      size: 18,
-                      color: TovoTheme.inkDoux,
-                    ),
-                  ],
+            borderRadius: BorderRadius.circular(14),
+            child: Container(
+              height: 64,
+              padding: const EdgeInsets.fromLTRB(14, 0, 8, 0),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: _erreur == null ? TovoTheme.ink : TovoTheme.danger,
+                  width: 1.4,
                 ),
+              ),
+              child: Row(
+                children: [
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Préfixe',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: TovoTheme.inkDoux,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Text(
+                            _pays.flag,
+                            style: const TextStyle(fontSize: 18),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _pays.dialCode,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600,
+                              color: TovoTheme.ink,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 10),
+                  const Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    size: 20,
+                    color: TovoTheme.inkDoux,
+                  ),
+                ],
               ),
             ),
           ),
         ),
       ),
-      const SizedBox(width: 8),
+      const SizedBox(width: 10),
       Expanded(
         child: TextField(
           key: const ValueKey('auth-phone'),
@@ -363,23 +351,31 @@ class _AuthScreenState extends State<AuthScreen> {
             if (_erreur != null) setState(() => _erreur = null);
           },
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          cursorColor: TovoTheme.teal,
+          cursorColor: TovoTheme.ink,
           decoration: InputDecoration(
-            hintText: _pays.isoCode == 'NE' ? '90 00 00 00' : 'Numéro',
-            hintStyle: const TextStyle(color: TovoTheme.muted),
-            filled: true,
-            fillColor: _gris,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 18,
-              vertical: 17,
+            hintText: 'Numéro de téléphone',
+            // Un cran plus petit que la saisie : le texte tient en entier.
+            hintStyle: const TextStyle(
+              fontSize: 15.5,
+              letterSpacing: 0,
+              color: TovoTheme.muted,
             ),
-            border: _bord,
-            enabledBorder: _bord,
-            focusedBorder: _bord,
+            filled: false,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 21,
+            ),
+            border: BordsDeChamp.repos,
+            enabledBorder: _erreur == null
+                ? BordsDeChamp.repos
+                : BordsDeChamp.erreur,
+            focusedBorder: _erreur == null
+                ? BordsDeChamp.focus
+                : BordsDeChamp.erreur,
           ),
           style: const TextStyle(
             fontSize: 17,
-            letterSpacing: 0.4,
+            letterSpacing: 0.3,
             fontWeight: FontWeight.w500,
             color: TovoTheme.ink,
           ),
@@ -503,16 +499,9 @@ class _AuthScreenState extends State<AuthScreen> {
     _erreur = null;
   });
 
-  static const _gris = Color(0xFFF2F3F1);
-
-  static final _bord = OutlineInputBorder(
-    borderRadius: BorderRadius.circular(16),
-    borderSide: BorderSide.none,
-  );
-
   static const _titre = TextStyle(
     fontFamily: TovoTheme.policeClient,
-    fontSize: 30,
+    fontSize: 26,
     height: 1.15,
     fontWeight: FontWeight.w600,
     letterSpacing: -0.8,
@@ -520,7 +509,7 @@ class _AuthScreenState extends State<AuthScreen> {
   );
 
   static const _sousTitre = TextStyle(
-    fontSize: 16,
+    fontSize: 15,
     height: 1.45,
     color: TovoTheme.inkDoux,
   );
@@ -568,7 +557,7 @@ class _BoutonPrincipal extends StatelessWidget {
   @override
   Widget build(BuildContext context) => FilledButton(
     style: FilledButton.styleFrom(
-      minimumSize: const Size.fromHeight(56),
+      minimumSize: const Size.fromHeight(50),
       backgroundColor: TovoTheme.teal,
       foregroundColor: Colors.white,
       disabledBackgroundColor: TovoTheme.teal,
@@ -579,7 +568,7 @@ class _BoutonPrincipal extends StatelessWidget {
         ? const _Attente()
         : Text(
             libelle,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
           ),
   );
 }
