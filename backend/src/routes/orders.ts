@@ -386,7 +386,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     // personne ce qu'il a mangé ; « 2 × Tacos poulet — Otakoss », si.
     const { data, error } = await request.supabase!
       .from('orders')
-      .select('id, type, status, total, placed_at, delivered_at, merchant_id, merchants(name), order_items(product_name, quantity)')
+      .select('id, type, status, total, placed_at, delivered_at, merchant_id, driver_id, merchants(name), order_items(product_name, quantity)')
       .order('placed_at', { ascending: false })
       .limit(query.data.limit);
 

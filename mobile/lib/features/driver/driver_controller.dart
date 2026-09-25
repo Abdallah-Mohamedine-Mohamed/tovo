@@ -89,6 +89,7 @@ class DriverController extends ChangeNotifier {
     _notifications = TovoPush.messagesEnAvantPlan().listen((message) {
       if (message['kind'] == 'dispatch' ||
           message['kind'] == 'assigned' ||
+          message['kind'] == 'order_ready' ||
           message['kind'] == 'incoming_order') {
         unawaited(refresh(silencieux: true));
       }
@@ -295,15 +296,29 @@ class DriverController extends ChangeNotifier {
 
   static const _statutsActifs = {'assigned', 'picked_up', 'delivering'};
 
+  /// Acceptée pendant la préparation (migration 0062) : la course est à lui,
+  /// mais la boutique ne l'a pas encore marquée « prête ».
+  static const _statutsAvantPret = {'confirmed', 'preparing', 'ready'};
+
   String? _trouverCourseActive(TovoResponse reponse) {
     if (!reponse.ok) return null;
+    final moi = _db.auth.currentUser?.id;
     for (final ordre in _extraireOrdres(reponse)) {
-      if (_statutsActifs.contains(ordre['status'])) {
+      final statut = ordre['status'];
+      // Le pool est lisible aussi : seule une commande qui porte SON nom
+      // est sa course, quand elle n'est pas encore « assigned ».
+      if (_statutsActifs.contains(statut) ||
+          (_statutsAvantPret.contains(statut) &&
+              moi != null &&
+              ordre['driver_id'] == moi)) {
         return ordre['id'] as String?;
       }
     }
     return null;
   }
+
+  /// La course est acceptée, mais la boutique cuisine encore.
+  bool get enPreparation => _statutsAvantPret.contains(statut);
 
   static List<Map<String, dynamic>> _extraireOrdres(TovoResponse reponse) =>
       reponse.list('orders');

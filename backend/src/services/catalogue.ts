@@ -72,19 +72,32 @@ export function filtrerSuggestionsTextuelles(query: string, items: ProductRow[])
 // recherche de « qu est comme » chez Garba d'Or.
 const MENU_WORDS = new Set('je j veux voudrais souhaite aimerais peux pourrais voir consulter regarder manger commander prendre acheter montre montrez donne donnez moi la le les de du des d chez a au en carte menu menus produit produits article articles plat plats propose proposes proposer proposez boutique restaurant resto enseigne tous toutes tout toute un une svp merci ce que qu est quoi quel quelle quels quelles comme il y avez as vous ont avoir vend vendez vendent quoi'.split(' '));
 
+/** Les mots qui décrivent le commerce sans le nommer. */
+const MOTS_GENERIQUES_ENSEIGNE = new Set(['restaurant', 'restau', 'resto', 'boutique', 'supermarche', 'magasin', 'chez', 'le', 'la', 'les', 'l', 'd', 'de', 'du', 'des', 'et']);
+
 export function requeteSansEnseigne(message: string, merchants: Array<{ id: string; name: string }>): string {
   const words = normaliserIntention(message).split(' ');
   const markerIndex = words.findIndex((word) => ['chez', 'boutique', 'enseigne', 'restaurant', 'resto'].includes(word));
-  const aliases = merchants.flatMap((merchant) => [merchant.name, merchant.name.replace(/\([^)]*\)/g, '').trim()]);
+  // Le nom complet, sans parenthèses, et son CŒUR sans les mots génériques :
+  // « RESTAURANT AFC » se dit « AFC ». Sans ce cœur, « AFC » restait dans la
+  // requête, cherché comme un PRODUIT chez AFC — « Je ne trouve pas de afc ».
+  const aliases = merchants.flatMap((merchant) => {
+    const sansParentheses = merchant.name.replace(/\([^)]*\)/g, '').trim();
+    const coeur = normaliserIntention(sansParentheses).split(' ')
+      .filter((mot) => mot && !MOTS_GENERIQUES_ENSEIGNE.has(mot)).join(' ');
+    return [merchant.name, sansParentheses, ...(coeur ? [coeur] : [])];
+  });
   let best: { start: number; length: number } | undefined;
   for (let start = 0; start < words.length; start++) {
     if (markerIndex >= 0 && start <= markerIndex) continue;
     for (let length = words.length - start; length > 0; length--) {
       const phrase = words.slice(start, start + length).join(' ');
       const compact = phrase.replace(/ /g, '');
-      if (compact.length < 4) continue;
+      if (compact.length < 3) continue;
       const exact = aliases.some((alias) => normaliserIntention(alias).replace(/ /g, '') === compact);
-      const fuzzy = aliases.some((alias) => {
+      // Trois lettres (« AFC ») : seulement à l'identique. Au-delà, les
+      // petites fautes sont tolérées.
+      const fuzzy = compact.length >= 4 && aliases.some((alias) => {
         const normalized = normaliserIntention(alias).replace(/ /g, '');
         return Math.abs(compact.length - normalized.length) <= 2
           && boutiquesCorrespondantes(phrase, [{ id: 'candidate', name: alias }]).length > 0;

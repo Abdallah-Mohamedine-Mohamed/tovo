@@ -157,4 +157,30 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
+
+  // Demande du client (25/09) : on parcourt souvent tard, boutiques fermées.
+  testWidgets(
+    'boutique fermée : ni voile, ni « Boutique fermée », « + » présent',
+    (tester) async {
+      await afficher(tester, [
+        {...produit(1), 'merchant_open': false},
+        produit(2, options: true),
+      ]);
+      expect(find.text('Boutique fermée'), findsNothing);
+      expect(find.text('À personnaliser'), findsNothing);
+      expect(find.byTooltip('Ajouter Produit 1'), findsOneWidget);
+      final voiles = tester
+          .widgetList<Opacity>(find.byType(Opacity))
+          .where((o) => o.opacity < 1 && o.opacity > 0);
+      expect(voiles, isEmpty);
+    },
+  );
+
+  testWidgets('un article indisponible reste en retrait, sans « + »', (
+    tester,
+  ) async {
+    await afficher(tester, [produit(1, dispo: false)]);
+    expect(find.text('Indisponible pour le moment'), findsOneWidget);
+    expect(find.byTooltip('Ajouter Produit 1'), findsNothing);
+  });
 }

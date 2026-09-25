@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/theme.dart';
+import 'anneau_tovo.dart';
 
 /// Le nom, demandé une fois et une seule.
 ///
@@ -68,91 +69,204 @@ class _DemandeDeNomState extends State<DemandeDeNom> {
     }
   }
 
+  /// Le prénom seul : c'est lui qu'on salue.
+  String get _prenom {
+    final mots = _nom.text.trim().split(RegExp(r'\s+'));
+    final premier = mots.isEmpty ? '' : mots.first;
+    if (premier.isEmpty) return '';
+    return premier[0].toUpperCase() + premier.substring(1);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: TovoTheme.canvas,
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Votre nom',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -0.7,
-                    color: TovoTheme.ink,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.dark,
+      child: Scaffold(
+        backgroundColor: TovoTheme.canvas,
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final clavier = MediaQuery.viewInsetsOf(context).bottom > 0;
+              final place = constraints.maxHeight - 330;
+              final taille = clavier
+                  ? place.clamp(0.0, 200.0)
+                  : (constraints.maxWidth - 32)
+                        .clamp(0.0, place)
+                        .clamp(0.0, 300.0);
+              return SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight - 24,
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          AnimatedSize(
+                            duration: TovoTheme.normal,
+                            curve: TovoTheme.courbe,
+                            child: taille >= 120
+                                ? Center(
+                                    child: AnneauTovo(
+                                      taille: taille,
+                                      centre: _Salut(
+                                        prenom: _prenom,
+                                        taille: taille,
+                                      ),
+                                    ),
+                                  )
+                                : const SizedBox(
+                                    width: double.infinity,
+                                    height: 16,
+                                  ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            // Coupé à la main : « appelez-vous » ne doit pas
+                            // se casser sur le trait d'union (Geist n'a pas
+                            // de trait d'union insécable).
+                            'Comment vous\nappelez-vous ?',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontFamily: TovoTheme.policeClient,
+                              fontSize: 28,
+                              height: 1.15,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.8,
+                              color: TovoTheme.ink,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Votre livreur saura qui il cherche.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 16,
+                              height: 1.45,
+                              color: TovoTheme.inkDoux,
+                            ),
+                          ),
+                          const SizedBox(height: 28),
+                          TextField(
+                            controller: _nom,
+                            autofillHints: const [AutofillHints.name],
+                            textCapitalization: TextCapitalization.words,
+                            textInputAction: TextInputAction.done,
+                            onSubmitted: (_) => _enregistrer(),
+                            onChanged: (_) => setState(() => _erreur = null),
+                            cursorColor: TovoTheme.teal,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w500,
+                              color: TovoTheme.ink,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'Prénom et nom',
+                              hintStyle: const TextStyle(
+                                color: TovoTheme.muted,
+                              ),
+                              filled: true,
+                              fillColor: const Color(0xFFF2F3F1),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 17,
+                              ),
+                              border: _bord,
+                              enabledBorder: _bord,
+                              focusedBorder: _bord,
+                            ),
+                          ),
+                          if (_erreur != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: Text(
+                                _erreur!,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: TovoTheme.danger,
+                                ),
+                              ),
+                            ),
+                          const SizedBox(height: 16),
+                          FilledButton(
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(56),
+                              backgroundColor: TovoTheme.teal,
+                              foregroundColor: Colors.white,
+                              disabledBackgroundColor: TovoTheme.teal,
+                              disabledForegroundColor: Colors.white,
+                              shape: const StadiumBorder(),
+                            ),
+                            onPressed: _occupe ? null : _enregistrer,
+                            child: Text(
+                              _occupe ? 'Un instant…' : 'Continuer',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 10),
-                const Text(
-                  'Pour personnaliser votre espace et permettre au livreur de vous retrouver.',
-                  style: TextStyle(
-                    fontSize: 15,
-                    height: 1.5,
-                    color: TovoTheme.inkDoux,
-                  ),
-                ),
-                const SizedBox(height: 32),
-                const Text('Prénom et nom'),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _nom,
-                  autofocus: false,
-                  autofillHints: const [AutofillHints.name],
-                  textCapitalization: TextCapitalization.words,
-                  textInputAction: TextInputAction.done,
-                  onSubmitted: (_) => _enregistrer(),
-                  decoration: InputDecoration(
-                    hintText: 'Prénom et nom',
-                    filled: true,
-                    fillColor: TovoTheme.tealMist,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 16,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(50),
-                    backgroundColor: TovoTheme.teal,
-                    shape: const StadiumBorder(),
-                  ),
-                  onPressed: _occupe ? null : _enregistrer,
-                  child: Text(
-                    _occupe ? 'Un instant…' : 'Continuer',
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                if (_erreur != null) ...[
-                  const SizedBox(height: 14),
-                  Text(
-                    _erreur!,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: TovoTheme.danger,
-                    ),
-                  ),
-                ],
-              ],
-            ),
+              );
+            },
           ),
         ),
       ),
+    );
+  }
+
+  static final _bord = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: BorderSide.none,
+  );
+}
+
+/// Le centre de l'anneau : « Bonjour », puis « Bonjour, Amina » à mesure
+/// que le client tape. L'app le reconnaît avant même qu'il ait validé.
+class _Salut extends StatelessWidget {
+  const _Salut({required this.prenom, required this.taille});
+
+  final String prenom;
+  final double taille;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(
+      fontFamily: TovoTheme.policeClient,
+      fontSize: (taille * 0.075).clamp(16.0, 28.0),
+      height: 1.2,
+      fontWeight: FontWeight.w600,
+      letterSpacing: -0.5,
+      color: TovoTheme.teal,
+    );
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(prenom.isEmpty ? 'Bonjour' : 'Bonjour,', style: style),
+        AnimatedSize(
+          duration: TovoTheme.normal,
+          curve: TovoTheme.courbe,
+          child: prenom.isEmpty
+              ? const SizedBox(width: 0)
+              : FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    prenom,
+                    key: const ValueKey('salut-prenom'),
+                    maxLines: 1,
+                    style: style.copyWith(color: TovoTheme.ink),
+                  ),
+                ),
+        ),
+      ],
     );
   }
 }

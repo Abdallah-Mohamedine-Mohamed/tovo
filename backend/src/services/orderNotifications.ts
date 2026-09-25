@@ -245,6 +245,32 @@ export async function notifierLivreursCommandeRecue(orderId: string): Promise<vo
  * par l'admin. Distinct du dispatch : ici la course lui est attribuée, il
  * n'a pas à courir pour l'obtenir.
  */
+/**
+ * La boutique vient de marquer « prête » une commande qu'un livreur avait
+ * déjà acceptée pendant la préparation (migration 0062) : il peut la prendre.
+ */
+export async function notifierLivreurCommandePrete(orderId: string): Promise<void> {
+  const db = serviceClient();
+  const { data: commande } = await db
+    .from('orders')
+    .select('driver_id, merchants(name)')
+    .eq('id', orderId)
+    .maybeSingle();
+  if (!commande?.driver_id) return;
+
+  const tokens = await jetons(commande.driver_id as string, 'driver');
+  if (tokens.length === 0) return;
+
+  const boutique = (commande.merchants as { name?: string } | null)?.name ?? 'La boutique';
+  const resultat = await sendPush(tokens.map((token) => ({
+    token,
+    title: 'Commande prête',
+    body: `${boutique} : votre commande est prête à récupérer.`,
+    data: { order_id: orderId, kind: 'order_ready' },
+  })));
+  await purger(resultat.invalidTokens);
+}
+
 export async function notifierLivreurAssigne(
   orderId: string,
   driverId: string,

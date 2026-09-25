@@ -518,6 +518,10 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
   }
 
   static const Map<String, String> _libelles = {
+    // Acceptée pendant la préparation : on file vers la boutique.
+    'confirmed': 'Allez à la boutique',
+    'preparing': 'Allez à la boutique',
+    'ready': 'Allez à la boutique',
     'assigned': 'Récupérez la commande',
     'picked_up': 'Commande récupérée',
     'delivering': 'En route vers le client',
@@ -734,6 +738,33 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
           _BoutonPreuve(fichier: _preuve, onTap: _photographier),
         ],
         const SizedBox(height: 16),
+        // La boutique cuisine encore : pas de bouton à toucher, juste
+        // l'information. Il passera à « Repas récupéré » tout seul, dès
+        // qu'elle marquera la commande prête (et une notification le dira).
+        if (etape == null && controller.enPreparation)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF4F5F5),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.soup_kitchen_outlined, color: TovoTheme.ink),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'En préparation · vous serez prévenu dès que c’est prêt',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: TovoTheme.ink,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         if (etape != null)
           FilledButton(
             style: FilledButton.styleFrom(

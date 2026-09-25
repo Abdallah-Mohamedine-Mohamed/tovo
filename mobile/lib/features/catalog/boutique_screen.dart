@@ -348,12 +348,21 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
         children: [
           Positioned.fill(
             bottom: 36,
-            // Un bas en courbe douce plutôt qu'un rectangle tranché net.
-            child: ClipPath(
-              clipper: const _BordDoux(),
+            // Un rectangle, bord bas franc — sauf le coin bas droit, arrondi :
+            // le côté opposé au logo, qui adoucit la ligne sans la tordre.
+            child: ClipRRect(
+              borderRadius: const BorderRadius.only(
+                bottomRight: Radius.circular(36),
+              ),
+              // Calée à GAUCHE : l'en-tête est plus haut que la couverture (2:1),
+              // l'image est donc rognée sur les côtés. Les couvertures portent
+              // le logo en haut à droite ; rogné au milieu, il finissait coupé
+              // en deux sous le bouton de recherche. Calé à gauche, il sort
+              // entier du cadre — le vrai logo est juste en dessous.
               child: CatalogImage(
                 couverture,
                 fit: BoxFit.cover,
+                alignment: Alignment.centerLeft,
                 decodeWidth: 900,
                 errorBuilder: (_, __, ___) =>
                     const ColoredBox(color: Color(0xFFF4F5F5)),
@@ -669,27 +678,4 @@ class _Barre extends SliverPersistentHeaderDelegate {
   @override
   bool shouldRebuild(covariant _Barre old) =>
       old.child != child || old.hauteur != hauteur || old.marge != marge;
-}
-
-/// Le bas de la couverture : une courbe douce et asymétrique, plus basse à
-/// gauche (sous le logo), qui remonte légèrement vers la droite. Assez pour
-/// quitter le rectangle, pas assez pour faire décoratif.
-class _BordDoux extends CustomClipper<Path> {
-  const _BordDoux();
-
-  @override
-  Path getClip(Size taille) {
-    final l = taille.width;
-    final h = taille.height;
-    return Path()
-      ..moveTo(0, 0)
-      ..lineTo(l, 0)
-      ..lineTo(l, h - 26)
-      ..cubicTo(l * 0.74, h - 4, l * 0.42, h - 30, l * 0.18, h - 8)
-      ..quadraticBezierTo(l * 0.08, h, 0, h - 2)
-      ..close();
-  }
-
-  @override
-  bool shouldReclip(covariant _BordDoux old) => false;
 }

@@ -418,18 +418,16 @@ class _CourierFormState extends State<CourierForm> {
             ],
           ),
           const SizedBox(height: 14),
-          // Gris clair, comme les pastilles : un geste, pas une alarme.
-          // « Commander le livreur » : explicite et court. Ni « appeler »
-          // (on ne téléphone pas), ni « confirmer » (confirmer quoi ?).
+          // Le MÊME bouton que « Commander » sur la fiche produit (teal,
+          // texte blanc, pilule) : commander, c'est un seul geste dans l'app,
+          // une seule couleur. « Commander le livreur » : explicite et court.
           FilledButton(
             onPressed: positionConnue && !_envoye ? _appeler : null,
             style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(52),
-              backgroundColor: const Color(0xFFEDEFEF),
-              foregroundColor: TovoTheme.ink,
-              disabledBackgroundColor: const Color(0xFFF4F5F5),
-              disabledForegroundColor: TovoTheme.muted,
-              elevation: 0,
+              minimumSize: const Size.fromHeight(46),
+              backgroundColor: TovoTheme.teal,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
               shape: const StadiumBorder(),
             ),
             child: Text(

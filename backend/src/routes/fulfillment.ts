@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { toHttpFailure } from '../lib/errors.js';
 import { envelope, orderTracking } from '../components/builders.js';
 import { queueDispatch } from '../services/dispatch.js';
-import { notifierClient } from '../services/orderNotifications.js';
+import { notifierClient, notifierLivreurCommandePrete } from '../services/orderNotifications.js';
 import { paiementMobileActif } from '../config/env.js';
 import { verifierPaiement } from '../services/payments.js';
 
@@ -50,7 +50,7 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const db = request.supabase!;
-    const { error } = await db.rpc('advance_order_status', {
+    const { data: statutFinal, error } = await db.rpc('advance_order_status', {
       p_order_id: params.data.orderId,
       p_status: body.data.status,
       p_note: body.data.note,
@@ -61,14 +61,23 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(failure.status).send(failure.body);
     }
 
+    // « Prête » alors qu'un livreur avait déjà accepté pendant la
+    // préparation : la base l'a passée directement à « assigned » (0062).
+    const statut = typeof statutFinal === 'string' ? statutFinal : body.data.status;
+
     // Une notification qui échoue ne doit pas faire échouer le changement
     // de statut : la commande a bien avancé, c'est un fait acquis.
-    notifierClient(params.data.orderId, body.data.status).catch((cause) => {
+    notifierClient(params.data.orderId, statut).catch((cause) => {
       request.log.error({ cause, orderId: params.data.orderId }, 'notification client impossible');
     });
+    if (body.data.status === 'ready' && statut === 'assigned') {
+      notifierLivreurCommandePrete(params.data.orderId).catch((cause) => {
+        request.log.error({ cause, orderId: params.data.orderId }, 'notification livreur impossible');
+      });
+    }
 
-    // « Prête » est le seul statut qui ouvre la course aux livreurs.
-    if (body.data.status === 'ready') {
+    // « Prête » sans livreur : la course s'ouvre aux livreurs.
+    if (statut === 'ready') {
       // La mise en file ne doit jamais faire échouer le changement de
       // statut : la commande est prête, c'est un fait acquis même si la
       // notification part mal.
@@ -139,9 +148,13 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    if (commande.status !== 'ready') {
+    // Dès que la boutique a confirmé, le livreur peut accepter et filer
+    // vers elle pendant la préparation (0062). Seule une commande encore
+    // en attente de la boutique est refusée : elle peut ne jamais être
+    // confirmée.
+    if (!['confirmed', 'preparing', 'ready'].includes(commande.status as string)) {
       return reply.code(409).send({
-        error: 'la commande n’est pas encore prête',
+        error: 'la boutique n’a pas encore confirmé la commande',
         code: 'NOT_READY',
       });
     }
@@ -157,7 +170,9 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(409).send({ error: 'course déjà prise', code: 'ALREADY_TAKEN' });
     }
 
-    notifierClient(params.data.orderId, 'assigned').catch(() => undefined);
+    // Prête : « assigned » ; en préparation : le statut ne bouge pas, mais la
+    // Live Activity du client affiche désormais le prénom du livreur.
+    notifierClient(params.data.orderId, commande.status === 'ready' ? 'assigned' : commande.status as string).catch(() => undefined);
 
     const suivi = await db.rpc('order_tracking', { p_order_id: params.data.orderId });
     return reply.send(

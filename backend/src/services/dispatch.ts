@@ -46,7 +46,7 @@ export async function dispatchOrder(job: DispatchJob): Promise<DispatchOutcome> 
 
   const { data: order } = await db
     .from('orders')
-    .select('id, status, driver_id, type, total, dropoff_hint')
+    .select('id, status, driver_id, type, total, dropoff_hint, zone_id')
     .eq('id', job.orderId)
     .maybeSingle();
 
@@ -64,33 +64,64 @@ export async function dispatchOrder(job: DispatchJob): Promise<DispatchOutcome> 
   if (error) throw error;
 
   const candidats = (data ?? []) as Candidat[];
-  if (candidats.length === 0) {
+
+  // PERSONNE À PROXIMITÉ CONNUE : on prévient quand même les livreurs en
+  // ligne de la zone. `dispatch_candidates` exige une position fraîche de
+  // moins de deux minutes ; un livreur à l'écran d'accueil, app en veille,
+  // n'en envoie plus — et les colis ne prévenaient alors PERSONNE, alors que
+  // les commandes de boutique (autre chemin) arrivaient bien.
+  let ids = candidats.map((c) => c.driver_id);
+  if (ids.length === 0) {
+    const { data: profils } = await db
+      .from('driver_profiles')
+      .select('id, zone_id')
+      .eq('is_online', true)
+      .eq('is_available', true);
+    ids = (profils ?? [])
+      .filter((p) => p.zone_id == null || order.zone_id == null || p.zone_id === order.zone_id)
+      .map((p) => p.id as string);
+  }
+  if (ids.length === 0) {
     return { orderId: job.orderId, candidates: 0, notified: 0, reason: 'no_candidates' };
   }
 
-  const messages: PushMessage[] = candidats
-    .filter((c) => c.fcm_token)
-    .map((c) => ({
-      token: c.fcm_token!,
-      title: order.type === 'courier' ? 'Nouvelle course' : 'Nouvelle livraison',
-      body: `${order.dropoff_hint} · ${order.total} F`,
-      data: { order_id: order.id as string, kind: 'dispatch' },
-    }));
+  // LES JETONS VIVENT DANS push_tokens. L'ancienne colonne
+  // driver_profiles.fcm_token n'est plus remplie : s'y fier seule faisait
+  // partir zéro notification. On garde les deux, sans doublon.
+  const { data: lignes } = await db
+    .from('push_tokens')
+    .select('token')
+    .eq('app', 'driver')
+    .in('user_id', ids)
+    .gt('last_seen_at', new Date(Date.now() - 60 * 24 * 60 * 60_000).toISOString());
+  const jetons = [...new Set([
+    ...candidats.map((c) => c.fcm_token).filter((t): t is string => Boolean(t)),
+    ...(lignes ?? []).map((l) => l.token as string),
+  ])];
+
+  const colis = order.type === 'courier';
+  const messages: PushMessage[] = jetons.map((token) => ({
+    token,
+    title: colis ? 'Nouvelle course de colis' : 'Nouvelle livraison',
+    body: colis ? `Un client demande un livreur · ${order.total} F` : `${order.dropoff_hint} · ${order.total} F`,
+    data: { order_id: order.id as string, kind: 'dispatch' },
+  }));
 
   const resultat = await sendPush(messages);
 
   // Un jeton mort fait échouer tous les envois suivants : on l'efface dès
-  // que FCM nous signale qu'il ne vaut plus rien.
+  // que FCM nous signale qu'il ne vaut plus rien, aux deux endroits.
   if (resultat.invalidTokens.length > 0) {
     await db
       .from('driver_profiles')
       .update({ fcm_token: null })
       .in('fcm_token', resultat.invalidTokens);
+    await db.from('push_tokens').delete().in('token', resultat.invalidTokens);
   }
 
   return {
     orderId: job.orderId,
-    candidates: candidats.length,
+    candidates: ids.length,
     notified: resultat.sent,
   };
 }

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/theme.dart';
+import 'anneau_tovo.dart';
 import 'phone_country.dart';
 
 /// Connexion par téléphone.
@@ -21,11 +22,17 @@ class AuthScreen extends StatefulWidget {
     required this.titre,
     required this.sousTitre,
     this.onConnecte,
+    this.codeDejaEnvoyeA,
   });
 
   final String titre;
   final String sousTitre;
   final VoidCallback? onConnecte;
+
+  /// Tests et captures : ouvre directement l'étape du code, comme si un
+  /// code venait d'être envoyé à ce numéro local.
+  @visibleForTesting
+  final String? codeDejaEnvoyeA;
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -44,6 +51,17 @@ class _AuthScreenState extends State<AuthScreen> {
   String? _erreur;
   int _secondesAvantRenvoi = 0;
   Timer? _resendTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    final numero = widget.codeDejaEnvoyeA;
+    if (numero != null) {
+      _numero.text = numero;
+      _etape = _Etape.code;
+      _secondesAvantRenvoi = 42;
+    }
+  }
 
   @override
   void dispose() {
@@ -126,6 +144,9 @@ class _AuthScreenState extends State<AuthScreen> {
       widget.onConnecte?.call();
     } on AuthException catch (e) {
       if (!mounted) return;
+      // Code faux : les cases se vident, on retape — pas six chiffres à
+      // effacer un à un.
+      _code.clear();
       setState(() => _erreur = _messageLisible(e));
     } on Exception {
       if (!mounted) return;
@@ -166,262 +187,523 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isClient = widget.titre == 'Tovo';
-    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
-    return Scaffold(
-      backgroundColor: TovoTheme.canvas,
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final showArtwork =
-                isClient &&
-                _etape == _Etape.numero &&
-                !keyboardOpen &&
-                constraints.maxHeight >= 700;
-            return SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(28, keyboardOpen ? 24 : 44, 28, 40),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 420),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (Navigator.of(context).canPop()) ...[
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: IconButton(
-                            tooltip: 'Retour',
-                            onPressed: () => Navigator.of(context).pop(),
-                            icon: const Icon(Icons.arrow_back_rounded),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                      ],
-                      if (showArtwork) ...[
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(22),
-                          child: Image.asset(
-                            'assets/branding/accueil-niamey.webp',
-                            height: (constraints.maxHeight * 0.25).clamp(
-                              140.0,
-                              220.0,
-                            ),
-                            fit: BoxFit.cover,
-                            alignment: Alignment.center,
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                      ],
-                      Text(
-                        isClient && _etape == _Etape.numero
-                            ? 'Tout commence par une envie.'
-                            : _etape == _Etape.numero
-                            ? 'Bienvenue sur ${widget.titre}'
-                            : 'Vérifiez votre numéro',
-                        style: const TextStyle(
-                          fontSize: 29,
-                          height: 1.15,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.9,
-                          color: TovoTheme.ink,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        isClient && _etape == _Etape.numero
-                            ? 'Un repas, des courses, un colis : dites-nous ce qu’il vous faut. Tovo s’en occupe.'
-                            : _etape == _Etape.numero
-                            ? widget.sousTitre
-                            : 'Saisissez le code reçu pour continuer.',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          height: 1.45,
-                          color: TovoTheme.inkDoux,
-                        ),
-                      ),
-                      const SizedBox(height: 32),
-                      if (_etape == _Etape.numero)
-                        ..._etapeNumero()
-                      else
-                        ..._etapeCode(),
-                      if (_erreur != null) ...[
-                        const SizedBox(height: 14),
-                        Text(
-                          _erreur!,
-                          style: const TextStyle(color: TovoTheme.danger),
-                        ),
-                      ],
-                      if (isClient && _etape == _Etape.numero) ...[
-                        const SizedBox(height: 18),
-                        const Text(
-                          'Votre numéro protège vos commandes et vous permet de suivre votre livreur. Aucun mot de passe à retenir.',
-                          style: TextStyle(
-                            fontSize: 12,
-                            height: 1.45,
-                            color: TovoTheme.inkDoux,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.dark,
+      child: PopScope(
+        // Le retour système, sur le code, ramène au numéro — il ne ferme pas
+        // l'app au milieu de la connexion.
+        canPop: _etape == _Etape.numero,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop && !_occupe) _changerDeNumero();
+        },
+        child: Scaffold(
+          backgroundColor: TovoTheme.canvas,
+          body: SafeArea(
+            child: AnimatedSwitcher(
+              duration: TovoTheme.normal,
+              switchInCurve: TovoTheme.courbe,
+              switchOutCurve: TovoTheme.courbe,
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween(
+                    begin: const Offset(0.04, 0),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: child,
                 ),
               ),
-            );
-          },
+              child: _etape == _Etape.numero
+                  ? KeyedSubtree(
+                      key: const ValueKey('etape-numero'),
+                      child: _ecranNumero(),
+                    )
+                  : KeyedSubtree(
+                      key: const ValueKey('etape-code'),
+                      child: _ecranCode(),
+                    ),
+            ),
+          ),
         ),
       ),
     );
   }
 
-  List<Widget> _etapeNumero() => [
-    const Text('Votre numéro'),
-    const SizedBox(height: 10),
-    Row(
-      children: [
-        Semantics(
-          button: true,
-          label: 'Pays : ${_pays.name}, indicatif ${_pays.dialCode}',
-          child: Material(
-            color: const Color(0xFFF2F3F1),
-            borderRadius: BorderRadius.circular(18),
-            child: InkWell(
-              key: const ValueKey('auth-country'),
-              onTap: _occupe ? null : _choisirPays,
-              borderRadius: BorderRadius.circular(18),
-              child: SizedBox(
-                height: 56,
-                width: 132,
-                child: Row(
+  /// Le premier écran : l'anneau, « Bienvenue », le numéro, « Continuer ».
+  /// Rien d'autre — pas de canal à choisir, pas de mot de passe.
+  Widget _ecranNumero() {
+    final isClient = widget.titre == 'Tovo';
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final clavier = MediaQuery.viewInsetsOf(context).bottom > 0;
+        // L'anneau prend la place libre ; clavier ouvert, il se fait petit,
+        // puis s'efface s'il n'y a plus la place : le champ passe avant.
+        final place = constraints.maxHeight - 330;
+        final taille = clavier
+            ? place.clamp(0.0, 170.0)
+            : (constraints.maxWidth - 32).clamp(0.0, place).clamp(0.0, 300.0);
+        final avecAnneau = taille >= 120;
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight - 24),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(_pays.flag, style: const TextStyle(fontSize: 21)),
-                    const SizedBox(width: 6),
+                    if (Navigator.of(context).canPop())
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: _Retour(
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                      ),
+                    AnimatedSize(
+                      duration: TovoTheme.normal,
+                      curve: TovoTheme.courbe,
+                      child: avecAnneau
+                          ? Center(child: AnneauTovo(taille: taille))
+                          : const SizedBox(width: double.infinity, height: 16),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Bienvenue',
+                      textAlign: TextAlign.center,
+                      style: _titre,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      isClient
+                          ? 'Commençons par votre numéro de téléphone.'
+                          : 'Connectez-vous à ${widget.titre} avec votre numéro.',
+                      textAlign: TextAlign.center,
+                      style: _sousTitre,
+                    ),
+                    const SizedBox(height: 28),
+                    _champNumero(),
+                    if (_erreur != null) _Erreur(_erreur!),
+                    const SizedBox(height: 16),
+                    _BoutonPrincipal(
+                      libelle: 'Continuer',
+                      occupe: _occupe,
+                      onPressed: _envoyerCode,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _champNumero() => Row(
+    children: [
+      Semantics(
+        button: true,
+        label: 'Pays : ${_pays.name}, indicatif ${_pays.dialCode}',
+        child: Material(
+          color: _gris,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            key: const ValueKey('auth-country'),
+            onTap: _occupe ? null : _choisirPays,
+            borderRadius: BorderRadius.circular(16),
+            child: SizedBox(
+              height: 56,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Row(
+                  children: [
+                    Text(_pays.flag, style: const TextStyle(fontSize: 20)),
+                    const SizedBox(width: 8),
                     Text(
                       _pays.dialCode,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                        color: TovoTheme.ink,
+                      ),
                     ),
-                    const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+                    const SizedBox(width: 2),
+                    const Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      size: 18,
+                      color: TovoTheme.inkDoux,
+                    ),
                   ],
                 ),
               ),
             ),
           ),
         ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: TextField(
-            key: const ValueKey('auth-phone'),
-            controller: _numero,
-            keyboardType: TextInputType.phone,
-            autofillHints: const [AutofillHints.telephoneNumberNational],
-            autofocus: false,
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => _envoyerCode(),
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: _decoration(
-              _pays.isoCode == 'NE' ? '90 00 00 00' : 'Numéro',
+      ),
+      const SizedBox(width: 8),
+      Expanded(
+        child: TextField(
+          key: const ValueKey('auth-phone'),
+          controller: _numero,
+          keyboardType: TextInputType.phone,
+          autofillHints: const [AutofillHints.telephoneNumberNational],
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _envoyerCode(),
+          onChanged: (_) {
+            if (_erreur != null) setState(() => _erreur = null);
+          },
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          cursorColor: TovoTheme.teal,
+          decoration: InputDecoration(
+            hintText: _pays.isoCode == 'NE' ? '90 00 00 00' : 'Numéro',
+            hintStyle: const TextStyle(color: TovoTheme.muted),
+            filled: true,
+            fillColor: _gris,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 18,
+              vertical: 17,
             ),
-            style: const TextStyle(
-              fontSize: 18,
-              letterSpacing: 0.3,
-              fontWeight: FontWeight.w500,
-            ),
+            border: _bord,
+            enabledBorder: _bord,
+            focusedBorder: _bord,
+          ),
+          style: const TextStyle(
+            fontSize: 17,
+            letterSpacing: 0.4,
+            fontWeight: FontWeight.w500,
+            color: TovoTheme.ink,
           ),
         ),
-      ],
-    ),
-    const SizedBox(height: 16),
-    FilledButton(
-      style: FilledButton.styleFrom(
-        minimumSize: const Size.fromHeight(54),
-        backgroundColor: TovoTheme.teal,
-        shape: const StadiumBorder(),
       ),
-      onPressed: _occupe ? null : _envoyerCode,
-      child: _occupe
-          ? const _Attente()
-          : const Text(
-              'Recevoir un code',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+    ],
+  );
+
+  /// Le code : un titre, six cases, et c'est tout. Il se valide seul au
+  /// sixième chiffre — il n'y a pas de bouton à chercher.
+  Widget _ecranCode() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 444),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Retour(onPressed: _occupe ? null : _changerDeNumero),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 20, 12, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text('Entrez le code', style: _titre),
+                    const SizedBox(height: 8),
+                    Text.rich(
+                      TextSpan(
+                        text: 'Envoyé sur WhatsApp au ',
+                        children: [
+                          TextSpan(
+                            text: _numeroLisible,
+                            style: const TextStyle(
+                              color: TovoTheme.ink,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      style: _sousTitre,
+                    ),
+                    const SizedBox(height: 32),
+                    _CasesCode(
+                      controller: _code,
+                      actif: !_occupe,
+                      onComplet: _verifierCode,
+                      onChanged: () {
+                        if (_erreur != null) setState(() => _erreur = null);
+                      },
+                    ),
+                    if (_erreur != null) _Erreur(_erreur!),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      height: 40,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: _occupe
+                            ? const SizedBox.square(
+                                dimension: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: TovoTheme.teal,
+                                ),
+                              )
+                            : _secondesAvantRenvoi > 0
+                            ? Text(
+                                'Renvoyer le code dans $_secondesAvantRenvoi s',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: TovoTheme.muted,
+                                ),
+                              )
+                            : TextButton(
+                                onPressed: _envoyerCode,
+                                style: TextButton.styleFrom(
+                                  foregroundColor: TovoTheme.teal,
+                                  padding: EdgeInsets.zero,
+                                  minimumSize: const Size(0, 40),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                child: const Text(
+                                  'Renvoyer le code',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// « +227 90 12 34 56 » : le numéro tel qu'on le lit, par paires.
+  String get _numeroLisible {
+    final chiffres = _numero.text.replaceAll(RegExp(r'\D'), '');
+    final local = _pays.removeTrunkZero && chiffres.startsWith('0')
+        ? chiffres.substring(1)
+        : chiffres;
+    final paires = <String>[];
+    for (var i = 0; i < local.length; i += 2) {
+      paires.add(
+        local.substring(i, i + 2 > local.length ? local.length : i + 2),
+      );
+    }
+    return '${_pays.dialCode} ${paires.join(' ')}';
+  }
+
+  void _changerDeNumero() => setState(() {
+    _etape = _Etape.numero;
+    _code.clear();
+    _erreur = null;
+  });
+
+  static const _gris = Color(0xFFF2F3F1);
+
+  static final _bord = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: BorderSide.none,
+  );
+
+  static const _titre = TextStyle(
+    fontFamily: TovoTheme.policeClient,
+    fontSize: 30,
+    height: 1.15,
+    fontWeight: FontWeight.w600,
+    letterSpacing: -0.8,
+    color: TovoTheme.ink,
+  );
+
+  static const _sousTitre = TextStyle(
+    fontSize: 16,
+    height: 1.45,
+    color: TovoTheme.inkDoux,
+  );
+}
+
+class _Retour extends StatelessWidget {
+  const _Retour({required this.onPressed});
+
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: 'Retour',
+    onPressed: onPressed,
+    icon: const Icon(Icons.arrow_back_rounded, color: TovoTheme.ink),
+  );
+}
+
+class _Erreur extends StatelessWidget {
+  const _Erreur(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 12),
+    child: Text(
+      message,
+      style: const TextStyle(fontSize: 14, color: TovoTheme.danger),
+    ),
+  );
+}
+
+class _BoutonPrincipal extends StatelessWidget {
+  const _BoutonPrincipal({
+    required this.libelle,
+    required this.occupe,
+    required this.onPressed,
+  });
+
+  final String libelle;
+  final bool occupe;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => FilledButton(
+    style: FilledButton.styleFrom(
+      minimumSize: const Size.fromHeight(56),
+      backgroundColor: TovoTheme.teal,
+      foregroundColor: Colors.white,
+      disabledBackgroundColor: TovoTheme.teal,
+      shape: const StadiumBorder(),
+    ),
+    onPressed: occupe ? null : onPressed,
+    child: occupe
+        ? const _Attente()
+        : Text(
+            libelle,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+  );
+}
+
+/// Six cases, un seul champ. Le vrai champ est invisible sous les cases :
+/// il garde le collage, le remplissage automatique du code (iOS, Android) et
+/// l'effacement ; les cases ne font que montrer ce qu'il contient.
+class _CasesCode extends StatefulWidget {
+  const _CasesCode({
+    required this.controller,
+    required this.actif,
+    required this.onComplet,
+    required this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final bool actif;
+  final VoidCallback onComplet;
+  final VoidCallback onChanged;
+
+  @override
+  State<_CasesCode> createState() => _CasesCodeState();
+}
+
+class _CasesCodeState extends State<_CasesCode> {
+  final _focus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(_redessiner);
+    widget.controller.addListener(_redessiner);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_redessiner);
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _redessiner() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final code = widget.controller.text;
+    return SizedBox(
+      height: 60,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: TextField(
+              key: const ValueKey('auth-code'),
+              controller: widget.controller,
+              focusNode: _focus,
+              enabled: widget.actif,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              autofillHints: const [AutofillHints.oneTimeCode],
+              maxLength: 6,
+              showCursor: false,
+              enableInteractiveSelection: false,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: const TextStyle(color: Colors.transparent, fontSize: 1),
+              decoration: const InputDecoration(
+                counterText: '',
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                disabledBorder: InputBorder.none,
+                filled: false,
+              ),
+              onChanged: (v) {
+                widget.onChanged();
+                // Validation automatique à six chiffres : un code se saisit
+                // et se valide d'un geste, pas de deux.
+                if (v.length == 6) widget.onComplet();
+              },
             ),
-    ),
-  ];
+          ),
+          IgnorePointer(
+            child: Row(
+              children: [
+                for (var i = 0; i < 6; i++) ...[
+                  if (i > 0) const SizedBox(width: 8),
+                  Expanded(
+                    child: _Case(
+                      chiffre: i < code.length ? code[i] : null,
+                      courante:
+                          _focus.hasFocus &&
+                          (i == code.length || (i == 5 && code.length == 6)),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
-  List<Widget> _etapeCode() => [
-    Text(
-      'Code envoyé au $_numeroComplet',
-      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+class _Case extends StatelessWidget {
+  const _Case({required this.chiffre, required this.courante});
+
+  final String? chiffre;
+  final bool courante;
+
+  @override
+  Widget build(BuildContext context) => AnimatedContainer(
+    duration: TovoTheme.vif,
+    height: 60,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: const Color(0xFFF2F3F1),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(
+        color: courante ? TovoTheme.ink : Colors.transparent,
+        width: 1.5,
+      ),
     ),
-    const SizedBox(height: 8),
-    TextField(
-      key: const ValueKey('auth-code'),
-      controller: _code,
-      keyboardType: TextInputType.number,
-      autofillHints: const [AutofillHints.oneTimeCode],
-      autofocus: true,
-      maxLength: 6,
-      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-      textAlign: TextAlign.center,
-      decoration: _decoration('••••••').copyWith(counterText: ''),
+    child: Text(
+      chiffre ?? '',
       style: const TextStyle(
-        fontSize: 26,
-        letterSpacing: 10,
-        fontWeight: FontWeight.w700,
+        fontFamily: TovoTheme.policeClient,
+        fontSize: 24,
+        fontWeight: FontWeight.w600,
+        color: TovoTheme.ink,
       ),
-      onChanged: (v) {
-        // Validation automatique à six chiffres : un code se saisit et se
-        // valide d'un geste, pas de deux.
-        if (v.length == 6 && !_occupe) _verifierCode();
-      },
-    ),
-    const SizedBox(height: 20),
-    FilledButton(
-      style: FilledButton.styleFrom(
-        minimumSize: const Size.fromHeight(50),
-        backgroundColor: TovoTheme.teal,
-        shape: const StadiumBorder(),
-      ),
-      onPressed: _occupe ? null : _verifierCode,
-      child: _occupe ? const _Attente() : const Text('Valider'),
-    ),
-    const SizedBox(height: 10),
-    TextButton(
-      onPressed: _secondesAvantRenvoi > 0 || _occupe ? null : _envoyerCode,
-      child: Text(
-        _secondesAvantRenvoi > 0
-            ? 'Renvoyer le code dans $_secondesAvantRenvoi s'
-            : 'Renvoyer le code',
-        style: const TextStyle(fontSize: 12),
-      ),
-    ),
-    TextButton(
-      onPressed: _occupe
-          ? null
-          : () => setState(() {
-              _etape = _Etape.numero;
-              _code.clear();
-              _erreur = null;
-            }),
-      child: const Text('Changer de numéro', style: TextStyle(fontSize: 12)),
-    ),
-  ];
-
-  InputDecoration _decoration(String hint) => InputDecoration(
-    hintText: hint,
-    filled: true,
-    fillColor: const Color(0xFFF2F3F1),
-    contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(18),
-      borderSide: BorderSide.none,
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(18),
-      borderSide: BorderSide.none,
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(18),
-      borderSide: BorderSide.none,
     ),
   );
 }

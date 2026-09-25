@@ -751,7 +751,11 @@ class _CartScreenState extends State<CartScreen> {
               height: 56,
               child: FilledButton(
                 onPressed: action,
+                // Même bouton que « Commander » sur la fiche produit : un
+                // seul geste « commander » dans l'app, une seule couleur.
                 style: FilledButton.styleFrom(
+                  backgroundColor: TovoTheme.teal,
+                  foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(18),
                   ),

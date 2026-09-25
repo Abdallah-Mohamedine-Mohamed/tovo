@@ -401,6 +401,18 @@ describe('catalogue complet', () => {
     expect(requeteSansEnseigne('tacos poulet chez otakoss', merchants)).toBe('tacos poulet');
   });
 
+  // « RESTAURANT AFC » se dit « AFC » : trois lettres, et le mot générique
+  // en moins. Avant, « AFC » restait dans la requête et était cherché comme
+  // un produit : « Je ne trouve pas de afc » (capture du 25/09).
+  it('reconnaît une enseigne courte par le cœur de son nom', () => {
+    const afc = [{ id: 'afc', name: 'RESTAURANT AFC' }];
+    expect(requeteSansEnseigne('AFC', afc)).toBe('');
+    expect(requeteSansEnseigne('Restaurant afc', afc)).toBe('');
+    expect(requeteSansEnseigne('burger chez afc', afc)).toBe('burger');
+    // Trois lettres : à l'identique seulement, pas de rapprochement.
+    expect(requeteSansEnseigne('afx', afc)).toBe('afx');
+  });
+
   it('une enseigne absente ne déclenche pas une liste générale', async () => {
     const answer = await merchantIntentAnswer(adapter, await resolveCatalogueIntent(adapter, 'tacos chez ZZZZZ'));
     expect(answer?.components).toEqual([]);

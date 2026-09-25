@@ -10,6 +10,7 @@ class CatalogImage extends StatelessWidget {
     this.fit = BoxFit.cover,
     this.errorBuilder,
     this.decodeWidth = 600,
+    this.alignment = Alignment.center,
   });
 
   final String url;
@@ -18,6 +19,9 @@ class CatalogImage extends StatelessWidget {
   final BoxFit fit;
   final ImageErrorWidgetBuilder? errorBuilder;
   final int decodeWidth;
+
+  /// Quelle partie garder quand l'image est rognée (BoxFit.cover).
+  final Alignment alignment;
 
   @visibleForTesting
   static ImageProvider Function(String)? providerOverride;
@@ -31,6 +35,7 @@ class CatalogImage extends StatelessWidget {
     width: width,
     height: height,
     fit: fit,
+    alignment: alignment,
     gaplessPlayback: true,
     errorBuilder: errorBuilder ?? (_, __, ___) => const SizedBox.shrink(),
     frameBuilder: (context, child, frame, synchronous) =>

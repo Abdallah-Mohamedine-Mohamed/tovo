@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tovo/components/registry.dart';
 import 'package:tovo/components/widgets/courier_form.dart';
+import 'package:tovo/core/theme.dart';
 
 Future<List<TovoInteraction>> _afficher(
   WidgetTester tester,
@@ -189,12 +190,14 @@ void main() {
     expect(find.text('Commander le livreur'), findsOneWidget);
   });
 
-  testWidgets('le bouton est gris clair, pas un aplat sombre', (tester) async {
+  testWidgets('même bouton que « Commander » sur la fiche produit', (
+    tester,
+  ) async {
     await _afficher(tester, {
       'pickup': {'lat': 13.51, 'lng': 2.11},
     });
     final bouton = tester.widget<FilledButton>(find.byType(FilledButton));
-    final fond = bouton.style!.backgroundColor!.resolve({});
-    expect(fond!.computeLuminance(), greaterThan(0.8));
+    expect(bouton.style!.backgroundColor!.resolve({}), TovoTheme.teal);
+    expect(bouton.style!.foregroundColor!.resolve({}), Colors.white);
   });
 }

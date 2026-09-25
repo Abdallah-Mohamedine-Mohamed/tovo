@@ -293,7 +293,7 @@ class _CategorieScreenState extends State<CategorieScreen> {
     children: [
       if (_rayons.isNotEmpty)
         SizedBox(
-          height: 112 + (MediaQuery.textScalerOf(context).scale(13) - 13) * 2,
+          height: 128 + (MediaQuery.textScalerOf(context).scale(13) - 13) * 2.6,
           child: ListView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.fromLTRB(12, 18, 12, 0),
@@ -391,40 +391,38 @@ class _CategorieScreenState extends State<CategorieScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Fermée : visible, mais en retrait, comme les produits.
-              Opacity(
-                opacity: ouverte ? 1 : 0.45,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
-                  child: AspectRatio(
-                    aspectRatio: 16 / 8,
-                    child: couverture.isNotEmpty
-                        ? CatalogImage(
-                            couverture,
-                            fit: BoxFit.cover,
-                            decodeWidth: 900,
-                            errorBuilder: (_, __, ___) => vide,
-                          )
-                        : logo.isNotEmpty
-                        ? ColoredBox(
-                            color: const Color(0xFFF4F5F5),
-                            child: Center(
-                              child: SizedBox(
-                                width: 84,
-                                height: 84,
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(16),
-                                  child: CatalogImage(
-                                    logo,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => vide,
-                                  ),
+              // Fermée : aussi belle qu'une autre. On parcourt souvent tard ;
+              // la ligne « Fermée pour le moment » suffit à le dire.
+              ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: AspectRatio(
+                  aspectRatio: 16 / 8,
+                  child: couverture.isNotEmpty
+                      ? CatalogImage(
+                          couverture,
+                          fit: BoxFit.cover,
+                          decodeWidth: 900,
+                          errorBuilder: (_, __, ___) => vide,
+                        )
+                      : logo.isNotEmpty
+                      ? ColoredBox(
+                          color: const Color(0xFFF4F5F5),
+                          child: Center(
+                            child: SizedBox(
+                              width: 84,
+                              height: 84,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: CatalogImage(
+                                  logo,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => vide,
                                 ),
                               ),
                             ),
-                          )
-                        : vide,
-                  ),
+                          ),
+                        )
+                      : vide,
                 ),
               ),
               const SizedBox(height: 10),

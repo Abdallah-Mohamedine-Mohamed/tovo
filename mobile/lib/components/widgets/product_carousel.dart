@@ -280,9 +280,11 @@ class ProductTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final available = data['is_available'] != false;
-    // Boutique fermée : on peut regarder, pas se faire livrer maintenant.
-    final fermee = data['merchant_open'] == false;
-    final enRetrait = !available || fermee;
+    // Seul un article INDISPONIBLE passe en retrait. Une boutique fermée,
+    // on la parcourt comme les autres — souvent tard le soir, pour choisir
+    // pour le lendemain (demande du client, 25/09) : pas de voile blanc, pas
+    // de « Boutique fermée » sur chaque tuile. Sa page le dit, une fois.
+    final enRetrait = !available;
     final photo = data['image_url'] as String?;
     final nom = enPhrase('${data['name'] ?? ''}');
     const placeholder = ColoredBox(
@@ -371,19 +373,12 @@ class ProductTile extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 3),
-              if (afficherBoutique || !available || fermee)
-                _ligneBoutique(available: available, fermee: fermee),
-              if (data['requires_options'] == true)
-                const Padding(
-                  padding: EdgeInsets.only(top: 3),
-                  child: Text(
-                    'À personnaliser',
-                    maxLines: 1,
-                    style: TextStyle(fontSize: 11, color: TovoTheme.inkDoux),
-                  ),
-                ),
-              // Le prix se cale en bas : aligné d'une tuile à l'autre, même
-              // si l'une porte « À personnaliser » et pas sa voisine.
+              // « À personnaliser » n'est plus écrit : le « + » d'un article à
+              // options ouvre sa fiche, qui les montre. Le dire sur la tuile
+              // était du bruit.
+              if (afficherBoutique || !available)
+                _ligneBoutique(available: available),
+              // Le prix se cale en bas : aligné d'une tuile à l'autre.
               const Spacer(),
               const SizedBox(height: 6),
               Text(
@@ -409,11 +404,9 @@ class ProductTile extends StatelessWidget {
     color: TovoTheme.ink,
   );
 
-  Widget _ligneBoutique({required bool available, required bool fermee}) {
+  Widget _ligneBoutique({required bool available}) {
     final texte = !available
         ? 'Indisponible pour le moment'
-        : fermee
-        ? 'Boutique fermée'
         : '${enPhrase(data['merchant_name'] as String?)}${onMerchant != null ? ' ›' : ''}';
     final ligne = Text(
       texte,
@@ -421,7 +414,7 @@ class ProductTile extends StatelessWidget {
       overflow: TextOverflow.ellipsis,
       style: const TextStyle(fontSize: 12, color: TovoTheme.inkDoux),
     );
-    if (onMerchant == null || !available || fermee) return ligne;
+    if (onMerchant == null || !available) return ligne;
     return InkWell(
       onTap: onMerchant,
       child: Padding(
