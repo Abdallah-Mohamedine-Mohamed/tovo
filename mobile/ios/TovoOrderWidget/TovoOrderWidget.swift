@@ -121,17 +121,29 @@ private struct Parcours {
     }
   }
 
-  /// La phrase de l'étape, qui s'adresse au client par son prénom — au début
-  /// (« Awa, … ») ou à la fin (« …, Awa ») selon l'étape, pour que ça sonne
-  /// juste. Sans prénom connu, la phrase s'en passe.
+  /// Le prénom du client n'est dit qu'au DÉBUT de la course (commande
+  /// envoyée, confirmée, recherche d'un livreur) et à la FIN (livrée) : à
+  /// chaque étape, c'était trop (retour du client, 25/09).
+  private var prenomClient: String? {
+    guard let c = client, !c.isEmpty else { return nil }
+    let debutDeCourse = colis
+      ? ["pending", "confirmed", "ready"].contains(status)
+      : ["pending", "confirmed"].contains(status)
+    return debutDeCourse || livre ? c : nil
+  }
+
+  /// La phrase de l'étape. Au début et à la fin de la course, elle s'adresse
+  /// au client par son prénom (« Awa, votre commande est confirmée »,
+  /// « Bon appétit, Awa ! ») ; entre les deux, elle s'en passe.
   var phrase: String {
     let livreur = (driver?.isEmpty == false) ? driver! : "Votre livreur"
+    let prenom = prenomClient
     func debut(_ texte: String) -> String {
-      guard let c = client, !c.isEmpty else { return majuscule(texte) }
+      guard let c = prenom else { return majuscule(texte) }
       return "\(c), \(texte)"
     }
     func fin(_ texte: String, _ ponctuation: String = "") -> String {
-      guard let c = client, !c.isEmpty else { return texte + ponctuation }
+      guard let c = prenom else { return texte + ponctuation }
       return "\(texte), \(c)\(ponctuation)"
     }
     if annule { return debut(colis ? "votre course est annulée" : "votre commande est annulée") }

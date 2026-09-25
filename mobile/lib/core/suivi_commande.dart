@@ -114,11 +114,23 @@ class EtapeSuivi {
   /// Le mot de la fin, pour la pastille.
   String get court => annule ? 'Annulée' : (colis ? 'Livré' : 'Livrée');
 
-  /// La phrase, qui s'adresse au client par son prénom, au début ou à la
-  /// fin selon l'étape. Sans prénom connu, la phrase s'en passe.
+  /// Le prénom du client n'est dit qu'au DÉBUT de la course (commande
+  /// envoyée, confirmée, recherche d'un livreur) et à la FIN (livrée) : à
+  /// chaque étape, c'était trop (retour du client, 25/09).
+  String? get _prenomClient {
+    final c = client;
+    if (c == null || c.isEmpty) return null;
+    final debutDeCourse = colis
+        ? const {'pending', 'confirmed', 'ready'}.contains(statut)
+        : const {'pending', 'confirmed'}.contains(statut);
+    return debutDeCourse || livre ? c : null;
+  }
+
+  /// La phrase de l'étape. Au début et à la fin de la course, elle s'adresse
+  /// au client par son prénom ; entre les deux, elle s'en passe.
   String get phrase {
     final nom = (livreur?.isNotEmpty ?? false) ? livreur! : 'Votre livreur';
-    final c = client;
+    final c = _prenomClient;
     String debut(String texte) => c == null
         ? '${texte[0].toUpperCase()}${texte.substring(1)}'
         : '$c, $texte';

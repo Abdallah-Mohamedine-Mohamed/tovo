@@ -5,14 +5,14 @@ import 'package:tovo/core/suivi_commande.dart';
 void main() {
   EtapeSuivi e(Map<String, dynamic> d) => EtapeSuivi.depuisMessage(d);
 
-  test('le prénom du client ouvre ou ferme la phrase', () {
+  test('le prénom du client : au début et à la fin de la course seulement', () {
     expect(
       e({'status': 'confirmed', 'client': 'Awa'}).phrase,
       'Awa, votre commande est confirmée',
     );
     expect(
       e({'status': 'preparing', 'client': 'Awa'}).phrase,
-      'Votre repas se prépare, Awa',
+      'Votre repas se prépare',
     );
     expect(
       e({'status': 'delivered', 'client': 'Awa'}).phrase,
@@ -28,7 +28,7 @@ void main() {
   test('le livreur est nommé ; « Votre livreur » à défaut', () {
     expect(
       e({'status': 'picked_up', 'client': 'Awa', 'driver': 'Moussa'}).phrase,
-      'Awa, Moussa arrive avec votre commande',
+      'Moussa arrive avec votre commande',
     );
     expect(
       e({'status': 'assigned'}).phrase,
@@ -41,10 +41,7 @@ void main() {
     expect(e({...colis, 'status': 'ready'}).etape, 'Recherche d’un livreur');
     expect(e({...colis, 'status': 'assigned'}).etape, 'Livreur en chemin');
     expect(e({...colis, 'status': 'picked_up'}).etape, 'Colis récupéré');
-    expect(
-      e({...colis, 'status': 'picked_up'}).phrase,
-      'Colis récupéré, Awa !',
-    );
+    expect(e({...colis, 'status': 'picked_up'}).phrase, 'Colis récupéré !');
     expect(e({...colis, 'status': 'delivering'}).etape, 'Colis en route');
     expect(e({...colis, 'status': 'delivered'}).etape, 'Colis livré');
     expect(
