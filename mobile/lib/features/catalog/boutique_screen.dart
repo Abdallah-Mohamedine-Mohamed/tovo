@@ -46,8 +46,6 @@ class BoutiqueScreen extends StatefulWidget {
 }
 
 class _BoutiqueScreenState extends State<BoutiqueScreen> {
-  /// Au-delà, un rayon montre ses 4 premiers produits et « Tout voir ».
-  static const _rayonComplet = 6;
   static const _hauteurOnglets = 52.0;
 
   final _scroll = ScrollController();
@@ -151,8 +149,10 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
     _saute = true;
     try {
       // Un rayon loin en bas n'est peut-être pas encore construit : on s'en
-      // approche d'abord, puis on se cale exactement.
-      for (var essai = 0; essai < 6; essai++) {
+      // approche d'abord, un écran à la fois, puis on se cale exactement.
+      // Les rayons étant désormais complets, il peut y avoir beaucoup
+      // d'écrans à franchir : on va jusqu'au bout de la page s'il le faut.
+      for (var essai = 0; essai < 200; essai++) {
         final cible = _positionDuRayon(i);
         if (cible != null) {
           await _scroll.animateTo(
@@ -161,8 +161,10 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
             curve: Curves.easeOutCubic,
           );
           // Les rayons au-dessus, construits pendant l'animation, ont
-          // remplacé leur hauteur estimée par la vraie : on se recale.
-          for (var recalage = 0; recalage < 3; recalage++) {
+          // remplacé leur hauteur estimée par la vraie : on se recale,
+          // jusqu'à ce que la position ne bouge plus (les rayons complets
+          // sont hauts : l'estimation se corrige en plusieurs fois).
+          for (var recalage = 0; recalage < 12; recalage++) {
             await WidgetsBinding.instance.endOfFrame;
             if (!mounted) return;
             final juste = _positionDuRayon(i);
@@ -172,6 +174,10 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
           return;
         }
         final vers = i > _premierConstruit() ? 1 : -1;
+        final bout = vers > 0
+            ? _scroll.offset >= _scroll.position.maxScrollExtent
+            : _scroll.offset <= 0;
+        if (bout) return;
         _scroll.jumpTo(
           (_scroll.offset + vers * MediaQuery.sizeOf(context).height).clamp(
             0.0,
@@ -523,75 +529,35 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
 
   String _nomRayon(int i) => enPhrase('${_rayons[i]['name'] ?? ''}');
 
+  /// Un rayon, EN ENTIER : son nom, puis tous ses produits, deux par ligne.
+  ///
+  /// Il n'en montrait que quatre, avec une flèche « Tout voir » : on croyait
+  /// que c'était toute la carte (retour du client, 25/09). Comme chez Glovo
+  /// ou Uber Eats, la page porte maintenant la carte entière ; la barre des
+  /// rayons, épinglée en haut, sert à y sauter. Plus de « 8 produits » ni de
+  /// flèche : le nom du rayon suffit.
   Widget _rayon(int i) {
     final rayon = _rayons[i];
     final items = (rayon['items'] as List? ?? const [])
         .whereType<Map<String, dynamic>>()
         .toList();
-    final total = (rayon['produits'] as num?)?.toInt() ?? items.length;
-    // Une seule section : c'est toute la carte, on la montre en entier.
-    final coupe = _rayons.length > 1 && items.length > _rayonComplet;
-    final montres = coupe ? items.take(4).toList() : items;
     return Padding(
       key: _cle(i),
-      padding: const EdgeInsets.fromLTRB(20, 26, 20, 0),
+      padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _rayons.length == 1 ? 'La carte' : _nomRayon(i),
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.4,
-                        color: TovoTheme.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '$total produit${total > 1 ? 's' : ''}',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: TovoTheme.inkDoux,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (coupe)
-                Semantics(
-                  button: true,
-                  label: 'Tout voir, ${_nomRayon(i)}',
-                  excludeSemantics: true,
-                  child: Material(
-                    color: const Color(0xFFF4F5F5),
-                    shape: const CircleBorder(),
-                    child: InkWell(
-                      customBorder: const CircleBorder(),
-                      onTap: () =>
-                          _ouvrirCatalogue(rayon: rayon['id'] as String?),
-                      child: const SizedBox(
-                        width: 44,
-                        height: 44,
-                        child: Icon(
-                          Icons.arrow_forward_rounded,
-                          size: 21,
-                          color: TovoTheme.ink,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
+          Text(
+            _rayons.length == 1 ? 'La carte' : _nomRayon(i),
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.4,
+              color: TovoTheme.ink,
+            ),
           ),
           const SizedBox(height: 16),
-          for (var ligne = 0; ligne < montres.length; ligne += 2)
+          for (var ligne = 0; ligne < items.length; ligne += 2)
             Padding(
               padding: EdgeInsets.only(top: ligne == 0 ? 0 : 22),
               child: IntrinsicHeight(
@@ -601,14 +567,14 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
                     for (var colonne = 0; colonne < 2; colonne++) ...[
                       if (colonne == 1) const SizedBox(width: 14),
                       Expanded(
-                        child: ligne + colonne < montres.length
+                        child: ligne + colonne < items.length
                             ? ProductTile(
-                                data: montres[ligne + colonne],
+                                data: items[ligne + colonne],
                                 afficherBoutique: false,
                                 onOpen: () =>
-                                    _ouvrirProduit(montres[ligne + colonne]),
+                                    _ouvrirProduit(items[ligne + colonne]),
                                 onAdd: () =>
-                                    _ouvrirProduit(montres[ligne + colonne]),
+                                    _ouvrirProduit(items[ligne + colonne]),
                               )
                             : const SizedBox.shrink(),
                       ),

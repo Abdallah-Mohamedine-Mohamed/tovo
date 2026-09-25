@@ -51,34 +51,40 @@ void main() {
     home: home,
   );
 
-  testWidgets('l’image déborde des bords de l’écran, et ne tourne pas', (
+  testWidgets('l’image déborde des bords de l’écran et tourne, pas le logo', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    // L'écran lui-même (MediaQuery), pas seulement la surface : un iPhone.
-    tester.view.physicalSize = const Size(1170, 2532);
-    tester.view.devicePixelRatio = 3;
-    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       app(const AuthScreen(titre: 'Tovo', sousTitre: ''), animations: true),
     );
-    await tester.pump(const Duration(seconds: 2));
+    await tester.pump(const Duration(seconds: 15));
     final image = find.descendant(
       of: find.byType(AnneauTovo),
       matching: find.byType(Image),
     );
     // Plus large que l'écran : les objets des côtés sont rognés, à la Glovo.
     expect(tester.getSize(image).width, greaterThan(390));
-    expect(tester.getRect(image).left, lessThan(0));
-    expect(
+    final rotation = tester.widget<RotationTransition>(
       find.descendant(
         of: find.byType(AnneauTovo),
         matching: find.byType(RotationTransition),
       ),
+    );
+    // Quinze secondes sur un tour de soixante : un quart de tour.
+    expect(rotation.turns.value, closeTo(0.25, 0.01));
+    // Le logo n'est pas dans ce qui tourne.
+    expect(
+      find.descendant(
+        of: find.byType(RotationTransition),
+        matching: find.bySemanticsLabel('Tovo'),
+      ),
       findsNothing,
     );
     expect(tester.takeException(), isNull);
+    // L'écran quitté, la rotation s'arrête avec lui.
+    await tester.pumpWidget(const SizedBox());
   });
 
   Future<void> capturer(WidgetTester tester, String nom) async {
@@ -296,6 +302,9 @@ void main() {
       find.byKey(const ValueKey('auth-code')),
     );
     expect(champ.autofillHints, contains(AutofillHints.oneTimeCode));
+    // Le clavier est ouvert dès l'arrivée, le curseur dans la première case.
+    expect(tester.testTextInput.isVisible, isTrue);
+    expect(find.byKey(const ValueKey('auth-code-curseur')), findsOneWidget);
     await capturer(tester, '2-code-vide');
 
     // Quatre chiffres : pas encore de vérification (elle part au sixième).

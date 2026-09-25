@@ -596,30 +596,73 @@ class _CasesCode extends StatefulWidget {
   State<_CasesCode> createState() => _CasesCodeState();
 }
 
-class _CasesCodeState extends State<_CasesCode> {
+class _CasesCodeState extends State<_CasesCode>
+    with SingleTickerProviderStateMixin {
   final _focus = FocusNode();
+
+  /// Le curseur qui clignote dans la case courante, au rythme d'iOS.
+  late final AnimationController _clignote = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1060),
+  );
 
   @override
   void initState() {
     super.initState();
-    _focus.addListener(_redessiner);
+    _focus.addListener(_focusChange);
     widget.controller.addListener(_redessiner);
+    // LE CLAVIER S'OUVRE DE LUI-MÊME, sur la première case. `autofocus`
+    // seul ne suffisait pas : l'écran apparaît pendant que l'envoi du code
+    // se termine, et un champ inactif à cet instant ignorait la demande.
+    // Le champ reste donc toujours actif (il refuse seulement la saisie
+    // pendant une vérification), et le focus est redemandé une fois l'écran
+    // posé.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_focus.hasFocus) _focus.requestFocus();
+    });
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_redessiner);
     _focus.dispose();
+    _clignote.dispose();
     super.dispose();
   }
 
+  void _focusChange() {
+    _cadencer();
+    _redessiner();
+  }
+
+  /// Le curseur clignote tant que le champ a le focus — et reste fixe si le
+  /// téléphone demande de réduire les animations.
+  void _cadencer() {
+    final anime = !MediaQuery.disableAnimationsOf(context);
+    if (_focus.hasFocus && anime) {
+      if (!_clignote.isAnimating) _clignote.repeat();
+    } else {
+      _clignote
+        ..stop()
+        ..value = 0;
+    }
+  }
+
   void _redessiner() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    // Chaque frappe remet le curseur allumé, comme dans un vrai champ.
+    if (_clignote.isAnimating) {
+      _clignote
+        ..value = 0
+        ..repeat();
+    }
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
     final code = widget.controller.text;
+    final courante = code.length.clamp(0, 5);
     return SizedBox(
       height: 60,
       child: Stack(
@@ -629,7 +672,7 @@ class _CasesCodeState extends State<_CasesCode> {
               key: const ValueKey('auth-code'),
               controller: widget.controller,
               focusNode: _focus,
-              enabled: widget.actif,
+              readOnly: !widget.actif,
               autofocus: true,
               keyboardType: TextInputType.number,
               autofillHints: const [AutofillHints.oneTimeCode],
@@ -662,9 +705,8 @@ class _CasesCodeState extends State<_CasesCode> {
                   Expanded(
                     child: _Case(
                       chiffre: i < code.length ? code[i] : null,
-                      courante:
-                          _focus.hasFocus &&
-                          (i == code.length || (i == 5 && code.length == 6)),
+                      courante: _focus.hasFocus && i == courante,
+                      clignote: _clignote,
                     ),
                   ),
                 ],
@@ -678,10 +720,15 @@ class _CasesCodeState extends State<_CasesCode> {
 }
 
 class _Case extends StatelessWidget {
-  const _Case({required this.chiffre, required this.courante});
+  const _Case({
+    required this.chiffre,
+    required this.courante,
+    required this.clignote,
+  });
 
   final String? chiffre;
   final bool courante;
+  final Animation<double> clignote;
 
   @override
   Widget build(BuildContext context) => AnimatedContainer(
@@ -696,15 +743,34 @@ class _Case extends StatelessWidget {
         width: 1.5,
       ),
     ),
-    child: Text(
-      chiffre ?? '',
-      style: const TextStyle(
-        fontFamily: TovoTheme.policeClient,
-        fontSize: 24,
-        fontWeight: FontWeight.w600,
-        color: TovoTheme.ink,
-      ),
-    ),
+    child: chiffre != null
+        ? Text(
+            chiffre!,
+            style: const TextStyle(
+              fontFamily: TovoTheme.policeClient,
+              fontSize: 24,
+              fontWeight: FontWeight.w600,
+              color: TovoTheme.ink,
+            ),
+          )
+        : courante
+        // Le trait vertical, allumé la première moitié du cycle.
+        ? AnimatedBuilder(
+            animation: clignote,
+            builder: (context, _) => Opacity(
+              key: const ValueKey('auth-code-curseur'),
+              opacity: clignote.value < 0.5 ? 1 : 0,
+              child: Container(
+                width: 2,
+                height: 26,
+                decoration: BoxDecoration(
+                  color: TovoTheme.ink,
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+            ),
+          )
+        : null,
   );
 }
 

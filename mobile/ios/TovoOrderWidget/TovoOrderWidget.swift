@@ -5,13 +5,19 @@ import WidgetKit
 
 // Le suivi de commande sur l'écran verrouillé et dans la Dynamic Island,
 // dans l'esprit d'Uber Eats : fond noir, « Tovo » bien lisible, un grand
-// titre, un compte à rebours qui défile tout seul (« Arrive dans 17:42 »),
-// une illustration 3D ronde qui change à chaque étape, et des segments
-// espacés en bas. Le titre et l'illustration s'animent à chaque étape.
+// titre, le temps, une illustration 3D ronde qui change à chaque étape, et
+// des segments espacés en bas. Le titre et l'illustration s'animent à
+// chaque étape.
 //
-// Tout ce qui défile (compte à rebours) le fait SANS mise à jour du
-// serveur : c'est le système qui compte. Les étapes, elles, arrivent par
-// push APNs, app fermée.
+// LE TEMPS (décision du client, 25/09) :
+//   - tant qu'aucun livreur n'est en route, le temps ÉCOULÉ depuis la
+//     commande (« Depuis 6:12 ») : honnête, il ne se trompe jamais ;
+//   - dès qu'un livreur est en route, une HEURE d'arrivée (« Arrivée vers
+//     14:35 »), calculée par le serveur sur les vraies distances. Une heure
+//     ne défile pas vers zéro sous les yeux du client : elle ne peut pas
+//     « rater » son rendez-vous, et se corrige sans bruit à chaque étape.
+// Le temps écoulé défile SANS mise à jour : c'est le système qui compte.
+// Les étapes et l'heure arrivent par push APNs, app fermée.
 
 private let menthe = Color(red: 0.42, green: 0.86, blue: 0.76)
 private let brume = Color.white.opacity(0.64)
@@ -172,46 +178,82 @@ private struct Segments: View {
   }
 }
 
-/// « Arrive dans 17:42 », qui défile tout seul ; sinon la phrase de l'étape.
+/// Le temps d'une course : l'heure d'arrivée si un livreur est en route,
+/// sinon le temps écoulé depuis la commande.
 @available(iOS 16.2, *)
-private struct Arrivee: View {
+private struct Temps {
   let parcours: Parcours
-  let eta: Date?
-  let taille: CGFloat
+  /// Heure d'arrivée envoyée par le serveur.
+  let arrivee: Date?
+  /// Heure de la commande.
+  let depuis: Date?
 
-  var body: some View {
-    if !parcours.fini, let eta, eta > Date() {
-      (Text("Arrive dans ").foregroundColor(brume)
-        + Text(timerInterval: Date()...eta, countsDown: true).foregroundColor(menthe))
-        .font(geist(taille, demiGras: false))
-        .monospacedDigit()
-        .lineLimit(1)
-    } else {
-      Text(parcours.sousTitre)
-        .font(geist(taille, demiGras: false))
-        .foregroundColor(brume)
-        .lineLimit(1)
-    }
+  var enRoute: Bool { ["assigned", "picked_up", "delivering"].contains(parcours.status) }
+
+  /// L'heure d'arrivée, seulement si elle a encore un sens : un livreur en
+  /// route, et une heure qui n'est pas dépassée de plus de 5 minutes.
+  var heure: Date? {
+    guard enRoute, let arrivee, arrivee > Date().addingTimeInterval(-5 * 60) else { return nil }
+    return arrivee
+  }
+
+  /// Le temps écoulé défile jusqu'à 12 h : largement assez pour une course.
+  var ecoule: ClosedRange<Date>? {
+    guard let depuis, depuis <= Date() else { return nil }
+    return depuis...depuis.addingTimeInterval(12 * 3600)
   }
 }
 
-/// Le compte à rebours seul, pour la Dynamic Island.
+/// La ligne du temps, sur l'écran verrouillé : « Arrivée vers 14:35 », ou
+/// « Depuis 6:12 » ; sinon la phrase de l'étape.
 @available(iOS 16.2, *)
-private struct Rebours: View {
-  let parcours: Parcours
-  let eta: Date?
+private struct LigneTemps: View {
+  let temps: Temps
   let taille: CGFloat
 
   var body: some View {
-    if parcours.fini {
-      Text(parcours.motCourt)
+    Group {
+      if temps.parcours.fini {
+        Text(temps.parcours.sousTitre).foregroundColor(brume)
+      } else if let heure = temps.heure {
+        Text("Arrivée vers ").foregroundColor(brume)
+          + Text(heure, style: .time).foregroundColor(menthe)
+      } else if let ecoule = temps.ecoule {
+        Text("Depuis ").foregroundColor(brume)
+          + Text(timerInterval: ecoule, countsDown: false).foregroundColor(menthe)
+      } else {
+        Text(temps.parcours.sousTitre).foregroundColor(brume)
+      }
+    }
+    .font(geist(taille, demiGras: false))
+    .monospacedDigit()
+    .lineLimit(1)
+  }
+}
+
+/// Le temps seul, pour la Dynamic Island : « 14:35 » (arrivée) ou « 6:12 »
+/// (écoulé).
+@available(iOS 16.2, *)
+private struct TempsCourt: View {
+  let temps: Temps
+  let taille: CGFloat
+
+  var body: some View {
+    if temps.parcours.fini {
+      Text(temps.parcours.motCourt)
         .font(geist(taille))
         .foregroundColor(menthe)
-    } else if let eta, eta > Date() {
-      Text(timerInterval: Date()...eta, countsDown: true)
+    } else if let heure = temps.heure {
+      Text(heure, style: .time)
         .font(geist(taille))
         .monospacedDigit()
         .foregroundColor(menthe)
+        .multilineTextAlignment(.trailing)
+    } else if let ecoule = temps.ecoule {
+      Text(timerInterval: ecoule, countsDown: false)
+        .font(geist(taille))
+        .monospacedDigit()
+        .foregroundColor(brume)
         .multilineTextAlignment(.trailing)
     } else {
       Image(systemName: "clock")
@@ -226,7 +268,7 @@ struct TovoOrderWidget: Widget {
   var body: some WidgetConfiguration {
     ActivityConfiguration(for: TovoOrderAttributes.self) { context in
       let p = parcours(context)
-      let eta = arrivee(context)
+      let t = temps(context, p)
       // ÉCRAN VERROUILLÉ
       VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .center, spacing: 14) {
@@ -241,8 +283,10 @@ struct TovoOrderWidget: Widget {
               .minimumScaleFactor(0.75)
               .id(p.titre)
               .transition(.push(from: .bottom))
-            Arrivee(parcours: p, eta: eta, taille: 16)
-            if eta != nil && !p.fini {
+            LigneTemps(temps: t, taille: 16)
+            // La phrase de l'étape, sous le temps (quand le temps l'a
+            // remplacée sur la ligne du dessus).
+            if !p.fini && (t.heure != nil || t.ecoule != nil) {
               Text(p.sousTitre)
                 .font(geist(13, demiGras: false))
                 .foregroundColor(brume)
@@ -263,7 +307,7 @@ struct TovoOrderWidget: Widget {
       .activitySystemActionForegroundColor(menthe)
     } dynamicIsland: { context in
       let p = parcours(context)
-      let eta = arrivee(context)
+      let t = temps(context, p)
       return DynamicIsland {
         DynamicIslandExpandedRegion(.leading) {
           Medaillon(nom: p.image, taille: 48)
@@ -272,7 +316,7 @@ struct TovoOrderWidget: Widget {
             .padding(.leading, 2)
         }
         DynamicIslandExpandedRegion(.trailing) {
-          Rebours(parcours: p, eta: eta, taille: 19)
+          TempsCourt(temps: t, taille: 19)
             .frame(maxWidth: 80, alignment: .trailing)
             .padding(.trailing, 4)
         }
@@ -302,7 +346,7 @@ struct TovoOrderWidget: Widget {
           .id(p.image)
           .transition(.scale.combined(with: .opacity))
       } compactTrailing: {
-        Rebours(parcours: p, eta: eta, taille: 13)
+        TempsCourt(temps: t, taille: 13)
           .frame(maxWidth: 46)
       } minimal: {
         Medaillon(nom: p.image, taille: 22, cercle: false)
@@ -321,9 +365,12 @@ struct TovoOrderWidget: Widget {
     )
   }
 
-  private func arrivee(_ context: ActivityViewContext<TovoOrderAttributes>) -> Date? {
-    guard let secondes = context.attributes.etaAt else { return nil }
-    return Date(timeIntervalSince1970: secondes)
+  private func temps(_ context: ActivityViewContext<TovoOrderAttributes>, _ p: Parcours) -> Temps {
+    Temps(
+      parcours: p,
+      arrivee: context.state.arrivee.map { Date(timeIntervalSince1970: $0) },
+      depuis: context.attributes.placedAt.map { Date(timeIntervalSince1970: $0) }
+    )
   }
 }
 

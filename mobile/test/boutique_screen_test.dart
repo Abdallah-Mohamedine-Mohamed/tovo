@@ -12,6 +12,7 @@ import 'package:http/testing.dart';
 import 'package:tovo/core/api.dart';
 import 'package:tovo/core/catalog_image.dart';
 import 'package:tovo/core/panier.dart';
+import 'package:tovo/components/widgets/product_carousel.dart';
 import 'package:tovo/core/theme.dart';
 import 'package:tovo/features/catalog/boutique_screen.dart';
 import 'package:tovo/features/catalog/catalog_screen.dart';
@@ -199,23 +200,29 @@ void main() {
     await capturer(tester, '2-rayon');
   });
 
-  testVisuel('un gros rayon montre 4 produits et « Tout voir »', (
+  testVisuel('un gros rayon montre TOUS ses produits, sans flèche', (
     tester,
   ) async {
     await ouvrir(tester);
     final gros = (fixture['sections'] as List)
         .cast<Map<String, dynamic>>()
         .firstWhere((r) => (r['produits'] as num) > 6);
-    final nom = '${gros['name']}';
-    final lisible = nom[0] + nom.substring(1).toLowerCase();
-    final bouton = find.bySemanticsLabel('Tout voir, $lisible');
-    await tester.ensureVisible(bouton);
-    await tester.pumpAndSettle();
-    await tester.tap(bouton);
-    await tester.pumpAndSettle();
-    final catalogue = tester.widget<CatalogScreen>(find.byType(CatalogScreen));
-    expect(catalogue.categoryId, gros['id']);
-    expect(catalogue.merchantId, fixture['merchant']['id']);
+    final items = (gros['items'] as List).cast<Map<String, dynamic>>();
+    // Plus de « Tout voir » ni de « N produits » : le nom du rayon suffit.
+    expect(find.bySemanticsLabel(RegExp('^Tout voir')), findsNothing);
+    expect(find.textContaining(RegExp(r'^\d+ produits?$')), findsNothing);
+    // Le DERNIER produit du rayon est sur la page, en faisant défiler.
+    final dernier = find.byWidgetPredicate(
+      (w) => w is ProductTile && w.data['id'] == items.last['id'],
+    );
+    await tester.scrollUntilVisible(
+      dernier,
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(dernier, findsOneWidget);
+    expect(find.byType(CatalogScreen), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testVisuel('sans photo de couverture : pas de fausse image', (tester) async {

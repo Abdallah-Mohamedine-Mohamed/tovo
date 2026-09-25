@@ -51,18 +51,12 @@ class TovoLiveActivity {
         'status': status,
         'kind': courier ? 'courier' : 'food',
         'title': title,
-        // Le chronomètre de l'île part de là et tourne tout seul.
+        // Le temps écoulé (« Depuis 6:12 ») part de là et tourne tout seul.
+        // Plus de compte à rebours forfaitaire (18/35 min) : l'heure
+        // d'arrivée vient du serveur, sur les vraies distances, dès qu'un
+        // livreur est en route (décision du client, 25/09).
         if (placedAt != null)
           'placedAt': placedAt.millisecondsSinceEpoch / 1000,
-        // « Arrive dans 17:42 » : un compte à rebours que l'île fait
-        // défiler seule. 18 min pour un livreur (il vient, c'est tout),
-        // 35 pour un repas, qui doit d'abord être préparé.
-        if (placedAt != null)
-          'etaAt':
-              placedAt
-                  .add(Duration(minutes: courier ? 18 : 35))
-                  .millisecondsSinceEpoch /
-              1000,
         'mode': ?mode,
         'driver': ?_prenom(driver),
       });

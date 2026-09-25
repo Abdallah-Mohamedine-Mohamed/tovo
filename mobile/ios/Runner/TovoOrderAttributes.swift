@@ -10,6 +10,9 @@ struct TovoOrderAttributes: ActivityAttributes {
     var status: String
     /// Prénom du livreur, dès qu'il a accepté la course.
     var driver: String?
+    /// Heure d'arrivée (secondes depuis 1970), calculée par le serveur dès
+    /// qu'un livreur est en route : « Arrivée vers 14:35 ».
+    var arrivee: Double?
   }
 
   var orderId: String
@@ -20,10 +23,10 @@ struct TovoOrderAttributes: ActivityAttributes {
   /// Colis : « deposer » (on vient chez le client) ou « recuperer » (on
   /// va chercher ailleurs et on apporte au client).
   var mode: String?
-  /// Heure de la commande, en secondes depuis 1970 : le chronomètre part de
-  /// là et tourne tout seul, sans aucune mise à jour.
+  /// Heure de la commande, en secondes depuis 1970 : le temps écoulé
+  /// (« Depuis 6:12 ») part de là et tourne tout seul, sans mise à jour.
   var placedAt: Double?
-  /// Arrivée estimée, en secondes depuis 1970 : « Arrive dans 17:42 », un
-  /// compte à rebours qui défile tout seul.
+  /// Ancienne arrivée estimée (forfait 18/35 min), plus envoyée ni lue :
+  /// gardée pour que les activités déjà lancées se décodent toujours.
   var etaAt: Double?
 }

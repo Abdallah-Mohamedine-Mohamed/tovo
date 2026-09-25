@@ -1,6 +1,7 @@
 import { getMessaging } from 'firebase-admin/messaging';
 import { serviceClient } from './supabase.js';
 import { firebaseApp } from './notifications.js';
+import { estimerArrivee } from './arrivee.js';
 
 const terminal = new Set(['delivered', 'cancelled']);
 
@@ -8,7 +9,8 @@ const terminal = new Set(['delivered', 'cancelled']);
  * Met à jour la Live Activity du client (écran verrouillé, Dynamic Island).
  *
  * `content-state` doit correspondre à TovoOrderAttributes.ContentState côté
- * iOS : { status, driver }. `driver` est facultatif des deux côtés.
+ * iOS : { status, driver, arrivee }. `driver` et `arrivee` (heure d'arrivée,
+ * en secondes depuis 1970) sont facultatifs des deux côtés.
  */
 export async function updateLiveActivities(orderId: string, status: string, driver: string | null = null): Promise<void> {
   const db = serviceClient();
@@ -23,6 +25,9 @@ export async function updateLiveActivities(orderId: string, status: string, driv
 
   const now = Math.floor(Date.now() / 1000);
   const ended = terminal.has(status);
+  // Un livreur en route : l'heure d'arrivée, recalculée à chaque étape.
+  // Une estimation impossible ne doit jamais empêcher la mise à jour.
+  const arrivee = ended ? null : await estimerArrivee(db, orderId, status).catch(() => null);
   const responses = await getMessaging(app).sendEach(activities.map((activity) => ({
     token: activity.fcm_token as string,
     apns: {
@@ -32,7 +37,7 @@ export async function updateLiveActivities(orderId: string, status: string, driv
         aps: {
           timestamp: now,
           event: ended ? 'end' : 'update',
-          'content-state': { status, ...(driver ? { driver } : {}) },
+          'content-state': { status, ...(driver ? { driver } : {}), ...(arrivee ? { arrivee } : {}) },
           ...(ended ? { 'dismissal-date': now + 60 } : {}),
         },
       },

@@ -53,10 +53,14 @@ final class LiveActivityBridge: NSObject, FlutterStreamHandler {
     let status = args["status"] as? String ?? "pending"
     // Prénom du livreur, dès qu'il existe : l'île dit « Moussa vous l'apporte ».
     let driver = (args["driver"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-    let state = TovoOrderAttributes.ContentState(status: status, driver: driver)
     let existing = Activity<TovoOrderAttributes>.activities.first {
       $0.attributes.orderId == orderId
     }
+    // L'heure d'arrivée vient du serveur (push). Une mise à jour faite par
+    // l'app, au même statut, ne doit pas l'effacer.
+    let precedent = existing?.content.state
+    let arrivee = precedent?.status == status ? precedent?.arrivee : nil
+    let state = TovoOrderAttributes.ContentState(status: status, driver: driver, arrivee: arrivee)
 
     switch call.method {
     case "start":
