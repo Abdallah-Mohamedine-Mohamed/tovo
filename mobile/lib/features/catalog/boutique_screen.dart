@@ -340,13 +340,10 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
   /// removePadding : il la connaît encore).
   double get _haut => MediaQuery.paddingOf(context).top;
 
-  static const _coin = 32.0;
-
-  /// La photo, puis la page blanche qui monte dessus. L'arrondi est celui de
-  /// la PAGE, en haut à droite : le bord bas de la photo file droit, puis
-  /// plonge vers le bas contre le bord de l'écran — la photo coule dans
-  /// l'arrondi (croquis du client, 25/09). Le logo reste à cheval sur la
-  /// ligne, à gauche, comme avant.
+  /// La photo, bord bas droit et net, et le logo à cheval sur la ligne, à
+  /// gauche. Plate : l'arrondi (sur la photo, puis sur la page) n'a pas
+  /// convaincu, et un bord franc laisse le logo seul marquer la jonction —
+  /// comme chez Uber Eats (25/09).
   Widget _enTete(String couverture) {
     final basPhoto = 200 + _haut;
     return SizedBox(
@@ -357,9 +354,7 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
             left: 0,
             right: 0,
             top: 0,
-            // La photo descend sous la page de la hauteur de l'arrondi :
-            // c'est elle qu'on voit dans le coin.
-            height: basPhoto + _coin,
+            height: basPhoto,
             // Calée à GAUCHE : l'en-tête est plus haut que la couverture (2:1),
             // l'image est donc rognée sur les côtés. Les couvertures portent
             // le logo en haut à droite ; rogné au milieu, il finissait coupé
@@ -372,20 +367,6 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
               decodeWidth: 900,
               errorBuilder: (_, __, ___) =>
                   const ColoredBox(color: Color(0xFFF4F5F5)),
-            ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            top: basPhoto,
-            bottom: 0,
-            child: const DecoratedBox(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.only(
-                  topRight: Radius.circular(_coin),
-                ),
-              ),
             ),
           ),
           Positioned(left: 16, right: 16, top: _haut + 8, child: _boutons()),

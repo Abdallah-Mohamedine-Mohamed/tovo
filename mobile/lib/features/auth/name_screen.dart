@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -86,18 +84,14 @@ class _DemandeDeNomState extends State<DemandeDeNom> {
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark,
+      // Heure et batterie en blanc, sur le vert de l'image.
+      value: SystemUiOverlayStyle.light,
       child: Scaffold(
         backgroundColor: TovoTheme.canvas,
         body: EcranDEntree(
-          heros: (hauteur) => LayoutBuilder(
-            builder: (context, c) {
-              final taille = math.min(c.maxWidth * 0.8, hauteur * 0.94);
-              return AnneauTovo(
-                taille: taille,
-                centre: _Salut(prenom: _prenom, taille: taille),
-              );
-            },
+          heros: (margeHaut) => AnneauTovo(
+            margeHaut: margeHaut,
+            centre: _Salut(prenom: _prenom),
           ),
           contenu: [
             const Text(
@@ -117,6 +111,7 @@ class _DemandeDeNomState extends State<DemandeDeNom> {
             const SizedBox(height: 24),
             TextField(
               controller: _nom,
+              scrollPadding: const EdgeInsets.only(bottom: 72),
               autofillHints: const [AutofillHints.name],
               textCapitalization: TextCapitalization.words,
               textInputAction: TextInputAction.done,
@@ -178,20 +173,20 @@ class _DemandeDeNomState extends State<DemandeDeNom> {
 /// Le centre de l'anneau : « Bonjour », puis « Bonjour, Amina » à mesure
 /// que le client tape. L'app le reconnaît avant même qu'il ait validé.
 class _Salut extends StatelessWidget {
-  const _Salut({required this.prenom, required this.taille});
+  const _Salut({required this.prenom});
 
   final String prenom;
-  final double taille;
 
   @override
   Widget build(BuildContext context) {
-    final style = TextStyle(
+    // En blanc sur le vert, comme le logo qu'il remplace.
+    const style = TextStyle(
       fontFamily: TovoTheme.policeClient,
-      fontSize: (taille * 0.075).clamp(16.0, 28.0),
+      fontSize: 28,
       height: 1.2,
       fontWeight: FontWeight.w600,
       letterSpacing: -0.5,
-      color: TovoTheme.teal,
+      color: Color(0xCCFFFFFF),
     );
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -208,7 +203,7 @@ class _Salut extends StatelessWidget {
                     prenom,
                     key: const ValueKey('salut-prenom'),
                     maxLines: 1,
-                    style: style.copyWith(color: TovoTheme.ink),
+                    style: style.copyWith(color: Colors.white),
                   ),
                 ),
         ),

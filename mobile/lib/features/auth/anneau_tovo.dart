@@ -3,103 +3,97 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/theme.dart';
 
-/// L'anneau d'accueil : tout ce que Tovo apporte — un repas, des courses,
-/// un parfum, un colis — disposé en cercle, et au centre ce qui les relie.
+/// L'image des écrans d'entrée, à la Glovo : tout ce que Tovo apporte — un
+/// repas, des courses, un parfum, un colis — posé AUX BORDS de l'écran, en
+/// partie rogné, sur le vert Tovo ; au milieu, le logo en blanc.
 ///
-/// Le même anneau ouvre la connexion (le logo au centre) et referme
-/// l'inscription (le prénom du client au centre) : le parcours commence par
-/// Tovo et finit par lui.
-///
-/// L'anneau tourne lentement sur lui-même ; le centre, lui, ne bouge pas.
-/// La rotation est faite ici plutôt que par le GIF fourni : même effet, une
-/// image fixe de 110 Ko au lieu de 9,9 Mo, fluide à toutes les cadences. Si
-/// le téléphone demande de réduire les animations, l'anneau reste immobile.
-class AnneauTovo extends StatefulWidget {
-  const AnneauTovo({super.key, required this.taille, this.centre});
+/// Les objets forment un cercle plus large que l'écran : ceux des côtés
+/// sortent à gauche et à droite, ceux du haut passent sous la barre d'état,
+/// ceux du bas sous la feuille. On ne voit donc jamais « un cercle autour du
+/// logo », mais des objets qui débordent du cadre. Immobile : la rotation
+/// n'a pas convaincu (retour du client, 25/09).
+class AnneauTovo extends StatelessWidget {
+  const AnneauTovo({super.key, this.centre, this.margeHaut = 0});
 
   /// PNG transparent recadré en carré sur le centre de l'anneau.
   static const asset = 'assets/branding/accueil-anneau.webp';
 
-  /// Un tour complet : lent, pour qu'on le sente vivre sans le regarder.
-  static const tour = Duration(seconds: 40);
+  /// Le fond : le vert Tovo, franc, comme le jaune de Glovo.
+  static const fond = TovoTheme.teal;
 
-  final double taille;
+  /// Diamètre de l'anneau rapporté à la largeur de l'écran : un peu plus
+  /// large que lui, pour que les objets des côtés soient coupés à moitié.
+  static const debord = 1.12;
 
-  /// Ce qui se tient au milieu. Par défaut : le logo.
+  /// Ce qui se tient au milieu. Par défaut : le logo, en blanc.
   final Widget? centre;
 
-  @override
-  State<AnneauTovo> createState() => _AnneauTovoState();
-}
-
-class _AnneauTovoState extends State<AnneauTovo>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _rotation = AnimationController(
-    vsync: this,
-    duration: AnneauTovo.tour,
-  );
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (MediaQuery.disableAnimationsOf(context)) {
-      _rotation.stop();
-    } else if (!_rotation.isAnimating) {
-      _rotation.repeat();
-    }
-  }
-
-  @override
-  void dispose() {
-    _rotation.dispose();
-    super.dispose();
-  }
+  /// La barre d'état : l'image passe dessous, mais le logo se centre dans
+  /// ce qui reste visible.
+  final double margeHaut;
 
   @override
   Widget build(BuildContext context) {
-    final taille = widget.taille;
-    return TweenAnimationBuilder<double>(
-      // Une entrée douce : l'anneau se pose, il ne surgit pas.
-      tween: Tween(begin: 0, end: 1),
-      duration: TovoTheme.ample,
-      curve: TovoTheme.courbe,
-      builder: (context, t, child) => Opacity(
-        opacity: t,
-        child: Transform.scale(scale: 0.94 + 0.06 * t, child: child),
-      ),
-      child: SizedBox.square(
-        dimension: taille,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Positioned.fill(
-              child: RotationTransition(
-                turns: _rotation,
-                child: Image.asset(
-                  AnneauTovo.asset,
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.medium,
-                  // Sans l'image, le centre reste lisible seul.
-                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+    return LayoutBuilder(
+      builder: (context, c) {
+        final diametre = c.maxWidth * debord;
+        return ClipRect(
+          child: Stack(
+            children: [
+              Positioned(
+                top: margeHaut,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Stack(
+                  alignment: Alignment.center,
+                  clipBehavior: Clip.none,
+                  children: [
+                    // Plus grand que son cadre : il déborde, le cadre le rogne.
+                    OverflowBox(
+                      maxWidth: diametre,
+                      maxHeight: diametre,
+                      child: TweenAnimationBuilder<double>(
+                        // Une entrée douce : les objets se posent, ils ne surgissent
+                        // pas.
+                        tween: Tween(begin: 0, end: 1),
+                        duration: TovoTheme.ample,
+                        curve: TovoTheme.courbe,
+                        builder: (context, t, child) => Opacity(
+                          opacity: t,
+                          child: Transform.scale(
+                            scale: 1.04 - 0.04 * t,
+                            child: child,
+                          ),
+                        ),
+                        child: Image.asset(
+                          asset,
+                          width: diametre,
+                          height: diametre,
+                          fit: BoxFit.contain,
+                          filterQuality: FilterQuality.medium,
+                          // Sans l'image, le logo reste lisible seul.
+                          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                        ),
+                      ),
+                    ),
+                    centre ??
+                        SvgPicture.asset(
+                          'assets/branding/tovo-logo.svg',
+                          width: (c.maxWidth * 0.42).clamp(120.0, 200.0),
+                          colorFilter: const ColorFilter.mode(
+                            Colors.white,
+                            BlendMode.srcIn,
+                          ),
+                          semanticsLabel: 'Tovo',
+                        ),
+                  ],
                 ),
               ),
-            ),
-            // Le vide intérieur fait à peu près 60 % du carré.
-            SizedBox(
-              width: taille * 0.52,
-              child: Center(
-                child:
-                    widget.centre ??
-                    SvgPicture.asset(
-                      'assets/branding/tovo-logo.svg',
-                      width: taille * 0.34,
-                      semanticsLabel: 'Tovo',
-                    ),
-              ),
-            ),
-          ],
-        ),
-      ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

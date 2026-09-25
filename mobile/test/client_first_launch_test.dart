@@ -51,32 +51,34 @@ void main() {
     home: home,
   );
 
-  testWidgets('l’anneau tourne, le logo au centre reste immobile', (
+  testWidgets('l’image déborde des bords de l’écran, et ne tourne pas', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    // L'écran lui-même (MediaQuery), pas seulement la surface : un iPhone.
+    tester.view.physicalSize = const Size(1170, 2532);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       app(const AuthScreen(titre: 'Tovo', sousTitre: ''), animations: true),
     );
-    await tester.pump(const Duration(seconds: 10));
-    final rotation = tester.widget<RotationTransition>(
+    await tester.pump(const Duration(seconds: 2));
+    final image = find.descendant(
+      of: find.byType(AnneauTovo),
+      matching: find.byType(Image),
+    );
+    // Plus large que l'écran : les objets des côtés sont rognés, à la Glovo.
+    expect(tester.getSize(image).width, greaterThan(390));
+    expect(tester.getRect(image).left, lessThan(0));
+    expect(
       find.descendant(
         of: find.byType(AnneauTovo),
         matching: find.byType(RotationTransition),
       ),
-    );
-    // Dix secondes sur un tour de quarante : un quart de tour.
-    expect(rotation.turns.value, closeTo(0.25, 0.01));
-    expect(
-      find.ancestor(
-        of: find.bySemanticsLabel('Tovo'),
-        matching: find.byType(RotationTransition),
-      ),
       findsNothing,
     );
-    // L'écran quitté, le ticker s'arrête avec lui.
-    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
   });
 
   Future<void> capturer(WidgetTester tester, String nom) async {
@@ -118,6 +120,10 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    // L'écran lui-même (MediaQuery), pas seulement la surface : un iPhone.
+    tester.view.physicalSize = const Size(1170, 2532);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       app(const AuthScreen(titre: 'Tovo', sousTitre: '')),
     );
@@ -164,14 +170,28 @@ void main() {
     await tester.tap(find.text('Continuer'));
     await tester.pump();
     expect(find.text('Numéro incomplet.'), findsOneWidget);
+
+    // Clavier d'iPhone ouvert (336 points) : l'image reste, « Continuer »
+    // est posé juste au-dessus.
+    tester.view.viewInsets = const FakeViewPadding(bottom: 1008);
+    await tester.pumpAndSettle();
+    expect(find.byType(AnneauTovo), findsOneWidget);
+    expect(
+      tester.getRect(find.text('Continuer')).bottom,
+      lessThanOrEqualTo(844 - 336),
+    );
+    await capturer(tester, '1-numero-clavier');
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('petit écran, clavier ouvert : le champ passe avant l’anneau', (
+  testWidgets('petit écran, clavier ouvert : « Continuer » remonte au-dessus', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(320, 568));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    tester.view.physicalSize = const Size(960, 1704);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       app(const AuthScreen(titre: 'Tovo', sousTitre: '')),
     );
@@ -182,8 +202,11 @@ void main() {
     tester.view.viewInsets = const FakeViewPadding(bottom: 780);
     addTearDown(tester.view.resetViewInsets);
     await tester.pumpAndSettle();
-    expect(find.byType(AnneauTovo), findsNothing);
-    await tester.ensureVisible(find.text('Continuer'));
+    // Rien ne disparaît : l'image reste, la page défile, et « Continuer »
+    // est juste au-dessus du clavier, touchable sans défiler.
+    expect(find.byType(AnneauTovo), findsOneWidget);
+    final bouton = tester.getRect(find.text('Continuer'));
+    expect(bouton.bottom, lessThanOrEqualTo(568 - 260));
     await tester.tap(find.text('Continuer'));
     await tester.pump();
     expect(find.text('Numéro incomplet.'), findsOneWidget);
@@ -195,6 +218,10 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    // L'écran lui-même (MediaQuery), pas seulement la surface : un iPhone.
+    tester.view.physicalSize = const Size(1170, 2532);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       app(const AuthScreen(titre: 'Tovo', sousTitre: '')),
     );
@@ -226,6 +253,10 @@ void main() {
   testWidgets('les apps livreur et boutique gardent leur nom', (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    // L'écran lui-même (MediaQuery), pas seulement la surface : un iPhone.
+    tester.view.physicalSize = const Size(1170, 2532);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       app(const AuthScreen(titre: 'Tovo Livreur', sousTitre: '')),
     );
@@ -242,6 +273,10 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    // L'écran lui-même (MediaQuery), pas seulement la surface : un iPhone.
+    tester.view.physicalSize = const Size(1170, 2532);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       app(
         const AuthScreen(
@@ -289,6 +324,10 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    // L'écran lui-même (MediaQuery), pas seulement la surface : un iPhone.
+    tester.view.physicalSize = const Size(1170, 2532);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(app(DemandeDeNom(onEnregistre: () {})));
     await tester.pumpAndSettle();
 
@@ -319,6 +358,9 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(320, 568));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    tester.view.physicalSize = const Size(960, 1704);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(app(DemandeDeNom(onEnregistre: () {})));
     await tester.pumpAndSettle();
     await tester.enterText(

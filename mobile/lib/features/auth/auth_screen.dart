@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -191,7 +190,11 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark,
+      // Sur le vert de l'image (numéro) : heure et batterie en blanc. Sur
+      // le code, fond clair : en foncé.
+      value: _etape == _Etape.numero
+          ? SystemUiOverlayStyle.light
+          : SystemUiOverlayStyle.dark,
       child: PopScope(
         // Le retour système, sur le code, ramène au numéro — il ne ferme pas
         // l'app au milieu de la connexion.
@@ -240,10 +243,7 @@ class _AuthScreenState extends State<AuthScreen> {
       onRetour: Navigator.of(context).canPop()
           ? () => Navigator.of(context).pop()
           : null,
-      heros: (hauteur) => LayoutBuilder(
-        builder: (context, c) =>
-            AnneauTovo(taille: math.min(c.maxWidth * 0.8, hauteur * 0.94)),
-      ),
+      heros: (margeHaut) => AnneauTovo(margeHaut: margeHaut),
       contenu: [
         const Text(
           'Bienvenue',
@@ -343,6 +343,9 @@ class _AuthScreenState extends State<AuthScreen> {
         child: TextField(
           key: const ValueKey('auth-phone'),
           controller: _numero,
+          // En défilant jusqu'au champ, la page garde aussi la place du
+          // message d'erreur qui s'affiche dessous.
+          scrollPadding: const EdgeInsets.only(bottom: 72),
           keyboardType: TextInputType.phone,
           autofillHints: const [AutofillHints.telephoneNumberNational],
           textInputAction: TextInputAction.done,

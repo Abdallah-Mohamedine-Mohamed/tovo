@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import 'anneau_tovo.dart';
 
 /// La mise en page des écrans d'entrée, à la Glovo : une image en pleine
 /// largeur jusque sous la barre d'état, une feuille aux coins arrondis qui
 /// monte dessus, le formulaire dans la feuille et le bouton tout en bas.
 ///
-/// Clavier ouvert, l'image s'efface et la feuille remonte : le champ et le
-/// bouton restent visibles au-dessus du clavier, même sur un petit écran.
+/// Clavier ouvert, RIEN ne disparaît : l'image garde sa taille, la page
+/// défile d'elle-même jusqu'au champ touché, et « Continuer » remonte juste
+/// au-dessus du clavier. La version précédente effaçait l'image et faisait
+/// sauter toute la page (retour du client, 25/09).
 class EcranDEntree extends StatelessWidget {
   const EcranDEntree({
     super.key,
@@ -17,8 +20,8 @@ class EcranDEntree extends StatelessWidget {
     this.onRetour,
   });
 
-  /// Le contenu de l'image, selon la place disponible (sous la barre d'état).
-  final Widget Function(double hauteur) heros;
+  /// L'image, qui reçoit la hauteur de la barre d'état qu'elle recouvre.
+  final Widget Function(double margeHaut) heros;
   final List<Widget> contenu;
   final Widget bouton;
   final VoidCallback? onRetour;
@@ -28,105 +31,76 @@ class EcranDEntree extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final haut = MediaQuery.paddingOf(context).top;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Le clavier se lit sur l'écran lui-même : le Scaffold retire sa
-        // hauteur du MediaQuery qu'il transmet à son contenu. Lu ICI, relu à
-        // chaque redimensionnement (l'ouverture du clavier en est un).
-        final clavier = View.of(context).viewInsets.bottom > 0;
-        final hauteurHeros = clavier
-            ? 0.0
-            : (constraints.maxHeight * 0.42).clamp(200.0, 380.0).toDouble();
-        final placeHeros = hauteurHeros - haut;
-        return Stack(
+    // La hauteur de l'ÉCRAN, que le clavier ne change pas : l'image ne
+    // bouge pas quand il s'ouvre.
+    final hauteurHeros = (MediaQuery.sizeOf(context).height * 0.40)
+        .clamp(220.0, 360.0)
+        .toDouble();
+    return Stack(
+      children: [
+        Column(
           children: [
-            AnimatedPositioned(
-              duration: TovoTheme.normal,
-              curve: TovoTheme.courbe,
-              top: 0,
-              left: 0,
-              right: 0,
-              height: hauteurHeros + _arrondi,
-              child: ColoredBox(
-                color: TovoTheme.tealSoft,
-                child: Padding(
-                  padding: EdgeInsets.only(top: haut, bottom: _arrondi),
-                  child: placeHeros >= 120
-                      ? Center(child: heros(placeHeros))
-                      : const SizedBox.shrink(),
-                ),
-              ),
-            ),
-            AnimatedPositioned(
-              duration: TovoTheme.normal,
-              curve: TovoTheme.courbe,
-              top: hauteurHeros,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: TovoTheme.canvas,
-                  borderRadius: BorderRadius.vertical(
-                    top: Radius.circular(clavier ? 0 : _arrondi),
-                  ),
-                ),
-                // Le bouton reste en bas quand il y a la place ; sinon (petit
-                // écran, feuille qui remonte) tout défile, sans déborder.
-                child: SafeArea(
-                  top: clavier,
-                  child: CustomScrollView(
-                    slivers: [
-                      SliverFillRemaining(
-                        hasScrollBody: false,
-                        child: Column(
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                24,
-                                28,
-                                24,
-                                16,
-                              ),
-                              child: Center(
-                                child: ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 420,
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: contenu,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const Spacer(),
-                            EnBasDEcran(child: bouton),
-                          ],
+            Expanded(
+              child: SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      height: hauteurHeros + _arrondi,
+                      child: ColoredBox(
+                        color: AnneauTovo.fond,
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: _arrondi),
+                          child: heros(haut),
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                    // La feuille monte sur l'image de la hauteur de son
+                    // arrondi.
+                    Transform.translate(
+                      offset: const Offset(0, -_arrondi),
+                      child: DecoratedBox(
+                        decoration: const BoxDecoration(
+                          color: TovoTheme.canvas,
+                          borderRadius: BorderRadius.vertical(
+                            top: Radius.circular(_arrondi),
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
+                          child: Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 420),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: contenu,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            if (onRetour != null)
-              Positioned(
-                top: haut + 4,
-                left: 8,
-                child: IconButton(
-                  tooltip: 'Retour',
-                  onPressed: onRetour,
-                  icon: const Icon(
-                    Icons.arrow_back_rounded,
-                    color: TovoTheme.ink,
-                  ),
-                ),
-              ),
+            // Hors du défilement : toujours visible, au-dessus du clavier.
+            SafeArea(top: false, child: EnBasDEcran(child: bouton)),
           ],
-        );
-      },
+        ),
+        if (onRetour != null)
+          Positioned(
+            top: haut + 4,
+            left: 8,
+            child: IconButton(
+              tooltip: 'Retour',
+              onPressed: onRetour,
+              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+            ),
+          ),
+      ],
     );
   }
 }
