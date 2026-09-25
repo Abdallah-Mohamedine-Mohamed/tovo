@@ -26,6 +26,9 @@ struct TovoOrderAttributes: ActivityAttributes {
   /// Heure de la commande, en secondes depuis 1970 : le temps écoulé
   /// (« Depuis 6:12 ») part de là et tourne tout seul, sans mise à jour.
   var placedAt: Double?
+  /// Prénom du client : l'île s'adresse à lui, au début ou à la fin de la
+  /// phrase (« Awa, votre commande est confirmée », « Bon appétit, Awa »).
+  var client: String?
   /// Ancienne arrivée estimée (forfait 18/35 min), plus envoyée ni lue :
   /// gardée pour que les activités déjà lancées se décodent toujours.
   var etaAt: Double?

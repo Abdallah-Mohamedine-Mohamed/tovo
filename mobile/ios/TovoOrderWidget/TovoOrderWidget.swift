@@ -5,19 +5,21 @@ import WidgetKit
 
 // Le suivi de commande sur l'écran verrouillé et dans la Dynamic Island.
 //
-// TOUT BOUGE, app fermée, sans aucune mise à jour du serveur — c'est le
-// système qui fait défiler (retour du client, 25/09 : « je ne veux plus voir
-// de temps figé ») :
-//   - le TEMPS ÉCOULÉ depuis la commande, en grand, qui tourne à la seconde ;
-//   - un ANNEAU autour de l'illustration, qui se remplit à mesure que la
-//     course avance (jusqu'à l'heure d'arrivée calculée par le serveur) ;
-//   - le segment de l'étape en cours, qui se remplit lui aussi.
-// Les étapes arrivent par push APNs ; le titre et l'illustration changent
-// alors avec une transition.
+// CE QUI BOUGE, app fermée, sans aucune mise à jour du serveur — c'est le
+// système qui fait défiler :
+//   - le temps écoulé depuis la commande (« 12:34 min »), à la seconde ;
+//   - le segment de l'étape en cours, qui se remplit à mesure que la course
+//     avance (jusqu'à l'arrivée calculée par le serveur).
+// Les étapes arrivent par push APNs : la phrase, l'étape et l'illustration
+// changent alors avec une transition.
 //
-// iOS n'autorise pas d'animation libre dans une Live Activity (pas de halo
-// qui pulse) : seuls les compteurs et les barres liés au temps défilent. On
-// s'appuie donc sur eux.
+// LA PHRASE s'adresse au client par son prénom, au début ou à la fin
+// (« Awa, votre commande est confirmée », « Bon appétit, Awa ! »), et nomme
+// le livreur en menthe. L'étape, en haut à droite, dit où l'on en est en
+// mots simples (« Colis récupéré », « En cuisine »).
+//
+// DANS L'ÎLE, les illustrations sont posées telles quelles, grandes, sans
+// cercle autour ; sur l'écran verrouillé, elles gardent leur médaillon.
 
 private let menthe = Color(red: 0.37, green: 0.88, blue: 0.77)
 private let brume = Color.white.opacity(0.6)
@@ -30,7 +32,7 @@ private func geist(_ taille: CGFloat, demiGras: Bool = true) -> Font {
   .custom(demiGras ? "Geist-SemiBold" : "Geist-Medium", size: taille)
 }
 
-/// Une illustration 3D du dossier Ressources. La version « -mini » (72 px)
+/// Une illustration 3D du dossier Ressources. La version « -mini » (96 px)
 /// sert dans l'île : une image trop lourde y apparaît en carré gris.
 private func illustration(_ nom: String) -> UIImage? {
   guard let url = Bundle.main.url(forResource: nom, withExtension: "png", subdirectory: "Ressources") else {
@@ -45,6 +47,7 @@ private struct Parcours {
   let kind: String
   let mode: String
   let driver: String?
+  let client: String?
   let boutique: String
 
   var colis: Bool { kind == "courier" }
@@ -93,54 +96,79 @@ private struct Parcours {
     }
   }
 
-  /// L'étape en un mot, en haut à droite de la carte.
+  /// L'étape, en mots simples.
   var etape: String {
     if annule { return "Annulée" }
-    if livre { return colis ? "Livré" : "Livrée" }
-    switch index {
-    case 0: return colis ? "Recherche" : "Confirmation"
-    case 1: return colis ? "Livreur trouvé" : "En cuisine"
-    default: return "En route"
-    }
-  }
-
-  /// La phrase de l'étape. Le prénom du livreur, quand il y en a un, y
-  /// figure : il sera mis en menthe.
-  var phrase: String {
-    if annule { return colis ? "Course annulée" : "Commande annulée" }
-    if let nom = driver, !nom.isEmpty {
-      switch status {
-      case "assigned":
-        if colis && !recuperer { return "\(nom) arrive chez vous" }
-        return colis ? "\(nom) part chercher le colis" : "\(nom) va chercher votre commande"
-      case "picked_up", "delivering":
-        return colis && !recuperer ? "\(nom) livre votre colis" : "\(nom) est en route vers vous"
-      case "delivered":
-        return colis ? "\(nom) a livré, merci !" : "C’est arrivé, bon appétit !"
-      default: break
-      }
-    }
     if colis {
       switch status {
+      case "assigned": return recuperer ? "Vers votre colis" : "Livreur en chemin"
       case "picked_up": return "Colis récupéré"
       case "delivering": return "Colis en route"
       case "delivered": return recuperer ? "Colis remis" : "Colis livré"
-      default: return "On cherche un livreur"
+      default: return "Recherche d’un livreur"
       }
     }
     switch status {
-    case "pending": return "\(boutique) confirme votre commande"
-    case "confirmed": return "Commande acceptée"
-    case "preparing": return "Votre repas se prépare, avec soin"
-    case "ready": return "Prête, un livreur arrive"
-    case "assigned": return "Un livreur va la chercher"
-    case "picked_up", "delivering": return "En route vers vous"
-    case "delivered": return "C’est arrivé, bon appétit !"
-    default: return boutique
+    case "pending": return "Envoyée"
+    case "confirmed": return "Confirmée"
+    case "preparing": return "En cuisine"
+    case "ready": return "Prête"
+    case "assigned": return "Livreur trouvé"
+    case "picked_up": return "Récupérée"
+    case "delivering": return "En route"
+    case "delivered": return "Livrée"
+    default: return "En cours"
+    }
+  }
+
+  /// La phrase de l'étape, qui s'adresse au client par son prénom — au début
+  /// (« Awa, … ») ou à la fin (« …, Awa ») selon l'étape, pour que ça sonne
+  /// juste. Sans prénom connu, la phrase s'en passe.
+  var phrase: String {
+    let livreur = (driver?.isEmpty == false) ? driver! : "Votre livreur"
+    func debut(_ texte: String) -> String {
+      guard let c = client, !c.isEmpty else { return majuscule(texte) }
+      return "\(c), \(texte)"
+    }
+    func fin(_ texte: String, _ ponctuation: String = "") -> String {
+      guard let c = client, !c.isEmpty else { return texte + ponctuation }
+      return "\(texte), \(c)\(ponctuation)"
+    }
+    if annule { return debut(colis ? "votre course est annulée" : "votre commande est annulée") }
+    if colis {
+      switch status {
+      case "assigned":
+        return recuperer
+          ? fin("\(livreur) part chercher votre colis")
+          : fin("\(livreur) arrive chercher votre colis")
+      case "picked_up":
+        return recuperer ? debut("\(livreur) a récupéré votre colis") : fin("Colis récupéré", " !")
+      case "delivering":
+        return recuperer ? fin("Votre colis arrive") : debut("votre colis est en route")
+      case "delivered":
+        return fin(recuperer ? "Colis remis, merci" : "Colis livré, merci", " !")
+      default:
+        return debut("on vous trouve un livreur")
+      }
+    }
+    switch status {
+    case "pending": return debut("\(boutique) confirme votre commande")
+    case "confirmed": return debut("votre commande est confirmée")
+    case "preparing": return fin("Votre repas se prépare")
+    case "ready": return debut("votre commande est prête")
+    case "assigned": return fin("\(livreur) va chercher votre commande")
+    case "picked_up", "delivering": return debut("\(livreur) arrive avec votre commande")
+    case "delivered": return fin("Bon appétit", " !")
+    default: return fin("Votre commande est en cours")
     }
   }
 
   var motCourt: String { annule ? "Annulée" : (colis ? "Livré" : "Livrée") }
+}
+
+private func majuscule(_ texte: String) -> String {
+  guard let premiere = texte.first else { return texte }
+  return premiere.uppercased() + texte.dropFirst()
 }
 
 /// Le temps de la course : depuis la commande, jusqu'à l'arrivée prévue.
@@ -157,69 +185,56 @@ private struct Chrono {
     let prevue = context.state.arrivee.map { Date(timeIntervalSince1970: $0) }
       ?? commande.addingTimeInterval(p.colis ? 25 * 60 : 40 * 60)
     debut = min(commande, maintenant)
-    // L'anneau ne doit jamais être plein avant l'arrivée : s'il reste moins
-    // d'une minute, on lui en laisse une.
+    // La barre ne doit jamais être pleine avant l'arrivée.
     fin = max(prevue, maintenant.addingTimeInterval(60), debut.addingTimeInterval(60))
   }
 
-  /// Ce que l'anneau et les segments parcourent.
+  /// Ce que le segment de l'étape en cours parcourt.
   var parcours: ClosedRange<Date> { debut...fin }
 
   /// Le temps écoulé tourne jusqu'à 12 h : largement assez pour une course.
   var ecoule: ClosedRange<Date> { debut...debut.addingTimeInterval(12 * 3600) }
 }
 
-/// Le temps écoulé depuis la commande, qui tourne à la seconde.
+/// L'illustration dans son médaillon, net : un fond léger et un trait blanc
+/// fin — pour l'écran verrouillé.
 @available(iOS 16.2, *)
-private struct TempsEcoule: View {
-  let chrono: Chrono
-  let taille: CGFloat
-  var couleur: Color = .white
-  var largeur: CGFloat
-
-  var body: some View {
-    Text(timerInterval: chrono.ecoule, countsDown: false)
-      .font(geist(taille))
-      .monospacedDigit()
-      .foregroundColor(couleur)
-      // Un compteur prend toute la largeur qu'on lui laisse : on la borne.
-      .frame(maxWidth: largeur, alignment: .leading)
-  }
-}
-
-/// L'illustration dans un anneau qui se remplit avec le temps.
-@available(iOS 16.2, *)
-private struct Anneau: View {
+private struct Medaillon: View {
   let nom: String
   let taille: CGFloat
-  let chrono: Chrono
-  let fini: Bool
-  var mini = false
-
-  private var trait: CGFloat { max(2, taille / 15) }
 
   var body: some View {
     ZStack {
-      Circle().fill(Color.white.opacity(0.07))
-      if fini {
-        Circle().stroke(menthe, lineWidth: trait)
-      } else {
-        Circle().stroke(piste, lineWidth: trait)
-        ProgressView(
-          timerInterval: chrono.parcours,
-          countsDown: false,
-          label: { EmptyView() },
-          currentValueLabel: { EmptyView() }
-        )
-        .progressViewStyle(.circular)
-        .tint(menthe)
-        .frame(width: taille, height: taille)
+      Circle().fill(Color.white.opacity(0.1))
+      Circle().strokeBorder(Color.white.opacity(0.9), lineWidth: 1.5)
+      if let image = illustration(nom) {
+        Image(uiImage: image)
+          .resizable()
+          .interpolation(.high)
+          .scaledToFit()
+          .padding(taille * 0.14)
       }
+    }
+    .frame(width: taille, height: taille)
+  }
+}
+
+/// L'illustration seule, grande, sans cercle — pour la Dynamic Island.
+@available(iOS 16.2, *)
+private struct Icone: View {
+  let nom: String
+  let taille: CGFloat
+  var mini = true
+
+  var body: some View {
+    Group {
       if let image = illustration(mini ? "\(nom)-mini" : nom) {
         Image(uiImage: image)
           .resizable()
+          .interpolation(.high)
           .scaledToFit()
-          .padding(taille * (mini ? 0.2 : 0.17))
+      } else {
+        Color.clear
       }
     }
     .frame(width: taille, height: taille)
@@ -277,6 +292,30 @@ private func phrase(_ p: Parcours) -> Text {
     + Text(String(texte[r.upperBound...])).foregroundColor(.white)
 }
 
+/// « 12:34 min » : le temps écoulé, qui tourne, et son unité.
+@available(iOS 16.2, *)
+private struct TempsEcoule: View {
+  let chrono: Chrono
+  let taille: CGFloat
+  let largeur: CGFloat
+  var suite = "min"
+
+  var body: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 4) {
+      Text(timerInterval: chrono.ecoule, countsDown: false)
+        .font(geist(taille))
+        .monospacedDigit()
+        .foregroundColor(menthe)
+        // Un compteur prend toute la largeur qu'on lui laisse : on la borne.
+        .frame(maxWidth: largeur, alignment: .leading)
+      Text(suite)
+        .font(geist(taille * 0.8, demiGras: false))
+        .foregroundColor(brume)
+        .lineLimit(1)
+    }
+  }
+}
+
 @available(iOS 16.2, *)
 struct TovoOrderWidget: Widget {
   var body: some WidgetConfiguration {
@@ -291,17 +330,18 @@ struct TovoOrderWidget: Widget {
             .foregroundColor(.white)
           Spacer()
           Text(p.etape)
-            .font(geist(13, demiGras: false))
+            .font(geist(13))
             .foregroundColor(p.annule ? brume : menthe)
             .id(p.etape)
             .transition(.opacity)
         }
         HStack(alignment: .center, spacing: 12) {
-          VStack(alignment: .leading, spacing: 4) {
+          VStack(alignment: .leading, spacing: 6) {
             phrase(p)
-              .font(geist(18))
+              .font(geist(19))
               .lineLimit(2)
               .minimumScaleFactor(0.8)
+              .fixedSize(horizontal: false, vertical: true)
               .id(p.phrase)
               .transition(.push(from: .bottom))
             if p.fini {
@@ -310,18 +350,11 @@ struct TovoOrderWidget: Widget {
                 .foregroundColor(brume)
                 .lineLimit(1)
             } else {
-              HStack(alignment: .firstTextBaseline, spacing: 6) {
-                TempsEcoule(chrono: c, taille: 40, largeur: 150)
-                  .fixedSize(horizontal: false, vertical: true)
-                Text("depuis la commande")
-                  .font(geist(13, demiGras: false))
-                  .foregroundColor(brume)
-                  .lineLimit(1)
-              }
+              TempsEcoule(chrono: c, taille: 16, largeur: 64, suite: "min depuis la commande")
             }
           }
           Spacer(minLength: 6)
-          Anneau(nom: p.image, taille: 70, chrono: c, fini: p.fini)
+          Medaillon(nom: p.image, taille: 64)
             .id(p.image)
             .transition(.scale.combined(with: .opacity))
         }
@@ -337,39 +370,44 @@ struct TovoOrderWidget: Widget {
       let c = Chrono(context, p)
       return DynamicIsland {
         DynamicIslandExpandedRegion(.leading) {
-          Anneau(nom: p.image, taille: 52, chrono: c, fini: p.fini)
+          Icone(nom: p.image, taille: 58, mini: false)
             .id(p.image)
             .transition(.scale.combined(with: .opacity))
-            .padding(.leading, 2)
+            .padding(.leading, 4)
         }
         DynamicIslandExpandedRegion(.trailing) {
-          VStack(alignment: .trailing, spacing: 0) {
+          VStack(alignment: .trailing, spacing: 1) {
             if p.fini {
               Text(p.motCourt)
                 .font(geist(18))
                 .foregroundColor(menthe)
             } else {
               Text(timerInterval: c.ecoule, countsDown: false)
-                .font(geist(24))
+                .font(geist(22))
                 .monospacedDigit()
                 .foregroundColor(menthe)
                 .multilineTextAlignment(.trailing)
-                .frame(maxWidth: 88, alignment: .trailing)
-              Text("écoulées")
-                .font(geist(11, demiGras: false))
+                .frame(maxWidth: 84, alignment: .trailing)
+              Text("min")
+                .font(geist(12, demiGras: false))
                 .foregroundColor(brume)
             }
           }
           .padding(.trailing, 4)
         }
         DynamicIslandExpandedRegion(.center) {
-          phrase(p)
-            .font(geist(15))
-            .lineLimit(2)
-            .minimumScaleFactor(0.8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .id(p.phrase)
-            .transition(.push(from: .bottom))
+          VStack(alignment: .leading, spacing: 3) {
+            Text(p.etape)
+              .font(geist(12))
+              .foregroundColor(p.annule ? brume : menthe)
+            phrase(p)
+              .font(geist(15))
+              .lineLimit(2)
+              .minimumScaleFactor(0.8)
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .id(p.phrase)
+          .transition(.push(from: .bottom))
         }
         DynamicIslandExpandedRegion(.bottom) {
           Segments(parcours: p, chrono: c)
@@ -377,7 +415,7 @@ struct TovoOrderWidget: Widget {
             .padding(.top, 10)
         }
       } compactLeading: {
-        Anneau(nom: p.image, taille: 26, chrono: c, fini: p.fini, mini: true)
+        Icone(nom: p.image, taille: 30)
           .id(p.image)
           .transition(.scale.combined(with: .opacity))
       } compactTrailing: {
@@ -391,12 +429,13 @@ struct TovoOrderWidget: Widget {
             .monospacedDigit()
             .foregroundColor(menthe)
             .multilineTextAlignment(.trailing)
-            .frame(maxWidth: 50)
+            .frame(maxWidth: 46)
         }
       } minimal: {
-        Anneau(nom: p.image, taille: 24, chrono: c, fini: p.fini, mini: true)
+        Icone(nom: p.image, taille: 26)
       }
-      .keylineTint(menthe)
+      // Un liseré à peine visible : l'île reste noire, discrète.
+      .keylineTint(menthe.opacity(0.28))
     }
   }
 
@@ -406,6 +445,7 @@ struct TovoOrderWidget: Widget {
       kind: context.attributes.kind,
       mode: context.attributes.mode ?? "deposer",
       driver: context.state.driver,
+      client: context.attributes.client,
       boutique: context.attributes.title
     )
   }

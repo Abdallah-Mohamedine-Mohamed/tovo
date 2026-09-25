@@ -24,6 +24,10 @@ class TovoLiveActivity {
   static StreamSubscription<AuthState>? _authSubscription;
   static StreamSubscription<String>? _fcmSubscription;
 
+  /// Le prénom du client, lu une fois dans son profil : l'île s'adresse à
+  /// lui (« Awa, votre commande est confirmée », « Bon appétit, Awa »).
+  static String? _client;
+
   static Future<void> start({
     required String orderId,
     required String status,
@@ -43,6 +47,7 @@ class TovoLiveActivity {
           if (event.event != AuthChangeEvent.signedOut) return;
           _registered.clear();
           _activityTokens.clear();
+          _client = null;
           unawaited(_endAll());
         });
     try {
@@ -59,10 +64,31 @@ class TovoLiveActivity {
           'placedAt': placedAt.millisecondsSinceEpoch / 1000,
         'mode': ?mode,
         'driver': ?_prenom(driver),
+        'client': ?await _prenomClient(),
       });
     } on PlatformException catch (error) {
       debugPrint('[live activity] ${error.message}');
     }
+  }
+
+  /// Le prénom du client, depuis son profil. Une seconde au plus : sans
+  /// réseau, l'île s'affiche sans prénom plutôt qu'en retard.
+  static Future<String?> _prenomClient() async {
+    if (_client != null) return _client;
+    final id = Supabase.instance.client.auth.currentUser?.id;
+    if (id == null) return null;
+    try {
+      final profil = await Supabase.instance.client
+          .from('profiles')
+          .select('full_name')
+          .eq('id', id)
+          .maybeSingle()
+          .timeout(const Duration(seconds: 1));
+      _client = _prenom(profil?['full_name'] as String?);
+    } catch (_) {
+      // Pas de prénom : la phrase se passe de lui.
+    }
+    return _client;
   }
 
   /// Le prénom seul : « Moussa vous l'apporte » tient dans l'île.

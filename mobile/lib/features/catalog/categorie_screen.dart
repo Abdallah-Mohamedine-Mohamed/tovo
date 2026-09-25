@@ -403,15 +403,26 @@ class _CategorieScreenState extends State<CategorieScreen> {
                 borderRadius: BorderRadius.circular(18),
                 child: AspectRatio(
                   aspectRatio: 16 / 8,
-                  // La photo seule, entière : le logo n'est plus posé dans
-                  // son coin (il la mangeait, et jurait avec elle — retour du
-                  // client, 25/09). Il passe à côté du nom, dessous.
+                  // Le logo, petit carré arrondi, posé SUR la photo vers le
+                  // coin bas gauche — décollé des bords, et sur la même ligne
+                  // que le nom en dessous (demande du client, 25/09).
                   child: couverture.isNotEmpty
-                      ? CatalogImage(
-                          couverture,
-                          fit: BoxFit.cover,
-                          decodeWidth: 900,
-                          errorBuilder: (_, __, ___) => vide,
+                      ? Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            CatalogImage(
+                              couverture,
+                              fit: BoxFit.cover,
+                              decodeWidth: 900,
+                              errorBuilder: (_, __, ___) => vide,
+                            ),
+                            if (logo.isNotEmpty)
+                              Positioned(
+                                left: _retrait,
+                                bottom: _retrait,
+                                child: _Logo(logo: logo),
+                              ),
+                          ],
                         )
                       : logo.isNotEmpty
                       ? ColoredBox(
@@ -434,61 +445,59 @@ class _CategorieScreenState extends State<CategorieScreen> {
                       : vide,
                 ),
               ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  // Le logo seulement s'il y a une photo : sans photo, c'est
-                  // déjà lui qui occupe la place de la photo.
-                  if (logo.isNotEmpty && couverture.isNotEmpty) ...[
-                    _Logo(logo: logo),
-                    const SizedBox(width: 12),
-                  ],
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          enPhrase(b['name'] as String?),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontFamily: TovoTheme.policeNoms,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            color: TovoTheme.ink,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Row(
-                          children: [
-                            Container(
-                              width: 6,
-                              height: 6,
-                              margin: const EdgeInsets.only(right: 7),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: ouverte
-                                    ? TovoTheme.success
-                                    : TovoTheme.inkDoux,
-                              ),
+              const SizedBox(height: 10),
+              // Le nom part de la même ligne que le logo, au-dessus.
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: _retrait),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            enPhrase(b['name'] as String?),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontFamily: TovoTheme.policeNoms,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              color: TovoTheme.ink,
                             ),
-                            Expanded(
-                              child: Text(
-                                infos.join('  ·  '),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: TovoTheme.inkDoux,
+                          ),
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
+                              Container(
+                                width: 6,
+                                height: 6,
+                                margin: const EdgeInsets.only(right: 7),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: ouverte
+                                      ? TovoTheme.success
+                                      : TovoTheme.inkDoux,
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
+                              Expanded(
+                                child: Text(
+                                  infos.join('  ·  '),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: TovoTheme.inkDoux,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
@@ -496,6 +505,10 @@ class _CategorieScreenState extends State<CategorieScreen> {
       ),
     );
   }
+
+  /// Le retrait du logo depuis le bord de la photo, et celui du nom : les
+  /// deux sur la même ligne.
+  static const _retrait = 12.0;
 
   Widget _echec() => Padding(
     padding: const EdgeInsets.all(24),
@@ -518,8 +531,9 @@ class _CategorieScreenState extends State<CategorieScreen> {
   );
 }
 
-/// Le logo d'une boutique, à côté de son nom : un petit carré arrondi, sur
-/// blanc, cerné d'un trait très fin pour qu'un logo blanc ne se perde pas.
+/// Le logo d'une boutique, posé sur sa photo : un petit carré arrondi, sur
+/// blanc, cerné d'un trait très fin pour qu'un logo blanc ne se perde pas,
+/// et une ombre légère qui le détache de l'image.
 class _Logo extends StatelessWidget {
   const _Logo({required this.logo});
 
@@ -533,6 +547,13 @@ class _Logo extends StatelessWidget {
       color: Colors.white,
       borderRadius: BorderRadius.circular(12),
       border: Border.all(color: const Color(0xFFE9EBEA)),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x29000000),
+          blurRadius: 10,
+          offset: Offset(0, 2),
+        ),
+      ],
     ),
     child: ClipRRect(
       borderRadius: BorderRadius.circular(11),
