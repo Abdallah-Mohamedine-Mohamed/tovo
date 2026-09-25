@@ -16,6 +16,7 @@ import 'package:tovo/core/api.dart';
 import 'package:tovo/core/read_cache.dart';
 import 'package:tovo/core/theme.dart';
 import 'package:tovo/features/catalog/catalog_screen.dart';
+import 'package:tovo/features/catalog/categorie_screen.dart';
 import 'package:tovo/features/catalog/product_screen.dart';
 import 'package:tovo/features/chat/conversation_chrome.dart';
 import 'package:tovo/features/chat/chat_screen.dart';
@@ -230,12 +231,14 @@ void main() {
   });
 
   testWidgets(
-    'explorer les boutiques ouvre le catalogue sans demander à l’IA',
+    'explorer les boutiques ouvre toutes les boutiques sans demander à l’IA',
     (tester) async {
       final sent = <String>[];
+      final lus = <String>[];
       final api = TovoApi(
         tokenProvider: () => null,
         client: MockClient((request) async {
+          lus.add(request.url.path);
           if (request.url.path == '/chat') {
             sent.add(jsonDecode(request.body)['text'] as String);
           }
@@ -249,7 +252,10 @@ void main() {
       await tester.tap(find.text('Explorer les boutiques'));
       await tester.pumpAndSettle();
 
-      expect(find.byType(CatalogScreen), findsOneWidget);
+      // La page à la Glovo (photos de couverture), plus l'ancienne liste.
+      expect(find.byType(CategorieScreen), findsOneWidget);
+      expect(find.text('Toutes les boutiques'), findsOneWidget);
+      expect(lus, contains('/boutiques'));
       expect(sent, isEmpty);
     },
   );

@@ -1484,7 +1484,9 @@ class _ChatScreenState extends State<ChatScreen> {
         query.trim().isEmpty &&
         categoryId == null &&
         !directory;
-    final categorie = directory && categoryId != null && merchantId == null;
+    // Sans catégorie (« Explorer les boutiques ») : la même page, avec
+    // toutes les boutiques — plus l'ancienne liste logo + adresse.
+    final categorie = directory && merchantId == null;
     final order = await Navigator.of(context).push<TovoResponse>(
       MaterialPageRoute(
         builder: (_) => boutique
@@ -1498,7 +1500,9 @@ class _ChatScreenState extends State<ChatScreen> {
             ? CategorieScreen(
                 api: widget.api,
                 categoryId: categoryId,
-                nom: categoryName,
+                nom: categoryName.isEmpty && categoryId == null
+                    ? 'Toutes les boutiques'
+                    : categoryName,
                 conversationId: _conversationId,
               )
             : CatalogScreen(
@@ -1642,7 +1646,7 @@ class _ChatScreenState extends State<ChatScreen> {
             onOuvrir: (id) => unawaited(_ouvrirConversation(id)),
             onNouvelle: _nouvelleConversation,
             onPanier: _ouvrirPanier,
-            onCatalogue: () => _ouvrirCatalogue(),
+            onCatalogue: () => _ouvrirCatalogue(directory: true),
           ),
           appBar: AppBar(
             backgroundColor: Colors.transparent,
@@ -1693,15 +1697,11 @@ class _ChatScreenState extends State<ChatScreen> {
                             surface: false,
                             onPressed: _copierConversation,
                           ),
-                        ConversationControl(
-                          symbol: ConversationSymbol.bookmark,
-                          label: 'Conversations enregistrées',
-                          surface: false,
-                          onPressed: () => Scaffold.of(context).openDrawer(),
-                        ),
+                        // Le marque-page ouvrait le même panneau que le menu
+                        // à gauche : un doublon, retiré (25/09).
                         if (_homeVisible)
                           ConversationControl(
-                            symbol: ConversationSymbol.calendar,
+                            symbol: ConversationSymbol.bag,
                             label: 'Mes commandes',
                             surface: false,
                             onPressed: _ouvrirCommandes,

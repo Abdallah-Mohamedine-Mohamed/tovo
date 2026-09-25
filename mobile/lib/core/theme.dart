@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 
 /// Thème Tovo — blanc et teal, tel que défini par la maquette.
 ///
@@ -247,6 +248,10 @@ class TovoTheme {
       appBarTheme: const AppBarTheme(
         backgroundColor: canvas,
         foregroundColor: ink,
+        // Heure et batterie en foncé, toujours. Sans cette ligne, une barre
+        // TRANSPARENTE (l'accueil) est lue comme « fond noir » par Flutter,
+        // qui passe les icônes en blanc — invisibles sur fond clair.
+        systemOverlayStyle: SystemUiOverlayStyle.dark,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,

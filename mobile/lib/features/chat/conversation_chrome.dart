@@ -21,6 +21,12 @@ enum ConversationSymbol {
   share,
   close,
   cart,
+  // Même trait que les autres, dans l'esprit des symboles d'Apple.
+  bag,
+  bubble,
+  compose,
+  store,
+  logout,
 }
 
 class ConversationIcon extends StatelessWidget {
@@ -178,6 +184,126 @@ class _ConversationIconPainter extends CustomPainter {
         );
         canvas.drawCircle(const Offset(9, 21), 1, stroke);
         canvas.drawCircle(const Offset(18, 21), 1, stroke);
+      case ConversationSymbol.bag:
+        // Un sac de courses : « mes commandes ».
+        canvas.drawPath(
+          Path()
+            ..moveTo(5.2, 8)
+            ..lineTo(18.8, 8)
+            ..lineTo(19.8, 19)
+            ..quadraticBezierTo(20, 21.5, 17.5, 21.5)
+            ..lineTo(6.5, 21.5)
+            ..quadraticBezierTo(4, 21.5, 4.2, 19)
+            ..close(),
+          stroke,
+        );
+        canvas.drawPath(
+          Path()
+            ..moveTo(8.5, 10.5)
+            ..lineTo(8.5, 6.5)
+            ..cubicTo(8.5, 1.8, 15.5, 1.8, 15.5, 6.5)
+            ..lineTo(15.5, 10.5),
+          stroke,
+        );
+      case ConversationSymbol.bubble:
+        // Une bulle de discussion, la queue en bas à gauche.
+        canvas.drawPath(
+          Path()
+            ..moveTo(8, 4)
+            ..lineTo(16, 4)
+            ..quadraticBezierTo(21, 4, 21, 9)
+            ..lineTo(21, 12)
+            ..quadraticBezierTo(21, 17, 16, 17)
+            ..lineTo(10.5, 17)
+            ..lineTo(6.6, 20.4)
+            ..quadraticBezierTo(5.6, 21.2, 5.7, 19.9)
+            ..lineTo(5.9, 16.8)
+            ..quadraticBezierTo(3, 15.8, 3, 12)
+            ..lineTo(3, 9)
+            ..quadraticBezierTo(3, 4, 8, 4)
+            ..close(),
+          stroke,
+        );
+      case ConversationSymbol.compose:
+        // Carré ouvert et crayon : « nouvelle conversation ».
+        canvas.drawPath(
+          Path()
+            ..moveTo(11, 4)
+            ..lineTo(7, 4)
+            ..quadraticBezierTo(4, 4, 4, 7)
+            ..lineTo(4, 17)
+            ..quadraticBezierTo(4, 20, 7, 20)
+            ..lineTo(17, 20)
+            ..quadraticBezierTo(20, 20, 20, 17)
+            ..lineTo(20, 13),
+          stroke,
+        );
+        canvas.drawPath(
+          Path()
+            ..moveTo(17.6, 3.4)
+            ..quadraticBezierTo(18.6, 2.4, 19.6, 3.4)
+            ..lineTo(20.6, 4.4)
+            ..quadraticBezierTo(21.6, 5.4, 20.6, 6.4)
+            ..lineTo(12.5, 14.5)
+            ..lineTo(9.2, 15.3)
+            ..lineTo(10, 12)
+            ..close(),
+          stroke,
+        );
+      case ConversationSymbol.store:
+        // Une devanture : store, vitrine, porte.
+        canvas.drawPath(
+          Path()
+            ..moveTo(4.5, 3.5)
+            ..lineTo(19.5, 3.5)
+            ..lineTo(21, 8.5)
+            ..quadraticBezierTo(21, 11, 18.4, 11)
+            ..quadraticBezierTo(15.7, 11, 15.7, 8.5)
+            ..quadraticBezierTo(15.7, 11, 12, 11)
+            ..quadraticBezierTo(8.3, 11, 8.3, 8.5)
+            ..quadraticBezierTo(8.3, 11, 5.6, 11)
+            ..quadraticBezierTo(3, 11, 3, 8.5)
+            ..close(),
+          stroke,
+        );
+        canvas.drawPath(
+          Path()
+            ..moveTo(4.5, 11)
+            ..lineTo(4.5, 20.5)
+            ..lineTo(19.5, 20.5)
+            ..lineTo(19.5, 11),
+          stroke,
+        );
+        canvas.drawPath(
+          Path()
+            ..moveTo(10, 20.5)
+            ..lineTo(10, 15.5)
+            ..quadraticBezierTo(10, 14.5, 11, 14.5)
+            ..lineTo(13, 14.5)
+            ..quadraticBezierTo(14, 14.5, 14, 15.5)
+            ..lineTo(14, 20.5),
+          stroke,
+        );
+      case ConversationSymbol.logout:
+        // Une porte et une flèche qui en sort.
+        canvas.drawPath(
+          Path()
+            ..moveTo(10, 4)
+            ..lineTo(7, 4)
+            ..quadraticBezierTo(4, 4, 4, 7)
+            ..lineTo(4, 17)
+            ..quadraticBezierTo(4, 20, 7, 20)
+            ..lineTo(10, 20),
+          stroke,
+        );
+        line(10, 12, 20.5, 12);
+        canvas.drawPath(
+          Path()
+            ..moveTo(16.5, 8)
+            ..lineTo(20.5, 12)
+            ..lineTo(16.5, 16),
+          stroke,
+        );
     }
   }
 

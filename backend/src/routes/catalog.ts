@@ -505,6 +505,48 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
     ));
   });
 
+  /**
+   * Toutes les boutiques, au format de la page catégorie : photo de
+   * couverture, logo, ouverte ou non. « Explorer les boutiques » ouvrait une
+   * liste à l'ancienne (logo + adresse) quand chaque catégorie avait déjà la
+   * présentation à la Glovo (demande du client, 25/09).
+   */
+  app.get('/boutiques', async (request, reply) => {
+    try {
+      const database = db(request);
+      const { data, error } = await database
+        .from('merchants')
+        .select('id, name, logo_url, cover_url, address_hint, is_open, rating, prep_time_min')
+        .eq('is_approved', true)
+        .order('is_open', { ascending: false })
+        .order('rating', { ascending: false })
+        .order('name')
+        .limit(200);
+      if (error) throw error;
+      const brutes = ((data ?? []) as Record<string, unknown>[]).map((m) => ({
+        id: m['id'] as string,
+        name: m['name'] as string,
+        logo_url: (m['logo_url'] as string | null) ?? null,
+        cover_url: (m['cover_url'] as string | null) ?? null,
+        address_hint: (m['address_hint'] as string | null) ?? '',
+        is_open: (m['is_open'] as boolean) ?? false,
+        prep_time_min: (m['prep_time_min'] as number | null) ?? null,
+        distance_m: null,
+        rayons: [] as string[],
+      }));
+      // « Ouverte » = interrupteur ET horaires du jour ; les vraiment
+      // ouvertes d'abord, l'ordre de la base ensuite.
+      const merchants = (await avecOuvertureReelle(database, brutes))
+        .map((b, i) => ({ b, i }))
+        .sort((x, y) => Number(y.b.is_open) - Number(x.b.is_open) || x.i - y.i)
+        .map(({ b }) => b);
+      return reply.send({ category: { id: null, name: 'Toutes les boutiques' }, mode: 'merchants', merchants, rayons: [] });
+    } catch (error) {
+      const failure = toHttpFailure(error);
+      return reply.code(failure.status).send(failure.body);
+    }
+  });
+
   app.get('/categories/:categoryId/products', async (request, reply) => {
     const params = z.object({ categoryId: z.string().uuid() }).safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'identifiant invalide' });

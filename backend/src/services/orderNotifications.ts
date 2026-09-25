@@ -1,6 +1,7 @@
 import { serviceClient } from './supabase.js';
 import { sendPush, type PushMessage } from './notifications.js';
 import { updateLiveActivities } from './liveActivities.js';
+import { filtreDeZone } from './zones.js';
 
 /**
  * Notifications liées au cycle d'une commande.
@@ -212,9 +213,10 @@ export async function notifierLivreursCommandeRecue(orderId: string): Promise<vo
     .eq('is_online', true)
     .eq('is_available', true);
 
+  // Un livreur de « Niamey » sert aussi Yantala (0063).
+  const couvre = await filtreDeZone(db, commande.zone_id as string | null);
   const ids = (profils ?? [])
-    .filter((profil) =>
-      profil.zone_id == null || commande.zone_id == null || profil.zone_id === commande.zone_id)
+    .filter((profil) => couvre(profil.zone_id as string | null))
     .map((profil) => profil.id as string);
 
   if (ids.length === 0) return;

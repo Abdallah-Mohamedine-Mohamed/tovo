@@ -1,6 +1,7 @@
 import { serviceClient } from './supabase.js';
 import { sendPush, type PushMessage } from './notifications.js';
 import { enqueue, registerProcessor, startWorker } from './queue.js';
+import { filtreDeZone } from './zones.js';
 
 /**
  * Attribution des courses.
@@ -77,8 +78,10 @@ export async function dispatchOrder(job: DispatchJob): Promise<DispatchOutcome> 
       .select('id, zone_id')
       .eq('is_online', true)
       .eq('is_available', true);
+    // Un livreur de « Niamey » sert aussi Yantala (0063).
+    const couvre = await filtreDeZone(db, order.zone_id as string | null);
     ids = (profils ?? [])
-      .filter((p) => p.zone_id == null || order.zone_id == null || p.zone_id === order.zone_id)
+      .filter((p) => couvre(p.zone_id as string | null))
       .map((p) => p.id as string);
   }
   if (ids.length === 0) {

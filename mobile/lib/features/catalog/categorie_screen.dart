@@ -27,13 +27,15 @@ class CategorieScreen extends StatefulWidget {
   const CategorieScreen({
     super.key,
     required this.api,
-    required this.categoryId,
+    this.categoryId,
     this.nom = '',
     this.conversationId,
   });
 
   final TovoApi api;
-  final String categoryId;
+
+  /// Sans catégorie : TOUTES les boutiques (« Explorer les boutiques »).
+  final String? categoryId;
 
   /// Le nom déjà connu (tuile touchée) : le titre s'affiche tout de suite.
   final String nom;
@@ -54,7 +56,9 @@ class _CategorieScreenState extends State<CategorieScreen> {
   bool _redirige = false;
   String? _erreur;
 
-  String get _chemin => '/categories/${widget.categoryId}/boutiques';
+  String get _chemin => widget.categoryId == null
+      ? '/boutiques'
+      : '/categories/${widget.categoryId}/boutiques';
 
   @override
   void initState() {
@@ -91,6 +95,7 @@ class _CategorieScreenState extends State<CategorieScreen> {
     // Catégorie qui se parcourt par produits (Beauté…), ou une seule
     // boutique : la page intermédiaire n'apprendrait rien au client.
     if (!_redirige &&
+        widget.categoryId != null &&
         (reponse.raw['mode'] == 'products' || boutiques.length == 1)) {
       _redirige = true;
       final vers = boutiques.length == 1
@@ -415,7 +420,7 @@ class _CategorieScreenState extends State<CategorieScreen> {
                                 borderRadius: BorderRadius.circular(16),
                                 child: CatalogImage(
                                   logo,
-                                  fit: BoxFit.cover,
+                                  fit: BoxFit.contain,
                                   errorBuilder: (_, __, ___) => vide,
                                 ),
                               ),

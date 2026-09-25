@@ -95,6 +95,12 @@ class _TiroirConversationsState extends State<TiroirConversations> {
     return '${date.day}/${date.month}';
   }
 
+  static const _ligne = TextStyle(
+    fontSize: 15,
+    fontWeight: FontWeight.w500,
+    color: TovoTheme.ink,
+  );
+
   @override
   Widget build(BuildContext context) {
     return Drawer(
@@ -107,7 +113,7 @@ class _TiroirConversationsState extends State<TiroirConversations> {
             if (widget.onPanier != null)
               ListTile(
                 leading: const ConversationIcon(ConversationSymbol.cart),
-                title: const Text('Mon panier'),
+                title: const Text('Mon panier', style: _ligne),
                 onTap: () {
                   Navigator.pop(context);
                   widget.onPanier!();
@@ -115,68 +121,34 @@ class _TiroirConversationsState extends State<TiroirConversations> {
               ),
             if (widget.onCatalogue != null)
               ListTile(
-                leading: const Icon(Icons.storefront_outlined, size: 24),
-                title: const Text('Explorer les boutiques'),
+                leading: const ConversationIcon(ConversationSymbol.store),
+                title: const Text('Explorer les boutiques', style: _ligne),
                 onTap: () {
                   Navigator.pop(context);
                   widget.onCatalogue!();
                 },
               ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 18, 20, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Conversations',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      color: TovoTheme.ink,
-                    ),
-                  ),
-                  SizedBox(height: 3),
-                  Text(
-                    'Retrouvez vos anciennes demandes',
-                    style: TextStyle(fontSize: 11.5, color: TovoTheme.muted),
-                  ),
-                ],
-              ),
+            // Une ligne comme les autres, pas un gros bouton plein : le
+            // panneau entier parle la langue des symboles du haut.
+            ListTile(
+              leading: const ConversationIcon(ConversationSymbol.compose),
+              title: const Text('Nouvelle conversation', style: _ligne),
+              onTap: () {
+                Navigator.of(context).pop();
+                widget.onNouvelle();
+              },
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(50),
-                  backgroundColor: TovoTheme.teal,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                ),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  widget.onNouvelle();
-                },
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text(
-                  'Nouvelle conversation',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
             const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 22),
+              padding: EdgeInsets.fromLTRB(22, 22, 22, 8),
               child: Text(
-                'CONVERSATIONS',
+                'Récentes',
                 style: TextStyle(
-                  fontSize: 10,
-                  letterSpacing: 1.1,
-                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
                   color: TovoTheme.muted,
                 ),
               ),
             ),
-            const SizedBox(height: 6),
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -212,11 +184,10 @@ class _TiroirConversationsState extends State<TiroirConversations> {
                         return ListTile(
                           dense: false,
                           selected: courante,
-                          selectedTileColor: TovoTheme.tealSoft,
-                          leading: Icon(
-                            Icons.chat_bubble_outline_rounded,
-                            size: 17,
-                            color: courante ? TovoTheme.teal : TovoTheme.muted,
+                          selectedTileColor: const Color(0xFFF4F5F5),
+                          leading: const ConversationIcon(
+                            ConversationSymbol.bubble,
+                            size: 20,
                           ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(
@@ -230,9 +201,9 @@ class _TiroirConversationsState extends State<TiroirConversations> {
                             style: TextStyle(
                               fontSize: 13.5,
                               fontWeight: courante
-                                  ? FontWeight.w700
+                                  ? FontWeight.w600
                                   : FontWeight.w500,
-                              color: courante ? TovoTheme.teal : TovoTheme.ink,
+                              color: TovoTheme.ink,
                             ),
                           ),
                           subtitle: Text(
@@ -257,9 +228,9 @@ class _TiroirConversationsState extends State<TiroirConversations> {
             const Divider(height: 1),
             ListTile(
               dense: true,
-              leading: const Icon(
-                Icons.logout,
-                size: 18,
+              leading: const ConversationIcon(
+                ConversationSymbol.logout,
+                size: 20,
                 color: TovoTheme.muted,
               ),
               title: const Text(

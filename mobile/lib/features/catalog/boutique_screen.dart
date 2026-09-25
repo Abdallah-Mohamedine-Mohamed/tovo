@@ -335,24 +335,24 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
     ],
   );
 
-  /// Photo de couverture, logo posé à cheval dessus.
+  /// Photo de couverture, le logo logé dans son coin bas gauche.
   /// La hauteur de la barre d'état (le contexte de l'état est au-dessus de
   /// removePadding : il la connaît encore).
   double get _haut => MediaQuery.paddingOf(context).top;
 
+  static const _coin = 32.0;
+
   Widget _enTete(String couverture) {
     return SizedBox(
-      height: 200 + _haut + 36,
+      height: 212 + _haut,
       child: Stack(
-        clipBehavior: Clip.none,
         children: [
           Positioned.fill(
-            bottom: 36,
-            // Un rectangle, bord bas franc — sauf le coin bas droit, arrondi :
-            // le côté opposé au logo, qui adoucit la ligne sans la tordre.
+            // Un rectangle, bord bas franc — sauf le coin bas GAUCHE, arrondi,
+            // celui où loge le logo (demande du client, 25/09).
             child: ClipRRect(
               borderRadius: const BorderRadius.only(
-                bottomRight: Radius.circular(36),
+                bottomLeft: Radius.circular(_coin),
               ),
               // Calée à GAUCHE : l'en-tête est plus haut que la couverture (2:1),
               // l'image est donc rognée sur les côtés. Les couvertures portent
@@ -370,8 +370,45 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
             ),
           ),
           Positioned(left: 16, right: 16, top: _haut + 8, child: _boutons()),
-          Positioned(left: 20, bottom: 0, child: _logo(72)),
+          // Le logo, collé dans le coin : ses bords gauche et bas prolongent
+          // ceux de la photo, son coin bas épouse l'arrondi de la couverture.
+          // Un liseré blanc en haut et à droite le détache de l'image, comme
+          // une encoche découpée dans la photo.
+          Positioned(left: 0, bottom: 0, child: _logoEnCoin(76)),
         ],
+      ),
+    );
+  }
+
+  Widget _logoEnCoin(double taille) {
+    final logo = _boutique['logo_url'] as String? ?? '';
+    if (logo.isEmpty) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.only(top: 4, right: 4),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.only(
+          topRight: Radius.circular(22),
+          bottomLeft: Radius.circular(_coin),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.only(
+          topRight: Radius.circular(18),
+          bottomLeft: Radius.circular(_coin),
+        ),
+        child: SizedBox.square(
+          dimension: taille,
+          child: ColoredBox(
+            color: Colors.white,
+            child: CatalogImage(
+              logo,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) =>
+                  const ColoredBox(color: Color(0xFFF4F5F5)),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -409,7 +446,7 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
             ? const ColoredBox(color: Color(0xFFF4F5F5))
             : CatalogImage(
                 logo,
-                fit: BoxFit.cover,
+                fit: BoxFit.contain,
                 errorBuilder: (_, __, ___) =>
                     const ColoredBox(color: Color(0xFFF4F5F5)),
               ),

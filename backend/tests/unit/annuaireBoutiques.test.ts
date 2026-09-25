@@ -29,3 +29,18 @@ describe('GET /merchants — « Explorer les boutiques »', () => {
     await app.close();
   });
 });
+
+describe('GET /boutiques — « Explorer » au format de la page catégorie', () => {
+  it('renvoie toutes les boutiques, ouvertes d’abord, sans redirection', async () => {
+    const app = Fastify();
+    await app.register(catalogRoutes);
+    const res = await app.inject({ method: 'GET', url: '/boutiques' });
+    expect(res.statusCode).toBe(200);
+    const corps = res.json();
+    expect(corps.mode).toBe('merchants');
+    expect(corps.category.name).toBe('Toutes les boutiques');
+    expect(corps.merchants.map((m: { name: string }) => m.name)).toEqual(["O'TAKOSS", 'GARBA D’OR']);
+    expect(corps.merchants[0]).toHaveProperty('cover_url');
+    await app.close();
+  });
+});

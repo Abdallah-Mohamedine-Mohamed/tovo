@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -236,63 +238,66 @@ class _AuthScreenState extends State<AuthScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final clavier = MediaQuery.viewInsetsOf(context).bottom > 0;
-        // L'anneau prend la place libre ; clavier ouvert, il se fait petit,
-        // puis s'efface s'il n'y a plus la place : le champ passe avant.
-        final place = constraints.maxHeight - 330;
-        final taille = clavier
-            ? place.clamp(0.0, 170.0)
-            : (constraints.maxWidth - 32).clamp(0.0, place).clamp(0.0, 300.0);
+        final retour = Navigator.of(context).canPop();
+        // Le formulaire est posé EN BAS, sous le pouce ; l'anneau occupe tout
+        // ce qui reste au-dessus, centré. Avant, le bloc entier flottait au
+        // milieu de l'écran, avec deux grands vides, et « Bienvenue » collé
+        // sous l'anneau (retour du client, 25/09). Clavier ouvert, l'anneau
+        // se fait petit, puis s'efface : le champ passe avant.
+        final zone =
+            constraints.maxHeight - _hauteurFormulaire - (retour ? 48 : 0);
+        final taille = (constraints.maxWidth - 24)
+            .clamp(0.0, math.max(0.0, zone - 32))
+            .clamp(0.0, clavier ? 170.0 : 400.0)
+            .toDouble();
         final avecAnneau = taille >= 120;
         return SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: constraints.maxHeight - 24),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (Navigator.of(context).canPop())
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: _Retour(
-                          onPressed: () => Navigator.of(context).pop(),
-                        ),
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (retour)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: _Retour(
+                        onPressed: () => Navigator.of(context).pop(),
                       ),
-                    AnimatedSize(
-                      duration: TovoTheme.normal,
-                      curve: TovoTheme.courbe,
-                      child: avecAnneau
-                          ? Center(child: AnneauTovo(taille: taille))
-                          : const SizedBox(width: double.infinity, height: 16),
                     ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Bienvenue',
-                      textAlign: TextAlign.center,
-                      style: _titre,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      isClient
-                          ? 'Commençons par votre numéro de téléphone.'
-                          : 'Connectez-vous à ${widget.titre} avec votre numéro.',
-                      textAlign: TextAlign.center,
-                      style: _sousTitre,
-                    ),
-                    const SizedBox(height: 28),
-                    _champNumero(),
-                    if (_erreur != null) _Erreur(_erreur!),
-                    const SizedBox(height: 16),
-                    _BoutonPrincipal(
-                      libelle: 'Continuer',
-                      occupe: _occupe,
-                      onPressed: _envoyerCode,
-                    ),
-                  ],
-                ),
+                  AnimatedContainer(
+                    duration: TovoTheme.normal,
+                    curve: TovoTheme.courbe,
+                    height: avecAnneau
+                        ? zone.clamp(taille + 32, double.infinity)
+                        : 16,
+                    alignment: Alignment.center,
+                    child: avecAnneau ? AnneauTovo(taille: taille) : null,
+                  ),
+                  const Text(
+                    'Bienvenue',
+                    textAlign: TextAlign.center,
+                    style: _titre,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    isClient
+                        ? 'Commençons par votre numéro de téléphone.'
+                        : 'Connectez-vous à ${widget.titre} avec votre numéro.',
+                    textAlign: TextAlign.center,
+                    style: _sousTitre,
+                  ),
+                  const SizedBox(height: 28),
+                  _champNumero(),
+                  if (_erreur != null) _Erreur(_erreur!),
+                  const SizedBox(height: 16),
+                  _BoutonPrincipal(
+                    libelle: 'Continuer',
+                    occupe: _occupe,
+                    onPressed: _envoyerCode,
+                  ),
+                ],
               ),
             ),
           ),
@@ -300,6 +305,9 @@ class _AuthScreenState extends State<AuthScreen> {
       },
     );
   }
+
+  /// Titre, phrase, champ, bouton et marges : la place que l'anneau laisse.
+  static const _hauteurFormulaire = 290.0;
 
   Widget _champNumero() => Row(
     children: [
