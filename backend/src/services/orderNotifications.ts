@@ -125,24 +125,36 @@ export async function notifierClient(orderId: string, statut: string): Promise<v
     livreur = prenom(profil?.full_name as string | null);
   }
 
-  // La Live Activity d'abord : elle bouge même quand l'étape ne mérite pas
-  // de notification (« en cuisine », « prête »).
-  await updateLiveActivities(orderId, statut, livreur).catch(() => undefined);
-  if (!commande) return;
-
   const une = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? v[0] ?? null : v ?? null);
-  const modele = messageClient({
-    statut,
-    type: commande.type as string,
-    mode: une(commande.courier_details as { mode: string } | { mode: string }[] | null)?.mode ?? null,
-    livreur,
-    boutique: une(commande.merchants as { name: string } | { name: string }[] | null)?.name ?? null,
-    total: commande.total as number,
-    especes: commande.payment_method === 'cash',
-  });
-  if (!modele) return;
+  const modele = commande
+    ? messageClient({
+        statut,
+        type: commande.type as string,
+        mode: une(commande.courier_details as { mode: string } | { mode: string }[] | null)?.mode ?? null,
+        livreur,
+        boutique: une(commande.merchants as { name: string } | { name: string }[] | null)?.name ?? null,
+        total: commande.total as number,
+        especes: commande.payment_method === 'cash',
+      })
+    : null;
 
-  const tokens = await jetons(commande.user_id as string, 'client');
+  // La Live Activity d'abord : elle bouge même quand l'étape ne mérite pas
+  // de notification (« en cuisine », « prête »). Quand elle en mérite une,
+  // l'alerte passe PAR ELLE : l'île s'ouvre avec la phrase de l'étape.
+  const servis = await updateLiveActivities(
+    orderId,
+    statut,
+    livreur,
+    modele ? { titre: modele.titre, corps: modele.corps } : null,
+  ).catch(() => new Set<string>());
+  if (!commande || !modele) return;
+
+  // UNE SEULE ANNONCE PAR APPAREIL. Un iPhone qui affiche la Live Activity
+  // vient d'être prévenu par elle : pas de notification classique en plus
+  // (les deux se marchaient dessus sur l'île). Android, ou un iPhone aux
+  // Live Activities désactivées, la reçoit comme avant.
+  const tokens = (await jetons(commande.user_id as string, 'client'))
+    .filter((token) => !servis.has(token));
   if (tokens.length === 0) return;
 
   const messages: PushMessage[] = tokens.map((token) => ({

@@ -192,29 +192,55 @@ private struct Chrono {
   /// Ce que le segment de l'étape en cours parcourt.
   var parcours: ClosedRange<Date> { debut...fin }
 
+  /// La part de la course déjà faite, de 0 à 1, à l'instant du rendu.
+  var fait: Double {
+    let total = fin.timeIntervalSince(debut)
+    guard total > 0 else { return 0 }
+    return min(1, max(0.03, Date().timeIntervalSince(debut) / total))
+  }
+
   /// Le temps écoulé tourne jusqu'à 12 h : largement assez pour une course.
   var ecoule: ClosedRange<Date> { debut...debut.addingTimeInterval(12 * 3600) }
 }
 
-/// L'illustration dans son médaillon, net : un fond léger et un trait blanc
-/// fin — pour l'écran verrouillé.
+/// L'illustration dans son médaillon, pour l'écran verrouillé, entourée d'un
+/// anneau menthe qui dit où en est la course.
+///
+/// L'anneau est DESSINÉ (un arc net, bouts arrondis) plutôt que confié au
+/// ProgressView circulaire du système : celui-ci, étiré à la taille du
+/// médaillon, sortait flou. Il avance à chaque mise à jour de la course ; le
+/// segment de l'étape, en bas, défile lui en continu.
 @available(iOS 16.2, *)
 private struct Medaillon: View {
   let nom: String
   let taille: CGFloat
+  /// De 0 à 1 ; nil : pas d'anneau (course finie ou annulée).
+  var fait: Double?
+  var annule = false
+
+  private var trait: CGFloat { max(3, taille / 18) }
 
   var body: some View {
     ZStack {
-      Circle().fill(Color.white.opacity(0.1))
-      Circle().strokeBorder(Color.white.opacity(0.9), lineWidth: 1.5)
+      Circle().fill(Color.white.opacity(0.08))
+      if let fait {
+        Circle().stroke(piste, lineWidth: trait)
+        Circle()
+          .trim(from: 0, to: fait)
+          .stroke(menthe, style: StrokeStyle(lineWidth: trait, lineCap: .round))
+          .rotationEffect(.degrees(-90))
+      } else {
+        Circle().stroke(annule ? eteint : menthe, lineWidth: trait)
+      }
       if let image = illustration(nom) {
         Image(uiImage: image)
           .resizable()
           .interpolation(.high)
           .scaledToFit()
-          .padding(taille * 0.14)
+          .padding(taille * 0.17)
       }
     }
+    .padding(trait / 2)
     .frame(width: taille, height: taille)
   }
 }
@@ -354,7 +380,7 @@ struct TovoOrderWidget: Widget {
             }
           }
           Spacer(minLength: 6)
-          Medaillon(nom: p.image, taille: 64)
+          Medaillon(nom: p.image, taille: 66, fait: p.fini ? nil : c.fait, annule: p.annule)
             .id(p.image)
             .transition(.scale.combined(with: .opacity))
         }
@@ -388,9 +414,6 @@ struct TovoOrderWidget: Widget {
                 .foregroundColor(menthe)
                 .multilineTextAlignment(.trailing)
                 .frame(maxWidth: 84, alignment: .trailing)
-              Text("min")
-                .font(geist(12, demiGras: false))
-                .foregroundColor(brume)
             }
           }
           .padding(.trailing, 4)
