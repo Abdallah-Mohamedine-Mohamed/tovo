@@ -112,3 +112,34 @@ describe('cascade', () => {
     expect(a).toMatchObject({ source: 'jev', local: null });
   });
 });
+
+describe('garde-fou des courses — « livre » n’est pas « livreur »', () => {
+  // Un classifieur qui CONFOND, comme celui de la prod le 26/09 : tout ce
+  // qui commence par « livre » part vers « livreur », avec assurance.
+  const confus = creerClassifieur(
+    async (texte: string) => normer(/livre|moto|coursier/.test(texte) ? [1, 0.05, 0] : [0, 0, 1]),
+    new Float32Array(index.flatMap(([v]) => [...normer(v)])),
+    index.map(([, i]) => i),
+    3,
+  );
+
+  it('« Je cherche un livre » : pas de livreur commandé, le chemin habituel', async () => {
+    installerClassifieur(confus);
+    for (const phrase of ['Je cherche un livre', 'Je voudrais un autre livre.', 'Je cherche un livre euh']) {
+      const a = await aiguiller(phrase);
+      expect(a.route.type, phrase).toBe('habituel');
+    }
+  });
+
+  it('une vraie demande de livreur passe toujours, même avec une faute', async () => {
+    installerClassifieur(confus);
+    for (const phrase of [
+      'Je voudrais un livreur',
+      'Je voudrais un autre livret pour récupérer un colis',
+      'il me faut une moto',
+    ]) {
+      const a = await aiguiller(phrase);
+      expect(a.route, phrase).toMatchObject({ type: 'intention', intention: 'livreur' });
+    }
+  });
+});

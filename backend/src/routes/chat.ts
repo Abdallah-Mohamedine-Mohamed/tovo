@@ -4,7 +4,7 @@ import { toHttpFailure } from '../lib/errors.js';
 import { envelope } from '../components/builders.js';
 import { ChatUnavailableError, orchestrate } from '../ai/orchestrator.js';
 import { LlmUnavailableError, llmEnabled } from '../ai/llmClient.js';
-import { EXECUTORS } from '../ai/tools.js';
+import { ANNULER_CONFIRME, EXECUTORS, GARDER_COMMANDE, annulerConfirme } from '../ai/tools.js';
 import {
   demandeDeCommandePassee,
   demandeGeneraleDeRepas,
@@ -22,7 +22,8 @@ import { consommer, messageLimite } from '../services/rateLimit.js';
 import { commanderUnLivreur } from '../services/livreur.js';
 import { ombreJev, type Intention } from '../ai/jev.js';
 import { ouvrirSessionVoix, vocabulaire } from '../services/voixDirecte.js';
-import { decider, indication, intentionChoisie } from '../ai/aiguillage.js';
+import { decider, indication, intentionChoisie, routeDuCerveau, type Route } from '../ai/aiguillage.js';
+import { cerveauActif, comprendre } from '../ai/decideur.js';
 import { aiguiller, cascadeActive } from '../ai/cascade.js';
 import { rechercheProduitRapide } from '../ai/orchestrator.js';
 import { cataloguePage, type CataloguePage } from '../services/catalogue.js';
@@ -354,10 +355,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // ni influencer (voir ai/jev.ts). Inactif sans JEV_OMBRE=1.
     if (body.data.text) ombreJev(body.data.text, request.log, body.data.client_message_id);
 
-    // Aiguillage (JEV_AIGUILLAGE=1) : lancé MAINTENANT, en parallèle de la
-    // conversation et du contrôle d'idempotence, pour ne presque rien ajouter
-    // au temps de réponse. Attendu plus bas ; `null` s'il est éteint ou lent.
-    const decisionCascade = body.data.text && cascadeActive()
+    // Le cerveau (ai/decideur.ts) comprend le message : lancé MAINTENANT, en
+    // parallèle de la conversation, de l'idempotence et de la recherche
+    // catalogue. Il lit aussi le dernier message de Tovo : « Yantala. »
+    // répond peut-être à « Où récupérer le colis ? ».
+    // AIGUILLAGE=cascade : l'ancien aiguillage (classifieur local + Jev).
+    const cerveau = Boolean(body.data.text) && cerveauActif();
+    const decisionCerveau = cerveau
+      ? dernierMessageTovo(db, body.data.conversation_id)
+        .catch(() => null)
+        .then((avant) => comprendre(body.data.text!, { avant }))
+        .catch(() => null)
+      : Promise.resolve(null);
+    const decisionCascade = body.data.text && !cerveau && cascadeActive()
       ? aiguiller(body.data.text).catch(() => null)
       : Promise.resolve(null);
 
@@ -366,7 +376,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // courant, et Jev y ajoutait près d'une seconde. Seulement pour une
     // recherche évidente (pas « annule », « le deuxième », « comme d'habitude »).
     const textePourRecherche = body.data.text ?? '';
-    const recherchePrealable = cascadeActive() && textePourRecherche
+    const recherchePrealable = (cerveau || cascadeActive()) && textePourRecherche
       && !referenceAuxResultats(textePourRecherche) && !demandeDeCommandePassee(textePourRecherche)
       && rechercheProduitRapide(textePourRecherche, requeteProduitUtilisateur(textePourRecherche))
       ? cataloguePage(db, { q: requeteProduitUtilisateur(textePourRecherche), limit: 8 }, false).catch(() => null)
@@ -463,6 +473,32 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
+    // « Oui, annuler » / « Non, la garder » : la réponse au garde-fou
+    // d'annulation (tools.ts). Seul ce bouton annule une commande.
+    const valeurTuile = body.data.interaction?.action === 'quick_reply'
+      ? String(body.data.interaction.payload.value ?? '')
+      : '';
+    if (valeurTuile.startsWith(ANNULER_CONFIRME) || valeurTuile === GARDER_COMMANDE) {
+      const resultat = valeurTuile === GARDER_COMMANDE
+        ? { components: [], content: 'D’accord, votre commande continue.' }
+        : await annulerConfirme({ db, userId }, valeurTuile.slice(ANNULER_CONFIRME.length));
+      const contenu = resultat.content ?? 'C’est noté.';
+      emit({ type: 'conversation', conversation_id: conversationId });
+      emit({ type: 'results', components: resultat.components });
+      emit({ type: 'text', text: contenu });
+      await db.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'user',
+        content: libelleLisible('quick_reply', body.data.interaction!.payload) ?? message,
+        client_message_id: body.data.client_message_id,
+      });
+      await db.from('messages').insert({
+        conversation_id: conversationId, role: 'assistant', content: contenu, components: resultat.components,
+      });
+      request.log.info({ conversationId, annulee: valeurTuile !== GARDER_COMMANDE }, 'confirmation d’annulation');
+      return output.finish({ conversation_id: conversationId, ...envelope(contenu, resultat.components) });
+    }
+
     // --- Aiguillage -------------------------------------------------------
     // Une tuile touchée porte l'intention CHOISIE et la phrase d'origine ;
     // sinon Jev propose une route, ou des tuiles s'il hésite sur une action.
@@ -484,22 +520,41 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     }
 
     if (!choisie && !pageInitiale && body.data.text) {
-      const cascade = await decisionCascade;
-      const route = cascade?.route ?? decider(null, body.data.text);
-      if (cascade) {
-        const resume = (d: typeof cascade.local) => d && {
-          choix: d.choix, confiance: Number(d.confiance.toFixed(2)), ms: Math.round(d.ms),
-          ...(d.erreur ? { erreur: d.erreur } : {}),
-        };
+      let route: Route;
+      if (cerveau) {
+        const d = await decisionCerveau;
+        route = d ? routeDuCerveau(d, body.data.text) : { type: 'habituel', decision: null };
         request.log.info({
           ref: body.data.client_message_id,
-          source: cascade.source,
-          local: resume(cascade.local),
-          jev: resume(cascade.jev),
+          intention: d?.intention ?? null,
+          sur: d?.sur ?? null,
+          modele: d?.modele ?? null,
+          ms: d ? Math.round(d.ms) : null,
+          relance: d?.relance ?? false,
+          ...(d?.erreurs.length ? { erreurs: d.erreurs } : {}),
           route: route.type,
-        }, 'aiguillage');
+        }, 'cerveau');
+      } else {
+        const cascade = await decisionCascade;
+        route = cascade?.route ?? decider(null, body.data.text);
+        if (cascade) {
+          const resume = (d: typeof cascade.local) => d && {
+            choix: d.choix, confiance: Number(d.confiance.toFixed(2)), ms: Math.round(d.ms),
+            ...(d.erreur ? { erreur: d.erreur } : {}),
+          };
+          request.log.info({
+            ref: body.data.client_message_id,
+            source: cascade.source,
+            local: resume(cascade.local),
+            jev: resume(cascade.jev),
+            route: route.type,
+          }, 'aiguillage');
+        }
       }
       if (route.type === 'intention') intention = route.intention;
+      // Une recherche : celle faite en parallèle du cerveau (suggestions
+      // proches comprises) sert telle quelle, sans la refaire.
+      if (intention === 'recherche' && prealable) pageInitiale = prealable;
 
       if (route.type === 'clarifier') {
         // Proposer ce qu'on a compris plutôt que deviner : une action mal
@@ -524,13 +579,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     }
     // Route connue : les détecteurs à mots ne décident plus.
     const parJev = intention !== undefined;
+    // Le cerveau n'a pas pu trancher (panne, délai) : les détecteurs à mots
+    // ne déclenchent plus d'action coûteuse à sa place — « Je veux devenir
+    // livreur » ne doit jamais commander de livreur parce qu'il contient le mot.
+    const motsPermis = !cerveau;
 
     // « Je veux un livreur » : la commande part, sans carte ni question. La
     // position vient du téléphone, le numéro du compte ; le livreur appelle
     // pour le reste. Sans position connue, on retombe sur la carte, qui
     // sait la demander.
     if (texteClient && body.data.context
-      && (parJev ? intention === 'livreur' : demandeUnLivreur(texteClient))) {
+      && (parJev ? intention === 'livreur' : motsPermis && demandeUnLivreur(texteClient))) {
       const resultat = await commanderUnLivreur(db, {
         clientOrderId: body.data.client_message_id,
         position: body.data.context,
@@ -591,7 +650,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // vient de dire. Un colis à envoyer ou à aller chercher garde le
       // bouton : là, il y a des détails à ajouter.
       const livreurSeul = !recuperation && !demandeUnColis(texteClient)
-        && (parJev ? intention === 'livreur' : demandeUnLivreur(texteClient));
+        && (parJev ? intention === 'livreur' : motsPermis && demandeUnLivreur(texteClient));
       if (livreurSeul) {
         for (const composant of resultat.components) {
           if (composant.type === 'courier_form') composant.data = { ...composant.data, auto: true };
@@ -625,6 +684,27 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         conversation_id: conversationId,
         ...envelope(contenu, resultat.components),
       });
+    }
+
+    // « Annule ma commande » : la carte de la commande et « Oui, annuler » /
+    // « Non, la garder », sans passer par le modèle. Rien n'est annulé ici.
+    if (intention === 'annuler') {
+      const resultat = await EXECUTORS['annuler_commande']!({}, { db, userId, currentMessage: texteClient });
+      const contenu = resultat.content ?? 'Voulez-vous vraiment annuler cette commande ?';
+      emit({ type: 'conversation', conversation_id: conversationId });
+      emit({ type: 'results', components: resultat.components });
+      emit({ type: 'text', text: contenu });
+      await db.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'user',
+        content: contenuClient,
+        client_message_id: body.data.client_message_id,
+      });
+      await db.from('messages').insert({
+        conversation_id: conversationId, role: 'assistant', content: contenu, components: resultat.components,
+      });
+      request.log.info({ conversationId }, 'annulation : confirmation demandée');
+      return output.finish({ conversation_id: conversationId, ...envelope(contenu, resultat.components) });
     }
 
     // « Je veux manger » n'est ni une recherche de proximité, ni une
@@ -751,6 +831,25 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       return output.finish({ error: 'La réponse a été interrompue. Retrouvez la conversation dans votre historique.' }, 503);
     }
   });
+}
+
+/**
+ * Le dernier message de Tovo dans la conversation, pour que le cerveau sache
+ * à quoi le client répond. `null` pour une conversation neuve.
+ */
+async function dernierMessageTovo(
+  db: import('@supabase/supabase-js').SupabaseClient,
+  conversationId: string | undefined,
+): Promise<string | null> {
+  if (!conversationId) return null;
+  const { data } = await db
+    .from('messages')
+    .select('content')
+    .eq('conversation_id', conversationId)
+    .eq('role', 'assistant')
+    .order('created_at', { ascending: false })
+    .limit(1);
+  return (data?.[0]?.content as string | undefined) ?? null;
 }
 
 /**

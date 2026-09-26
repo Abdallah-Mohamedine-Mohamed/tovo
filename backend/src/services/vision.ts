@@ -1,5 +1,6 @@
 import { env } from '../config/env.js';
 import { serviceClient } from './supabase.js';
+import { viaLigneGoogle } from '../lib/ligneGoogle.js';
 
 /**
  * Description d'image par Gemini Vision.
@@ -127,6 +128,7 @@ export async function decrireImageDepuisOctets(
       `https://generativelanguage.googleapis.com/v1beta/models/${MODELE}:generateContent`,
       {
         method: 'POST',
+        ...viaLigneGoogle,
         headers: {
           'content-type': 'application/json',
           'x-goog-api-key': env.GEMINI_API_KEY,

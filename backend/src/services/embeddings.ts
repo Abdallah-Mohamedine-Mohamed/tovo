@@ -1,4 +1,5 @@
 import { env } from '../config/env.js';
+import { viaLigneGoogle } from '../lib/ligneGoogle.js';
 
 /**
  * Génération d'embeddings.
@@ -102,6 +103,7 @@ async function embedUneFois(
       `https://generativelanguage.googleapis.com/v1beta/models/${MODELE}:embedContent`,
       {
         method: 'POST',
+        ...viaLigneGoogle,
         headers: {
           'content-type': 'application/json',
           'x-goog-api-key': env.GEMINI_API_KEY,
@@ -177,6 +179,7 @@ export async function embedImage(
       `https://generativelanguage.googleapis.com/v1beta/models/${MODELE}:embedContent`,
       {
         method: 'POST',
+        ...viaLigneGoogle,
         headers: {
           'content-type': 'application/json',
           'x-goog-api-key': env.GEMINI_API_KEY,

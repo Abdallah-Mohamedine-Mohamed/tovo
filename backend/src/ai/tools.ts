@@ -851,20 +851,50 @@ async function commandeEnCours(ctx: ToolContext, fourni: string): Promise<string
  * S'il arbitrait lui-même, il finirait par annuler une commande déjà payée
  * parce que le client aura insisté — et l'argent serait perdu pour le
  * boutiquier.
+ *
+ * Et rien n'est annulé sans un toucher du client : l'outil montre la commande
+ * et demande « Oui, annuler » / « Non, la garder ». Seul ce bouton annule
+ * (route /chat, `annulerConfirme`). Un modèle qui comprend mal — « Annule le
+ * coca » voulait retirer un article — ne peut donc jamais annuler une
+ * commande à lui seul.
  */
+export const ANNULER_CONFIRME = 'annuler-confirme:';
+export const GARDER_COMMANDE = 'garder-commande';
+
 const annulerCommande: Executor = async (args, ctx) => {
   const orderId = await commandeEnCours(ctx, texte(args, 'order_id'));
-  if (!orderId) return { summary: { commandes_en_cours: 0 }, components: [] };
+  if (!orderId) {
+    return { summary: { commandes_en_cours: 0 }, components: [], content: 'Vous n’avez aucune commande en cours.' };
+  }
+  const { data: suivi } = await ctx.db.rpc('order_tracking', { p_order_id: orderId });
+  return {
+    summary: { confirmation_demandee: true, order_id: orderId },
+    content: 'Voulez-vous vraiment annuler cette commande ?',
+    components: [
+      ...(suivi ? [orderTracking(suivi as Record<string, unknown>)] : []),
+      quickReplies([
+        { label: 'Oui, annuler', value: `${ANNULER_CONFIRME}${orderId}` },
+        { label: 'Non, la garder', value: GARDER_COMMANDE },
+      ]),
+    ],
+  };
+};
 
+/** L'annulation elle-même, après le « Oui, annuler » du client. */
+export async function annulerConfirme(ctx: ToolContext, orderId: string): Promise<ToolOutcome> {
   const { data, error } = await ctx.db.rpc('cancel_my_order', {
     p_order_id: orderId,
-    p_motif: texte(args, 'motif') || null,
+    p_motif: null,
   });
 
-  if (error) return { summary: { erreur: error.message }, components: [] };
+  if (error) {
+    return { summary: { erreur: error.message }, components: [], content: 'Je n’ai pas pu annuler la commande. Réessayez dans un instant.' };
+  }
 
+  // Le refus vient de la base, déjà rédigé pour le client (livreur parti,
+  // commande payée…).
   const refus = data as string | null;
-  if (refus) return { summary: { annulee: false, raison: refus }, components: [] };
+  if (refus) return { summary: { annulee: false, raison: refus }, components: [], content: refus };
 
   // Le suivi remis à jour montre la commande annulée. Sans lui, l'ancienne
   // carte resterait à l'écran avec un statut périmé.
@@ -873,8 +903,9 @@ const annulerCommande: Executor = async (args, ctx) => {
   return {
     summary: { annulee: true, order_id: orderId },
     components: suivi ? [orderTracking(suivi as Record<string, unknown>)] : [],
+    content: 'C’est fait, votre commande est annulée.',
   };
-};
+}
 
 /**
  * De quoi appeler le livreur.
@@ -1392,10 +1423,11 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
   {
     name: 'annuler_commande',
     description:
-      "Annule une commande du client. Possible tant qu'aucun livreur n'est en " +
-      "route, et si elle n'a pas déjà été payée. Sans identifiant, prend la " +
-      "dernière commande en cours. N'arbitre jamais toi-même : l'outil refuse " +
-      'et explique pourquoi quand il ne peut pas.',
+      "Demande au client de confirmer l'annulation de TOUTE sa commande (il " +
+      "touche « Oui, annuler »). Seulement s'il veut annuler la commande : pour " +
+      "retirer un article, ce n'est pas cet outil. Sans identifiant, prend la " +
+      "dernière commande en cours. N'arbitre jamais toi-même : la base refuse " +
+      'et explique pourquoi quand ce n’est plus possible.',
     parameters: {
       type: 'object',
       properties: {

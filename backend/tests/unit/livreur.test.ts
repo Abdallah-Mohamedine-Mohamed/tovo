@@ -17,6 +17,12 @@ vi.mock('../../src/services/orderNotifications.js', () => ({
   notifierClient: vi.fn(async () => undefined),
 }));
 vi.mock('../../src/services/payments.js', () => ({ ouvrirPaiement: vi.fn() }));
+// Ces tests portent sur les voies rapides elles-mêmes : le cerveau (qui
+// appellerait le vrai Gemini) est éteint ; il a ses tests dans aiguillage.test.
+vi.mock('../../src/ai/decideur.js', async (original) => ({
+  ...(await original<typeof import('../../src/ai/decideur.js')>()),
+  cerveauActif: () => false,
+}));
 
 import { demandeUnLivreur } from '../../src/services/livreur.js';
 import { chatRoutes } from '../../src/routes/chat.js';

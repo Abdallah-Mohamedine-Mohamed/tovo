@@ -5,6 +5,8 @@ import { startSweep } from './services/sweep.js';
 import { startIndexer } from './services/indexer.js';
 import { closeQueues } from './services/queue.js';
 import { chargerClassifieur } from './ai/classifieur.js';
+import { lireReglage } from './ai/decideur.js';
+import { entretenirLigneGoogle } from './lib/ligneGoogle.js';
 
 const app = await buildApp();
 
@@ -18,8 +20,15 @@ startIndexer().catch((cause) => app.log.error(cause, 'indexation des produits in
 
 // Classifieur d'intentions local (CLASSIFIEUR_LOCAL=1) : chargé en arrière-
 // plan, le serveur répond pendant ce temps — la cascade continue sans lui.
-chargerClassifieur((message, erreur) =>
-  erreur ? app.log.error({ erreur: erreur instanceof Error ? erreur.message : erreur }, message) : app.log.info(message));
+// Inutile avec le cerveau (AIGUILLAGE=cerveau) : ~300 Mo de mémoire épargnés.
+if (env.AIGUILLAGE === 'cascade') {
+  chargerClassifieur((message, erreur) =>
+    erreur ? app.log.error({ erreur: erreur instanceof Error ? erreur.message : erreur }, message) : app.log.info(message));
+}
+
+// La ligne vers Google reste chaude : pas de connexion à rouvrir après un
+// silence (jusqu'à 0,9 s gagnée par message, lib/ligneGoogle.ts).
+entretenirLigneGoogle(env.GEMINI_API_KEY, lireReglage(env.CERVEAU_MODELE)[0]);
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {

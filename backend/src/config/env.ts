@@ -18,6 +18,10 @@ import { z } from 'zod';
 const vide = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => (v === '' ? undefined : v), schema.optional());
 
+/** Vide = la valeur par défaut (et non une erreur au démarrage). */
+const sansVide = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (v === '' ? undefined : v), schema);
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -104,6 +108,26 @@ const schema = z.object({
   // régression logistique d'accord) : ≥ 0,7 → 57 % des messages, 1 %
   // d'erreur. Sans l'arbitre (index ancien), préférer 0,8.
   CLASSIFIEUR_SEUIL: z.coerce.number().min(0).max(1).default(0.7),
+
+  // Le cerveau (ai/decideur.ts) : Gemini comprend chaque message et décide
+  // de la route. Banc du 26/09 (193 phrases) : 94-95 % de justesse, 1 à 2
+  // actions coûteuses à tort, contre 6 pour classifieur + Jev.
+  // 'cascade' rend la main à l'ancien aiguillage (classifieur local + Jev).
+  AIGUILLAGE: sansVide(z.enum(['cerveau', 'cascade']).default('cerveau')),
+  // « modèle:réflexion » (réflexion : aucune, courte ou low). Banc du 26/09
+  // avec la consigne du cerveau, 0 action coûteuse à tort pour tous :
+  //   3.1-flash-lite:aucune  96 %, médiane 0,93 s, 95 % sous 1,27 s ← choisi
+  //   3.5-flash-lite:courte  94 %, 0,73 s / 0,89 s
+  //   3.8-flash:low          97 %, 1,39 s / 2,65 s
+  CERVEAU_MODELE: sansVide(z.string().default('gemini-3.1-flash-lite:aucune')),
+  // Relance : si le cerveau n'a pas répondu dans ce délai, un second modèle
+  // part en parallèle et la première réponse gagne. Coupe la traîne lente.
+  CERVEAU_RELANCE_MS: sansVide(z.coerce.number().int().positive().default(1300)),
+  CERVEAU_RELANCE_MODELE: sansVide(z.string().default('gemini-3.5-flash-lite:courte')),
+  // Personne n'a répondu dans ce délai : chemin habituel, sans aiguillage.
+  CERVEAU_DELAI_MAX_MS: sansVide(z.coerce.number().int().positive().default(4000)),
+  // Dernier recours si Google est en panne (exige OPENAI_API_KEY).
+  CERVEAU_SECOURS_OPENAI: sansVide(z.string().default('gpt-5.5')),
 
   REDIS_URL: z.string().optional(),
   SENTRY_DSN: z.string().optional(),

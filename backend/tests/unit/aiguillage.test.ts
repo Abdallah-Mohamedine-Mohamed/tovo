@@ -20,6 +20,22 @@ vi.mock('../../src/ai/aiguillage.js', async (original) => ({
   consulterJev: vi.fn(() => (jev.muet ? new Promise(() => undefined) : Promise.resolve(jev.decision))),
 }));
 
+// Le cerveau simulé : éteint par défaut (les tests Jev ci-dessous), sa
+// décision fixée par chaque test du cerveau.
+const cerveau = vi.hoisted(() => ({
+  actif: false,
+  decision: null as import('../../src/ai/decideur.js').DecisionCerveau | null,
+  contextes: [] as Array<unknown>,
+}));
+vi.mock('../../src/ai/decideur.js', async (original) => ({
+  ...(await original<typeof import('../../src/ai/decideur.js')>()),
+  cerveauActif: vi.fn(() => cerveau.actif),
+  comprendre: vi.fn(async (_m: string, contexte: unknown) => {
+    cerveau.contextes.push(contexte);
+    return cerveau.decision ?? { intention: null, sur: false, modele: null, ms: 4000, relance: true, erreurs: ['panne'] };
+  }),
+}));
+
 import { decider, intentionChoisie } from '../../src/ai/aiguillage.js';
 import { chatRoutes } from '../../src/routes/chat.js';
 
@@ -28,7 +44,11 @@ const NIAMEY = { lat: 13.5137, lng: 2.1098 };
 const d = (choix: DecisionJev['choix'], confiance: number, probabilites: DecisionJev['probabilites'] = {}): DecisionJev =>
   ({ choix, confiance, probabilites, ms: 300, cout: 0 });
 
-afterEach(() => { vi.clearAllMocks(); jev.decision = null; jev.actif = false; jev.muet = false; });
+afterEach(() => {
+  vi.clearAllMocks();
+  jev.decision = null; jev.actif = false; jev.muet = false;
+  cerveau.actif = false; cerveau.decision = null; cerveau.contextes = [];
+});
 
 describe('decider — la route selon la confiance de Jev', () => {
   it('sûr : Jev décide', () => {
@@ -82,6 +102,7 @@ function fausseBase() {
   const inserts: Array<Record<string, unknown>> = [];
   const rpc = vi.fn(async (nom: string, args?: Record<string, unknown>) => {
     if (nom === 'place_courier_order') return { data: COMMANDE, error: null };
+    if (nom === 'cancel_my_order') return { data: null, error: null };
     if (nom === 'order_tracking') return { data: { order_id: COMMANDE, type: 'courier', status: 'ready' }, error: null };
     if (nom === 'courier_city_offer') return { data: { price: 1000, callback_minutes: 7 }, error: null };
     // Trouvé exactement seulement pour « riz » : le reste du catalogue est vide.
@@ -96,11 +117,22 @@ function fausseBase() {
     }
     return { data: null, error: null };
   });
-  const chaine = (table: string): unknown => new Proxy(() => undefined, {
+  const chaine = (table: string, colonnes = ''): unknown => new Proxy(() => undefined, {
     get: (_c, prop) => {
-      if (prop === 'then') return (ok: (v: unknown) => void) => ok(table === 'conversations' ? { data: { id: 'conv-1' }, error: null } : { data: null, error: null });
+      if (prop === 'then') {
+        return (ok: (v: unknown) => void) => ok(
+          table === 'conversations' ? { data: { id: 'conv-1' }, error: null }
+            // Une commande en cours (pour l'annulation), et le dernier
+            // message de Tovo (lu seul, pour le contexte du cerveau).
+            : table === 'orders' ? { data: [{ id: COMMANDE }], error: null }
+              : table === 'messages' && colonnes === 'content'
+                ? { data: [{ content: 'Où le livreur doit-il récupérer le colis ?' }], error: null }
+                : { data: null, error: null },
+        );
+      }
       if (prop === 'insert') return (ligne: Record<string, unknown>) => { if (table === 'messages') inserts.push(ligne); return chaine(table); };
-      return () => chaine(table);
+      if (prop === 'select') return (c: string) => chaine(table, c);
+      return () => chaine(table, colonnes);
     },
   });
   return { rpc, from: vi.fn((t: string) => chaine(t)), inserts };
@@ -186,6 +218,89 @@ describe('POST /chat — aiguillage réel', () => {
     const app = await appAvec(db);
     const res = await envoyer(app, { text: 'Je veux un livreur' });
     expect(res.json().content).toContain('7 minutes');
+    await app.close();
+  });
+});
+
+describe('POST /chat — le cerveau', () => {
+  const decision = (intention: import('../../src/ai/jev.js').Intention, sur = true) =>
+    ({ intention, sur, modele: 'gemini-3.1-flash-lite', ms: 850, relance: false, erreurs: [] });
+
+  it('sûr d’une course : le livreur est commandé, sans modèle conversationnel', async () => {
+    cerveau.actif = true;
+    cerveau.decision = decision('livreur');
+    const db = fausseBase();
+    const app = await appAvec(db);
+    const res = await envoyer(app, { text: 'Il me faut une moto tout de suite' });
+    expect(res.json().content).toContain('7 minutes');
+    expect(generate).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('pas sûr d’une course : des tuiles, aucune commande', async () => {
+    cerveau.actif = true;
+    cerveau.decision = decision('livreur', false);
+    const db = fausseBase();
+    const app = await appAvec(db);
+    const res = await envoyer(app, { text: 'Livreur' });
+    expect(res.json().components[0].type).toBe('quick_replies');
+    expect(db.rpc).not.toHaveBeenCalledWith('place_courier_order', expect.anything());
+    await app.close();
+  });
+
+  it('en panne : « Je veux devenir livreur » ne commande JAMAIS un livreur sur le mot', async () => {
+    cerveau.actif = true;
+    const db = fausseBase();
+    const app = await appAvec(db);
+    generate.mockResolvedValue({ text: 'Pour devenir livreur, écrivez-nous.', toolCalls: [], usage: { input: 1, output: 1, cached: 0 } });
+    await envoyer(app, { text: 'Je veux devenir livreur' });
+    expect(db.rpc).not.toHaveBeenCalledWith('place_courier_order', expect.anything());
+    await app.close();
+  });
+
+  it('« annule ma commande » : la commande et une confirmation — rien n’est annulé', async () => {
+    cerveau.actif = true;
+    cerveau.decision = decision('annuler');
+    const db = fausseBase();
+    const app = await appAvec(db);
+    const res = await envoyer(app, { text: 'annule ma commande' });
+    const tuiles = res.json().components.find((c: { type: string }) => c.type === 'quick_replies');
+    expect(tuiles.data.items.map((t: { label: string }) => t.label)).toEqual(['Oui, annuler', 'Non, la garder']);
+    expect(db.rpc).not.toHaveBeenCalledWith('cancel_my_order', expect.anything());
+    expect(generate).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('« Oui, annuler » : c’est ce bouton, et lui seul, qui annule', async () => {
+    const db = fausseBase();
+    const app = await appAvec(db);
+    const res = await envoyer(app, {
+      interaction: { action: 'quick_reply', payload: { label: 'Oui, annuler', value: `annuler-confirme:${COMMANDE}` } },
+    });
+    expect(db.rpc).toHaveBeenCalledWith('cancel_my_order', { p_order_id: COMMANDE, p_motif: null });
+    expect(res.json().content).toContain('annulée');
+    expect(db.inserts[0]).toMatchObject({ role: 'user', content: 'Oui, annuler' });
+    await app.close();
+  });
+
+  it('« Non, la garder » : rien n’est annulé', async () => {
+    const db = fausseBase();
+    const app = await appAvec(db);
+    const res = await envoyer(app, {
+      interaction: { action: 'quick_reply', payload: { label: 'Non, la garder', value: 'garder-commande' } },
+    });
+    expect(db.rpc).not.toHaveBeenCalledWith('cancel_my_order', expect.anything());
+    expect(res.json().content).toContain('continue');
+    await app.close();
+  });
+
+  it('lit le dernier message de Tovo : « Yantala. » répond à une question', async () => {
+    cerveau.actif = true;
+    cerveau.decision = decision('livreur');
+    const db = fausseBase();
+    const app = await appAvec(db);
+    await envoyer(app, { text: 'Yantala.', conversation_id: '33333333-3333-4333-8333-333333333333' });
+    expect(cerveau.contextes[0]).toEqual({ avant: 'Où le livreur doit-il récupérer le colis ?' });
     await app.close();
   });
 });

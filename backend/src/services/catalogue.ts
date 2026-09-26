@@ -67,6 +67,57 @@ export function filtrerSuggestionsTextuelles(query: string, items: ProductRow[])
   });
 }
 
+/**
+ * Les mesures et les emballages : ce qu'un produit PÈSE ou CONTIENT, jamais ce
+ * que le client cherche. Une faute de frappe ne doit pas y mener : « livre »
+ * (le livre) est à une lettre de « litre », et la recherche tolérante (0058)
+ * renvoyait tout ce qui se vend au litre — 5Alive, l'eau, l'huile, un four
+ * de 20 L (26/09).
+ */
+const MOTS_DE_MESURE = new Set([
+  'l', 'litre', 'litres', 'cl', 'ml', 'kg', 'kilo', 'kilos', 'kilogramme', 'g', 'gr', 'gramme', 'grammes',
+  'carton', 'cartons', 'sachet', 'sachets', 'bouteille', 'bouteilles', 'paquet', 'paquets', 'pack', 'packs',
+  'boite', 'boites', 'bidon', 'bidons', 'flacon', 'flacons', 'canette', 'canettes', 'piece', 'pieces',
+  'portion', 'portions', 'lot', 'lots', 'unite', 'unites', 'dose', 'doses',
+]);
+
+function distance(a: string, b: string): number {
+  const ligne = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let precedent = ligne[0]!;
+    ligne[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const courant = ligne[j]!;
+      ligne[j] = Math.min(ligne[j]! + 1, ligne[j - 1]! + 1, precedent + (a[i - 1] === b[j - 1] ? 0 : 1));
+      precedent = courant;
+    }
+  }
+  return ligne[b.length]!;
+}
+
+/** Un mot du produit est-il assez proche du mot cherché ? Mêmes règles que 0058. */
+function motProche(demande: string, mot: string): boolean {
+  if (mot === demande) return true;
+  if (MOTS_DE_MESURE.has(mot)) return false;
+  if (mot[0] !== demande[0] || Math.abs(mot.length - demande.length) > 2) return false;
+  const tolerance = demande.length <= 3 ? 0 : demande.length <= 5 ? 1 : 2;
+  return distance(demande, mot) <= tolerance;
+}
+
+/**
+ * Les suggestions « proches » (fautes de frappe) ne sont gardées que si
+ * chaque mot cherché ressemble à un VRAI mot du produit — pas à une mesure
+ * ni à un emballage. Sinon, mieux vaut dire « je ne trouve pas ».
+ */
+export function filtrerSuggestionsProches(query: string, items: ProductRow[]): ProductRow[] {
+  const demandes = [...new Set(motsRecherche(query))];
+  if (demandes.length === 0) return items;
+  return items.filter((item) => {
+    const mots = motsRecherche(`${item.name} ${item.description ?? ''}`);
+    return demandes.every((d) => mots.some((m) => motProche(d, m)));
+  });
+}
+
 // Les mots d'une QUESTION sur la boutique (« qu'est-ce que … a comme
 // produit ? ») comptent aussi : restés dans la requête, ils devenaient la
 // recherche de « qu est comme » chez Garba d'Or.
@@ -130,6 +181,12 @@ export async function cataloguePage(db: SupabaseClient, filter: CatalogueFilter,
   let response = await db.rpc('catalog_products_page', parameters);
   if (response.error) throw response.error;
   let page = response.data as CataloguePage;
+  // Des suggestions par faute de frappe : on vérifie qu'elles ressemblent
+  // vraiment à la demande (et pas seulement à « litre »).
+  if (page.match_type === 'similar' && parameters.p_query && page.total > 0) {
+    const items = filtrerSuggestionsProches(parameters.p_query, page.items);
+    page = { ...page, items, total: items.length, next_offset: null };
+  }
   if (page.total === 0 && parameters.p_query) {
     const normalizedQuery = normaliserIntention(parameters.p_query);
     const singleWord = normalizedQuery.length > 0 && !normalizedQuery.includes(' ');

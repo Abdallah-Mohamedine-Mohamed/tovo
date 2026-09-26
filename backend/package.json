@@ -36,7 +36,9 @@
     "recherche:variantes": "tsx --env-file=.env scripts/recherche/variantes.ts",
     "staging:nettoyer": "tsx --env-file=.env.staging scripts/scenarios/nettoyer.ts",
     "classifieur:indexer": "tsx --env-file=.env scripts/classifieur/indexer.ts",
-    "classifieur:distiller": "tsx --env-file=.env scripts/classifieur/distiller.ts"
+    "classifieur:distiller": "tsx --env-file=.env scripts/classifieur/distiller.ts",
+    "banc:ia": "tsx --env-file=.env scripts/banc-ia/banc.ts",
+    "banc:recolter": "tsx --env-file=.env scripts/banc-ia/recolter.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",
@@ -48,6 +50,7 @@
     "firebase-admin": "^14.2.0",
     "ioredis": "^6.0.0",
     "standardwebhooks": "^1.0.0",
+    "undici": "6.22.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {

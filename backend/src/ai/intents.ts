@@ -413,3 +413,21 @@ export function boutiquesMentionnees<T extends { id: string; name: string }>(
 
   return [];
 }
+
+/**
+ * La phrase porte-t-elle un VRAI indice de course — un livreur, un colis, un
+ * trajet ? Garde-fou des actions qui coûtent (un livreur qui se déplace).
+ *
+ * Le classifieur local compare des SENS : pour lui, « Je cherche un livre »
+ * est tout proche de « Je cherche un livreur ». Le 26/09, il a tranché
+ * « livreur » à 0,72 sur ces mots, et un livreur a été commandé pour un
+ * client qui voulait un livre. Désormais, sans indice ici, pas de course :
+ * la phrase suit le chemin habituel (la recherche).
+ */
+export function indiceDeCourse(texte: string): boolean {
+  const n = normaliserIntention(texte);
+  return /\b(livreur|livreurs|livreuse|coursier|coursiers|course|courses de livraison|moto|zemidjan|kabou|kabu)\b/.test(n)
+    || /\b(colis|paquet|paquets|document|documents|courrier|enveloppe)\b/.test(n)
+    || /\b(envoyer|envoie|envoyez|expedier|expedie|deposer|depose|deposez|recuperer|recupere|recuperez|livrer|livre moi|livrez|apporter|apporte|apportez|transporter|transporte|ramener|ramene)\b/.test(n)
+    || /\b(aller|va|allez|venir|viens|venez) (chercher|prendre|recuperer)\b/.test(n);
+}

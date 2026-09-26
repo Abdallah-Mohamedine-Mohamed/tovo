@@ -1,5 +1,6 @@
 import { env } from '../config/env.js';
 import { cacheDuPrompt, oublierCache } from './promptCache.js';
+import { viaLigneGoogle } from '../lib/ligneGoogle.js';
 
 /**
  * Abstraction du modèle de langage.
@@ -250,6 +251,9 @@ export class GeminiClient implements LlmClient {
         },
         body: JSON.stringify(corps),
         signal: controleur.signal,
+        // Connexion gardée ouverte (lib/ligneGoogle.ts) : pas de poignée de
+        // main chiffrée à refaire après un silence.
+        ...viaLigneGoogle,
       });
 
       if (!reponse.ok) {

@@ -2,6 +2,7 @@ import { env } from '../config/env.js';
 import { aiguillageActif, consulterJev, decider, type Route } from './aiguillage.js';
 import { classerLocalement, classifieurActif } from './classifieur.js';
 import type { DecisionJev } from './jev.js';
+import { indiceDeCourse } from './intents.js';
 
 /**
  * La cascade : du plus rapide au plus lent, on s'arrête dès qu'on est sûr.
@@ -27,6 +28,24 @@ export interface Aiguillage {
 export const cascadeActive = (): boolean => classifieurActif() || aiguillageActif();
 
 export async function aiguiller(message: string): Promise<Aiguillage> {
+  return garderLesCourses(message, await aiguillerSansGarde(message));
+}
+
+/**
+ * Une course (livreur, colis) n'est décidée d'office que si la phrase en
+ * porte un indice : « Je cherche un livre » ressemblait assez à « un
+ * livreur » pour que le classifieur tranche seul, et commande un livreur
+ * (26/09). Sans indice, la phrase repart sur le chemin habituel.
+ */
+function garderLesCourses(message: string, a: Aiguillage): Aiguillage {
+  const r = a.route;
+  if (r.type === 'intention' && (r.intention === 'livreur' || r.intention === 'colis') && !indiceDeCourse(message)) {
+    return { ...a, route: { type: 'habituel', decision: r.decision } };
+  }
+  return a;
+}
+
+async function aiguillerSansGarde(message: string): Promise<Aiguillage> {
   const local = await classerLocalement(message);
   if (local?.choix && local.confiance >= env.CLASSIFIEUR_SEUIL) {
     return { route: { type: 'intention', intention: local.choix, decision: local }, source: 'local', local, jev: null };
