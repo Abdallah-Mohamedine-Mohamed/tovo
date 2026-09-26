@@ -7,8 +7,10 @@ import { serviceClient } from './supabase.js';
  * configurer ailleurs (demande du client, 26/09).
  *
  * Chaque minute, le serveur relit les réglages de l'admin (platform_settings :
- * en service ou non, toutes les N minutes, combien de phrases à écrire) et
- * lance un passage si le dernier date de plus de N minutes. Un seul passage à
+ * en service ou non, toutes les N minutes, combien de phrases à écrire,
+ * l'examen toutes les M minutes) et lance un passage si le dernier date de
+ * plus de N minutes. L'examen complet n'est refait que toutes les M minutes :
+ * il interroge l'assistant avec la même clé Gemini que les clients. Un seul passage à
  * la fois ; un passage raté n'arrête rien, le suivant réessaie.
  *
  * Le passage (ai/banc/passage.ts) ne touche ni aux commandes ni au catalogue :
@@ -19,27 +21,36 @@ interface Reglages {
   actif: boolean;
   intervalleMin: number;
   phrases: number;
+  examenMin: number;
 }
 
 async function lireReglages(): Promise<Reglages | null> {
-  const { data, error } = await serviceClient()
-    .from('platform_settings')
-    .select('banc_ia_actif, banc_ia_intervalle_min, banc_ia_phrases')
-    .limit(1)
-    .maybeSingle();
+  const db = serviceClient();
+  let lecture = await db.from('platform_settings')
+    .select('banc_ia_actif, banc_ia_intervalle_min, banc_ia_phrases, banc_ia_examen_min').limit(1).maybeSingle();
+  // Migration 0066 pas encore appliquée : sans le rythme de l'examen.
+  if (lecture.error) {
+    lecture = await db.from('platform_settings')
+      .select('banc_ia_actif, banc_ia_intervalle_min, banc_ia_phrases').limit(1).maybeSingle() as typeof lecture;
+  }
   // Colonnes absentes : la migration 0065 n'est pas encore appliquée.
-  if (error || !data) return null;
+  const data = lecture.data as Record<string, unknown> | null;
+  if (lecture.error || !data) return null;
   return {
     actif: data.banc_ia_actif !== false,
     intervalleMin: Number(data.banc_ia_intervalle_min ?? 30),
     phrases: Number(data.banc_ia_phrases ?? 30),
+    examenMin: Number(data.banc_ia_examen_min ?? 60),
   };
 }
 
-async function dernierPassage(): Promise<number | null> {
-  const { data } = await serviceClient().from('banc_passages').select('cree_le').order('cree_le', { ascending: false }).limit(1);
-  const le = data?.[0]?.cree_le as string | undefined;
-  return le ? Date.parse(le) : null;
+/** Le dernier passage, et le dernier qui a fait passer l'examen. */
+async function derniersPassages(): Promise<{ passage: number | null; examen: number | null }> {
+  const db = serviceClient();
+  const { data } = await db.from('banc_passages').select('cree_le, rapport').order('cree_le', { ascending: false }).limit(50);
+  const lignes = (data ?? []) as Array<{ cree_le: string; rapport: { examen?: unknown } | null }>;
+  const date = (l?: { cree_le: string }) => (l ? Date.parse(l.cree_le) : null);
+  return { passage: date(lignes[0]), examen: date(lignes.find((l) => l.rapport?.examen)) };
 }
 
 export function demarrerBancIa(log: FastifyBaseLogger): () => void {
@@ -53,17 +64,20 @@ export function demarrerBancIa(log: FastifyBaseLogger): () => void {
     try {
       const reglages = await lireReglages();
       if (!reglages?.actif) return;
-      const dernier = await dernierPassage();
-      if (dernier !== null && Date.now() - dernier < reglages.intervalleMin * 60_000) return;
+      const derniers = await derniersPassages();
+      if (derniers.passage !== null && Date.now() - derniers.passage < reglages.intervalleMin * 60_000) return;
+      const examiner = derniers.examen === null || Date.now() - derniers.examen >= reglages.examenMin * 60_000;
       const { passageDuBanc } = await import('../ai/banc/passage.js');
-      log.info({ phrases: reglages.phrases }, 'banc IA : passage');
-      const { rapport } = await passageDuBanc({ phrases: reglages.phrases });
+      log.info({ phrases: reglages.phrases, examiner }, 'banc IA : passage');
+      const { rapport } = await passageDuBanc({ phrases: reglages.phrases, examiner });
       log.info({
         duree_s: rapport.duree_s,
         reels: rapport.reels,
         synthetiques: { ecrites: rapport.synthetiques.ecrites, gardees: rapport.synthetiques.gardees },
-        justesse: rapport.examen.justesse,
-        couteuses_a_tort: rapport.examen.actions_couteuses_a_tort,
+        ...(rapport.examen ? {
+          justesse: rapport.examen.justesse,
+          couteuses_a_tort: rapport.examen.actions_couteuses_a_tort,
+        } : {}),
         failles: rapport.nouvelles_failles.length,
       }, 'banc IA : passage terminé');
     } catch (cause) {

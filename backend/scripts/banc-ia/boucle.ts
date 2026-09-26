@@ -6,6 +6,7 @@
  *   npm run banc:boucle -- --sec         → sans rien écrire en base (essai)
  *   npm run banc:boucle -- --phrases 40  → plus ou moins de phrases écrites
  *   npm run banc:boucle -- --jours 3     → récolter 3 jours en arrière
+ *   npm run banc:boucle -- --sans-examen → écrire et juger, sans l'examen
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 
@@ -28,6 +29,7 @@ const { rapport, nouveaux, failles } = await passageDuBanc({
   ...(scenarios !== undefined ? { scenarios } : {}),
   ...(echantillon !== undefined ? { echantillon } : {}),
   ...(jours !== undefined ? { jours } : {}),
+  examiner: !argv.includes('--sans-examen'),
   journal: (m) => console.log(m),
 });
 
@@ -36,8 +38,10 @@ const fichier = `scripts/banc-ia/resultats/passage-${rapport.passage.slice(0, 16
 writeFileSync(fichier, JSON.stringify({ rapport, nouveaux }, null, 1));
 console.log(`\n# Passage du ${rapport.passage.slice(0, 16).replace('T', ' à ')}${sec ? ' (essai, rien en base)' : ''}`);
 console.log(`Vraies phrases : ${rapport.reels.recoltees} récoltées, ${rapport.reels.dans_examen} dans l'examen, ${rapport.reels.a_valider} à trancher`);
-console.log(`Phrases écrites : ${rapport.synthetiques.ecrites}, ${rapport.synthetiques.gardees} gardées, ${rapport.synthetiques.ecartees} écartées`);
-console.log(`Examen : ${rapport.examen.phrases} phrases, justesse ${rapport.examen.justesse} %, ${rapport.examen.actions_couteuses_a_tort} actions coûteuses à tort`);
+console.log(`Phrases écrites : ${rapport.synthetiques.ecrites}, ${rapport.synthetiques.gardees} gardées, ${rapport.synthetiques.ecartees} en désaccord (à trancher)`);
+console.log(rapport.examen
+  ? `Examen : ${rapport.examen.phrases} phrases, justesse ${rapport.examen.justesse} %, ${rapport.examen.actions_couteuses_a_tort} actions coûteuses à tort, ambiguës : ${rapport.examen.ambigues.doutes}/${rapport.examen.ambigues.phrases} doutes`
+  : 'Examen : pas cette fois');
 console.log(`Nouvelles failles du cerveau : ${failles.length}`);
 for (const f of failles.slice(0, 15)) console.log(`   « ${f.texte} » → ${f.cerveau}, attendu ${f.attendu} [${f.scenario}]`);
 console.log(`\nDétail : ${fichier}`);

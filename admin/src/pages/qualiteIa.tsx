@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import { List } from '@refinedev/antd';
 import { useNotification } from '@refinedev/core';
-import { Alert, Button, Card, Col, InputNumber, Row, Select, Space, Statistic, Switch, Table, Tag, Typography } from 'antd';
+import {
+  Alert, Button, Card, Col, Empty, Input, InputNumber, Radio, Row, Select, Space, Statistic, Switch, Tag, Typography,
+} from 'antd';
 import { supabaseClient } from '../supabaseClient';
 
 /**
- * Qualité de l'IA — les phrases où le juge (un modèle fort) et le cerveau ne
- * sont pas d'accord. Un humain tranche : c'est ce qui empêche l'IA de graver
- * ses propres erreurs dans l'examen.
+ * Qualité de l'IA — l'examen de l'assistant, et les phrases à trancher.
  *
- * Écrites par la boucle du banc (lancée par le serveur, toutes les 30 minutes
- * par défaut — réglable en haut de la page). « Valider » met la phrase dans l'examen du cerveau avec
- * l'intention choisie ; « Écarter » la retire. Accès : admins (RLS).
+ * La boucle du banc (lancée par le serveur, réglable en haut de la page)
+ * relit les phrases tapées dans l'app et fait écrire des phrases de clients
+ * imaginés par deux IA puissantes (Gemini et GPT). Quand les avis divergent,
+ * la phrase arrive ici. L'humain dit ce qu'elle veut dire :
+ *   - un sens unique ;
+ *   - ambiguë : l'assistant doit proposer des tuiles (les choix à cocher) ;
+ *   - erronée : incompréhensible, l'assistant ne doit pas agir.
+ * « Valider » la met dans l'examen ; « Écarter » la retire. Accès : admins.
  */
 
 const INTENTIONS: Record<string, string> = {
@@ -26,6 +31,8 @@ const INTENTIONS: Record<string, string> = {
   annuler: 'Annuler la commande',
   social: 'Rien à commander',
 };
+const OPTIONS = Object.entries(INTENTIONS).map(([value, label]) => ({ value, label }));
+const nom = (cle: string | null) => (cle ? INTENTIONS[cle] ?? (cle === 'ambigu' ? 'Ambiguë' : cle === 'tuiles' ? 'Hésite (tuiles)' : cle) : '—');
 
 interface Cas {
   id: string;
@@ -33,39 +40,59 @@ interface Cas {
   avant: string | null;
   attendu: string;
   origine: string;
+  etiqueteur: string | null;
   juge: string | null;
   cerveau: string | null;
   note: string | null;
-  cree_le: string;
+}
+
+type Reponse = 'intention' | 'tuiles' | 'erronee';
+interface Decision {
+  reponse: Reponse;
+  intention: string;
+  tuiles: string[];
+  commentaire: string;
 }
 
 interface Rapport {
   passage?: string;
-  reels?: { recoltees: number; dans_examen: number; a_valider: number };
-  synthetiques?: { ecrites: number; gardees: number; ecartees: number };
-  examen?: { phrases: number; justesse: number | null; actions_couteuses_a_tort: number };
+  reels?: { recoltees: number };
+  synthetiques?: { ecrites: number; gardees: number };
+  examen?: { phrases: number; justesse: number | null; actions_couteuses_a_tort: number; ambigues?: { phrases: number; doutes: number } } | null;
 }
 
-const etiquette = (cle: string | null) => (cle ? INTENTIONS[cle] ?? cle : '—');
+/** Les avis connus d'une phrase, sans doublon, pour pré-cocher les tuiles. */
+function propositions(c: Cas): string[] {
+  return [...new Set([c.etiqueteur, c.juge, c.cerveau].filter((x): x is string => !!x && x in INTENTIONS))];
+}
 
+function decisionParDefaut(c: Cas): Decision {
+  return { reponse: 'intention', intention: c.juge && c.juge in INTENTIONS ? c.juge : c.attendu, tuiles: propositions(c), commentaire: '' };
+}
+
+// ── Réglages ────────────────────────────────────────────────────────────
 interface Reglages {
   banc_ia_actif: boolean;
   banc_ia_intervalle_min: number;
   banc_ia_phrases: number;
+  banc_ia_examen_min?: number;
 }
 
-/**
- * Les réglages de la boucle : le serveur les relit chaque minute.
- */
 const ReglagesBoucle = () => {
   const { open } = useNotification();
   const [r, setR] = useState<Reglages | null>(null);
   const [enCours, setEnCours] = useState(false);
 
   useEffect(() => {
-    void supabaseClient.from('platform_settings')
-      .select('banc_ia_actif, banc_ia_intervalle_min, banc_ia_phrases').limit(1).maybeSingle()
-      .then(({ data }) => setR((data as Reglages | null) ?? null));
+    void (async () => {
+      let lecture = await supabaseClient.from('platform_settings')
+        .select('banc_ia_actif, banc_ia_intervalle_min, banc_ia_phrases, banc_ia_examen_min').limit(1).maybeSingle();
+      if (lecture.error) {
+        lecture = await supabaseClient.from('platform_settings')
+          .select('banc_ia_actif, banc_ia_intervalle_min, banc_ia_phrases').limit(1).maybeSingle() as typeof lecture;
+      }
+      setR((lecture.data as Reglages | null) ?? null);
+    })();
   }, []);
 
   if (!r) return null;
@@ -77,33 +104,121 @@ const ReglagesBoucle = () => {
       ? { type: 'error', message: 'Réglages non enregistrés', description: error.message }
       : { type: 'success', message: 'Réglages enregistrés', description: 'Le serveur les applique dans la minute.' });
   };
+  const champ = (titre: string, element: React.ReactNode) => (
+    <Space direction="vertical" size={4}>
+      <Typography.Text type="secondary">{titre}</Typography.Text>
+      {element}
+    </Space>
+  );
   return (
     <Card size="small" title="Réglages de l’apprentissage" style={{ marginBottom: 20 }}>
       <Space size={32} wrap align="end">
-        <Space direction="vertical" size={4}>
-          <Typography.Text type="secondary">En marche</Typography.Text>
-          <Switch checked={r.banc_ia_actif} onChange={(v) => setR({ ...r, banc_ia_actif: v })} />
-        </Space>
-        <Space direction="vertical" size={4}>
-          <Typography.Text type="secondary">Un passage toutes les</Typography.Text>
+        {champ('En marche', <Switch checked={r.banc_ia_actif} onChange={(v) => setR({ ...r, banc_ia_actif: v })} />)}
+        {champ('Un passage toutes les', (
           <InputNumber min={10} max={1440} value={r.banc_ia_intervalle_min} addonAfter="minutes"
-            onChange={(v) => setR({ ...r, banc_ia_intervalle_min: Number(v ?? 30) })} />
-        </Space>
-        <Space direction="vertical" size={4}>
-          <Typography.Text type="secondary">Phrases de clients imaginés par passage</Typography.Text>
+            onChange={(v) => setR({ ...r, banc_ia_intervalle_min: Number(v ?? 10) })} />
+        ))}
+        {champ('Phrases imaginées par passage', (
           <InputNumber min={0} max={200} value={r.banc_ia_phrases}
-            onChange={(v) => setR({ ...r, banc_ia_phrases: Number(v ?? 30) })} />
-        </Space>
+            onChange={(v) => setR({ ...r, banc_ia_phrases: Number(v ?? 20) })} />
+        ))}
+        {r.banc_ia_examen_min !== undefined && champ('Examen complet toutes les', (
+          <InputNumber min={10} max={1440} value={r.banc_ia_examen_min} addonAfter="minutes"
+            onChange={(v) => setR({ ...r, banc_ia_examen_min: Number(v ?? 60) })} />
+        ))}
         <Button type="primary" loading={enCours} onClick={() => void enregistrer()}>Enregistrer</Button>
       </Space>
     </Card>
   );
 };
 
-export const QualiteIa = () => {
+// ── Une phrase à trancher ───────────────────────────────────────────────
+const CartePhrase = ({ c, onFini }: { c: Cas; onFini: (id: string) => void }) => {
   const { open } = useNotification();
+  const [d, setD] = useState<Decision>(() => decisionParDefaut(c));
+  const [enCours, setEnCours] = useState(false);
+  const imaginee = c.origine === 'synthetique';
+
+  const trancher = async (statut: 'valide' | 'rejete') => {
+    setEnCours(true);
+    const { data: session } = await supabaseClient.auth.getUser();
+    const { error } = await supabaseClient.from('banc_cas').update({
+      statut,
+      reponse: d.reponse,
+      attendu: d.reponse === 'intention' ? d.intention : d.tuiles[0] ?? c.attendu,
+      tuiles: d.reponse === 'tuiles' ? d.tuiles : null,
+      commentaire: d.commentaire.trim() || null,
+      tranche_le: new Date().toISOString(),
+      tranche_par: session.user?.id ?? null,
+    }).eq('id', c.id);
+    setEnCours(false);
+    if (error) {
+      open?.({ type: 'error', message: 'Impossible d’enregistrer', description: `${error.message} — la migration 0066 est-elle appliquée ?` });
+      return;
+    }
+    onFini(c.id);
+  };
+
+  return (
+    <Card style={{ marginBottom: 14 }} styles={{ body: { padding: 18 } }}>
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <div>
+          <Tag>{imaginee ? 'Phrase imaginée' : 'Phrase tapée dans l’app'}</Tag>
+          <Typography.Title level={4} style={{ margin: '8px 0 0' }}>« {c.texte} »</Typography.Title>
+          {c.avant && <Typography.Text type="secondary">En réponse à Tovo : « {c.avant} »</Typography.Text>}
+        </div>
+
+        <Space wrap size={[8, 8]}>
+          <Typography.Text type="secondary">Les avis :</Typography.Text>
+          {imaginee && <Tag color="purple">Gemini (qui l’a écrite) : {nom(c.etiqueteur)}</Tag>}
+          <Tag color="blue">GPT‑5.5 (le juge) : {nom(c.juge)}</Tag>
+          <Tag color="orange">L’assistant : {nom(c.cerveau)}</Tag>
+        </Space>
+        {c.note && <Typography.Text type="secondary" italic>{c.note}</Typography.Text>}
+
+        <Radio.Group value={d.reponse} onChange={(e) => setD({ ...d, reponse: e.target.value as Reponse })}>
+          <Radio.Button value="intention">Elle veut dire…</Radio.Button>
+          <Radio.Button value="tuiles">Ambiguë : proposer des tuiles</Radio.Button>
+          <Radio.Button value="erronee">Phrase erronée</Radio.Button>
+        </Radio.Group>
+
+        {d.reponse === 'intention' && (
+          <Select style={{ width: 300 }} value={d.intention} options={OPTIONS}
+            onChange={(v) => setD({ ...d, intention: v })} />
+        )}
+        {d.reponse === 'tuiles' && (
+          <Space direction="vertical" size={4}>
+            <Typography.Text type="secondary">Les choix que l’assistant doit proposer :</Typography.Text>
+            <Select mode="multiple" style={{ minWidth: 420 }} value={d.tuiles} options={OPTIONS}
+              onChange={(v) => setD({ ...d, tuiles: v })} />
+          </Space>
+        )}
+        {d.reponse === 'erronee' && (
+          <Typography.Text type="secondary">
+            Incompréhensible ou mal transcrite : l’assistant ne doit rien faire à sa place, seulement demander de reformuler.
+          </Typography.Text>
+        )}
+
+        <Input.TextArea
+          value={d.commentaire}
+          onChange={(e) => setD({ ...d, commentaire: e.target.value })}
+          placeholder="Avec vos mots : ce que la phrase veut dire (facultatif — ex. « réclamation, mauvais plat reçu »)"
+          autoSize={{ minRows: 1, maxRows: 3 }}
+          maxLength={500}
+        />
+
+        <Space>
+          <Button type="primary" loading={enCours} onClick={() => void trancher('valide')}>Valider</Button>
+          <Button disabled={enCours} onClick={() => void trancher('rejete')}>Écarter</Button>
+        </Space>
+      </Space>
+    </Card>
+  );
+};
+
+// ── La page ─────────────────────────────────────────────────────────────
+export const QualiteIa = () => {
   const [cas, setCas] = useState<Cas[]>([]);
-  const [choix, setChoix] = useState<Record<string, string>>({});
   const [rapport, setRapport] = useState<Rapport | null>(null);
   const [total, setTotal] = useState<number | null>(null);
   const [chargement, setChargement] = useState(true);
@@ -112,9 +227,9 @@ export const QualiteIa = () => {
   const charger = useCallback(async () => {
     setChargement(true);
     const [aValider, dernier, compte] = await Promise.all([
-      supabaseClient.from('banc_cas').select('id, texte, avant, attendu, origine, juge, cerveau, note, cree_le')
-        .eq('statut', 'a_valider').order('cree_le', { ascending: false }).limit(200),
-      supabaseClient.from('banc_passages').select('rapport').order('cree_le', { ascending: false }).limit(1),
+      supabaseClient.from('banc_cas').select('id, texte, avant, attendu, origine, etiqueteur, juge, cerveau, note')
+        .eq('statut', 'a_valider').order('cree_le', { ascending: false }).limit(100),
+      supabaseClient.from('banc_passages').select('rapport').order('cree_le', { ascending: false }).limit(20),
       supabaseClient.from('banc_cas').select('id', { count: 'exact', head: true }).eq('statut', 'valide'),
     ]);
     if (aValider.error) {
@@ -122,7 +237,9 @@ export const QualiteIa = () => {
     } else {
       setErreur(null);
       setCas((aValider.data ?? []) as Cas[]);
-      setRapport(((dernier.data?.[0] as { rapport?: Rapport } | undefined)?.rapport) ?? null);
+      // Le dernier passage qui a fait passer l'examen.
+      const rapports = ((dernier.data ?? []) as Array<{ rapport: Rapport }>).map((l) => l.rapport);
+      setRapport(rapports.find((x) => x.examen) ?? rapports[0] ?? null);
       setTotal(compte.count ?? null);
     }
     setChargement(false);
@@ -132,90 +249,41 @@ export const QualiteIa = () => {
     void charger();
   }, [charger]);
 
-  const trancher = async (c: Cas, statut: 'valide' | 'rejete') => {
-    const { data: session } = await supabaseClient.auth.getUser();
-    const { error } = await supabaseClient.from('banc_cas').update({
-      statut,
-      attendu: choix[c.id] ?? c.juge ?? c.attendu,
-      tranche_le: new Date().toISOString(),
-      tranche_par: session.user?.id ?? null,
-    }).eq('id', c.id);
-    if (error) {
-      open?.({ type: 'error', message: 'Impossible d’enregistrer', description: error.message });
-      return;
-    }
-    setCas((liste) => liste.filter((x) => x.id !== c.id));
-  };
-
   const ex = rapport?.examen;
   return (
-    <List title="Qualité de l’IA">
-      <Typography.Paragraph style={{ maxWidth: 820, fontSize: 15 }}>
-        L’assistant de Tovo passe un <b>examen</b> en continu. À chaque passage, le serveur relit les vraies phrases de
-        vos clients, et fait écrire des phrases de clients imaginés par deux IA puissantes qui se contrôlent l’une
-        l’autre. Quand un <b>juge</b> et l’<b>assistant</b> ne comprennent pas une vraie phrase de la même façon, elle
-        arrive ci-dessous : choisissez ce qu’elle veut vraiment dire, puis <b>Valider</b>. Une phrase inutile ou
-        incompréhensible : <b>Écarter</b>.
+    <List title="Qualité de l’IA" headerButtons={<Button onClick={() => void charger()}>Actualiser</Button>}>
+      <Typography.Paragraph style={{ maxWidth: 860, fontSize: 15 }}>
+        L’assistant de Tovo passe un <b>examen</b> en continu. À chaque passage, le serveur relit les phrases tapées dans
+        l’app et fait écrire des phrases de clients imaginés par deux IA puissantes, <b>Gemini</b> et <b>GPT</b>, qui se
+        contrôlent l’une l’autre. Quand leurs avis divergent, la phrase arrive ci-dessous. Dites ce qu’elle veut dire,
+        si elle est <b>ambiguë</b> (l’assistant devra proposer des choix) ou <b>erronée</b>, puis <b>Valider</b>.
       </Typography.Paragraph>
+
       <ReglagesBoucle />
+
       {erreur && (
         <Alert type="error" showIcon style={{ marginBottom: 16 }}
           message="Lecture impossible" description={`${erreur} — la migration 0065 est-elle appliquée ?`} />
       )}
-      <Row gutter={16} style={{ marginBottom: 20 }}>
-        <Col span={6}><Card><Statistic title="Justesse du cerveau (dernier passage)" value={ex?.justesse ?? '—'} suffix={ex?.justesse != null ? '%' : ''} /></Card></Col>
-        <Col span={6}><Card><Statistic title="Actions coûteuses à tort" value={ex?.actions_couteuses_a_tort ?? '—'} /></Card></Col>
-        <Col span={6}><Card><Statistic title="Phrases dans l’examen" value={total ?? '—'} /></Card></Col>
-        <Col span={6}><Card><Statistic title="À trancher" value={cas.length} /></Card></Col>
+
+      <Row gutter={16} style={{ marginBottom: 12 }}>
+        <Col xs={12} lg={6}><Card><Statistic title="Justesse de l’assistant" value={ex?.justesse ?? '—'} suffix={ex?.justesse != null ? '%' : ''} /></Card></Col>
+        <Col xs={12} lg={6}><Card><Statistic title="Actions coûteuses à tort" value={ex?.actions_couteuses_a_tort ?? '—'} /></Card></Col>
+        <Col xs={12} lg={6}><Card><Statistic title="Phrases dans l’examen" value={total ?? '—'} /></Card></Col>
+        <Col xs={12} lg={6}><Card><Statistic title="À trancher" value={cas.length} /></Card></Col>
       </Row>
       {rapport?.passage && (
         <Typography.Paragraph type="secondary">
-          Dernier passage : {new Date(rapport.passage).toLocaleString('fr-FR')} — {rapport.reels?.recoltees ?? 0} vraies phrases
-          récoltées, {rapport.synthetiques?.gardees ?? 0} phrases écrites gardées sur {rapport.synthetiques?.ecrites ?? 0}.
+          Dernier examen : {new Date(rapport.passage).toLocaleString('fr-FR')}
+          {ex?.ambigues && ex.ambigues.phrases > 0 && ` — phrases ambiguës : l’assistant a hésité sur ${ex.ambigues.doutes} sur ${ex.ambigues.phrases}`}.
         </Typography.Paragraph>
       )}
-      <Table<Cas>
-        rowKey="id"
-        loading={chargement}
-        dataSource={cas}
-        pagination={{ pageSize: 20 }}
-        columns={[
-          {
-            title: 'Phrase du client',
-            render: (_, c) => (
-              <Space direction="vertical" size={2}>
-                <Typography.Text strong>{c.texte}</Typography.Text>
-                {c.avant && <Typography.Text type="secondary">En réponse à : « {c.avant} »</Typography.Text>}
-                {c.note && <Typography.Text type="warning">{c.note}</Typography.Text>}
-              </Space>
-            ),
-          },
-          { title: 'Le juge', width: 170, render: (_, c) => <Tag color="blue">{etiquette(c.juge)}</Tag> },
-          { title: 'Le cerveau', width: 170, render: (_, c) => <Tag color="orange">{etiquette(c.cerveau)}</Tag> },
-          {
-            title: 'Ce que ça veut dire',
-            width: 240,
-            render: (_, c) => (
-              <Select
-                style={{ width: 220 }}
-                value={choix[c.id] ?? c.juge ?? c.attendu}
-                onChange={(v) => setChoix((x) => ({ ...x, [c.id]: v }))}
-                options={Object.entries(INTENTIONS).map(([value, label]) => ({ value, label }))}
-              />
-            ),
-          },
-          {
-            title: '',
-            width: 200,
-            render: (_, c) => (
-              <Space>
-                <Button type="primary" onClick={() => void trancher(c, 'valide')}>Valider</Button>
-                <Button onClick={() => void trancher(c, 'rejete')}>Écarter</Button>
-              </Space>
-            ),
-          },
-        ]}
-      />
+
+      <Typography.Title level={4} style={{ marginTop: 12 }}>À trancher</Typography.Title>
+      {!chargement && cas.length === 0 && <Empty description="Rien à trancher pour le moment." />}
+      {cas.map((c) => (
+        <CartePhrase key={c.id} c={c} onFini={(id) => setCas((l) => l.filter((x) => x.id !== id))} />
+      ))}
     </List>
   );
 };

@@ -35,6 +35,12 @@ export interface OptionsPassage {
   echantillon?: number;
   /** Récolter N jours en arrière au lieu de « depuis le passage précédent ». */
   jours?: number;
+  /**
+   * Faire passer l'examen complet à l'assistant (par défaut oui). La boucle
+   * ne le fait qu'une fois par heure : il interroge l'assistant avec la même
+   * clé Gemini que les clients.
+   */
+  examiner?: boolean;
   journal?: (message: string) => void;
 }
 
@@ -80,13 +86,18 @@ export async function passageDuBanc(options: OptionsPassage = {}) {
       }
     });
 
-  /** Ce que le cerveau comprend (« tuiles » s'il hésite sur une action). */
-  const cerveau = (cas: Array<{ texte: string; avant?: string | null }>) =>
-    parPaquets(cas, 1, 5, async ([c]): Promise<Array<Intention | 'tuiles' | null>> => {
+  /**
+   * Ce que le cerveau comprend (« tuiles » s'il hésite sur une action), et
+   * s'il doute : une phrase ambiguë ou erronée doit le faire douter.
+   */
+  const lireAvecDoute = (cas: Array<{ texte: string; avant?: string | null }>) =>
+    parPaquets(cas, 1, 5, async ([c]): Promise<Array<{ predit: Intention | 'tuiles' | null; doute: boolean }>> => {
       const d = await comprendre(c!.texte, { avant: c!.avant ?? null });
-      if (!d.intention) return [null];
-      return [!d.sur && COUTEUSES.has(d.intention) ? 'tuiles' : d.intention];
+      if (!d.intention) return [{ predit: null, doute: false }];
+      return [{ predit: !d.sur && COUTEUSES.has(d.intention) ? 'tuiles' : d.intention, doute: !d.sur }];
     });
+  const cerveau = async (cas: Array<{ texte: string; avant?: string | null }>) =>
+    (await lireAvecDoute(cas)).map((r) => r.predit);
 
   // ── Ce que l'examen contient déjà ─────────────────────────────────────
   const connues = new Set(JEU.map((c) => cleDe(c.texte, c.avant)));
@@ -164,12 +175,18 @@ export async function passageDuBanc(options: OptionsPassage = {}) {
       dejaVues: auHasard(JEU.map((c) => c.texte), 40),
     };
     const parScenario = Math.ceil(phrasesVoulues / scenarios.length);
-    journal(`écriture : ${scenarios.map((s) => s.cle).join(', ')} (${parScenario} phrases chacun)`);
-    ecrites = (await parPaquets(scenarios, 1, 3, async ([s]) => {
+    // Des lots de 30 au plus : au-delà, une seule réponse devient très longue
+    // et le modèle se répète.
+    const lots = scenarios.flatMap((sc) => Array.from(
+      { length: Math.ceil(parScenario / 30) },
+      (_, i) => ({ scenario: sc, combien: Math.min(30, parScenario - i * 30) }),
+    ));
+    journal(`écriture : ${scenarios.map((sc) => sc.cle).join(', ')} (${parScenario} phrases chacun, ${lots.length} lots)`);
+    ecrites = (await parPaquets(lots, 1, 4, async ([lot]) => {
       try {
-        return (await ecrirePhrases(lEcrivain, s!, parScenario, contexte)).map((p) => ({ ...p, scenario: s!.cle }));
+        return (await ecrirePhrases(lEcrivain, lot!.scenario, lot!.combien, contexte)).map((p) => ({ ...p, scenario: lot!.scenario.cle }));
       } catch (cause) {
-        journal(`écrivain en panne sur « ${s!.cle} » : ${(cause as Error).message.slice(0, 120)}`);
+        journal(`écrivain en panne sur « ${lot!.scenario.cle} » : ${(cause as Error).message.slice(0, 120)}`);
         return [];
       }
     })).filter((p) => {
@@ -182,11 +199,21 @@ export async function passageDuBanc(options: OptionsPassage = {}) {
     const [jugesEcrites, cerveauEcrites] = await Promise.all([juger(ecrites), cerveau(ecrites)]);
     ecrites.forEach((p, i) => {
       const j = jugesEcrites[i] ?? null;
+      const c = cerveauEcrites[i] ?? null;
       if (!memeSens(p.intention, j)) {
+        // Les deux modèles forts ne sont pas d'accord : souvent la phrase la
+        // plus intéressante (ambiguë, ou une intention qui manque). Elle part
+        // à l'humain au lieu d'être jetée (demande du client, 26/09).
         ecartees++;
+        if (j) {
+          nouveaux.push({
+            texte: p.texte, avant: p.avant ?? null, attendu: p.intention, origine: 'synthetique', statut: 'a_valider',
+            etiqueteur: p.intention, juge: j, cerveau: c,
+            note: `[${p.scenario}] Les deux IA ne sont pas d'accord. ${p.note ?? ''}`.trim(), cle: cleDe(p.texte, p.avant),
+          });
+        }
         return;
       }
-      const c = cerveauEcrites[i] ?? null;
       if (c !== 'tuiles' && !memeSens(p.intention, c as Etiquette | null)) {
         failles.push({ texte: p.texte, avant: p.avant ?? null, attendu: p.intention, cerveau: c, scenario: p.scenario });
       }
@@ -206,23 +233,36 @@ export async function passageDuBanc(options: OptionsPassage = {}) {
   }
 
   // ── 3. L'examen du cerveau ────────────────────────────────────────────
-  type CasExamen = { texte: string; avant: string | null; attendu: string; origine: string };
-  let examen: CasExamen[] = JEU.map((c) => ({ texte: c.texte, avant: c.avant ?? null, attendu: c.attendu, origine: c.source }));
-  if (!sec) {
-    const { data } = await db.from('banc_cas').select('texte, avant, attendu, origine').eq('statut', 'valide').limit(50_000);
-    const base = (data ?? []) as CasExamen[];
+  // reponse : 'intention' (un sens), 'tuiles' (ambiguë : l'assistant doit
+  // douter et proposer des choix), 'erronee' (il ne doit pas agir).
+  type CasExamen = { texte: string; avant: string | null; attendu: string; origine: string; reponse?: string };
+  const examiner = options.examiner ?? true;
+  let examen: CasExamen[] = examiner
+    ? JEU.map((c) => ({ texte: c.texte, avant: c.avant ?? null, attendu: c.attendu, origine: c.source }))
+    : [];
+  if (!sec && examiner) {
+    let lecture = await db.from('banc_cas').select('texte, avant, attendu, origine, reponse').eq('statut', 'valide').limit(50_000);
+    // Migration 0066 pas encore appliquée : sans la colonne reponse.
+    if (lecture.error) lecture = await db.from('banc_cas').select('texte, avant, attendu, origine').eq('statut', 'valide').limit(50_000) as typeof lecture;
+    const base = (lecture.data ?? []) as CasExamen[];
     const reelsBase = base.filter((c) => c.origine !== 'synthetique');
     const synth = auHasard(base.filter((c) => c.origine === 'synthetique'), Math.max(0, echantillon - reelsBase.length));
     examen = [...examen, ...reelsBase, ...synth];
-  } else {
+  } else if (examiner) {
     examen = [...examen, ...nouveaux.filter((c) => c.statut === 'valide')];
   }
-  journal(`examen : ${examen.length} phrases`);
-  const reponses = await cerveau(examen);
-  const justes = examen.filter((c, i) => reponses[i] === c.attendu || memeSens(reponses[i] as Etiquette, c.attendu as Etiquette)).length;
+  if (examiner) journal(`examen : ${examen.length} phrases`);
+  const lus = await lireAvecDoute(examen);
+  const sansSens = (c: CasExamen) => c.reponse === 'tuiles' || c.reponse === 'erronee';
+  const juste = (c: CasExamen, i: number) => sansSens(c)
+    ? lus[i]!.doute
+    : lus[i]!.predit === c.attendu || memeSens(lus[i]!.predit as Etiquette, c.attendu as Etiquette);
+  const justes = examen.filter(juste).length;
   const aTort = examen
-    .map((c, i) => ({ ...c, predit: reponses[i] ?? null }))
-    .filter((c) => c.predit && c.predit !== 'tuiles' && COUTEUSES.has(c.predit as Intention) && !memeSens(c.predit as Etiquette, c.attendu as Etiquette));
+    .map((c, i) => ({ ...c, predit: lus[i]!.predit, doute: lus[i]!.doute }))
+    .filter((c) => c.predit && c.predit !== 'tuiles' && COUTEUSES.has(c.predit as Intention)
+      && (sansSens(c) ? !c.doute : !memeSens(c.predit as Etiquette, c.attendu as Etiquette)));
+  const ambigues = examen.filter(sansSens);
 
   const rapport = {
     passage: new Date().toISOString(),
@@ -235,14 +275,20 @@ export async function passageDuBanc(options: OptionsPassage = {}) {
       a_valider: nouveaux.filter((c) => c.origine === 'reel' && c.statut === 'a_valider').length,
     },
     synthetiques: { scenarios: scenarios.map((s) => s.cle), ecrites: ecrites.length, gardees: ecrites.length - ecartees, ecartees },
-    examen: {
+    examen: examiner ? {
       phrases: examen.length,
       justesse: examen.length ? Math.round((1000 * justes) / examen.length) / 10 : null,
       actions_couteuses_a_tort: aTort.length,
-      exemples_a_tort: aTort.slice(0, 15).map((c) => ({ texte: c.texte, attendu: c.attendu, predit: c.predit })),
-    },
+      exemples_a_tort: aTort.slice(0, 15).map((c) => ({ texte: c.texte, attendu: c.reponse === 'intention' || !c.reponse ? c.attendu : c.reponse, predit: c.predit })),
+      // Ambiguës et erronées : l'assistant a-t-il douté, au lieu de deviner ?
+      ambigues: { phrases: ambigues.length, doutes: ambigues.filter((c) => lus[examen.indexOf(c)]!.doute).length },
+    } : null,
     nouvelles_failles: failles.slice(0, 40),
   };
-  if (!sec) await db.from('banc_passages').insert({ rapport });
+  if (!sec) {
+    const ecrit = await db.from('banc_passages').insert({ rapport, examine: examiner });
+    // Migration 0066 pas encore appliquée : sans la colonne examine.
+    if (ecrit.error) await db.from('banc_passages').insert({ rapport });
+  }
   return { rapport, nouveaux, failles };
 }
