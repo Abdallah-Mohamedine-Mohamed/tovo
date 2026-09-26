@@ -166,7 +166,14 @@ class _ChatScreenState extends State<ChatScreen> {
     unawaited(_demarrer());
     // La pastille montre le panier en cours dès l'ouverture.
     unawaited(PanierEnDirect.instance.rafraichir(widget.api));
+    // De retour dans l'app (après MyNita, une notification…) : la commande
+    // a pu avancer, être livrée ou annulée entre-temps.
+    _cycleDeVie = AppLifecycleListener(
+      onResume: () => unawaited(_rafraichirCommandes()),
+    );
   }
+
+  late final AppLifecycleListener _cycleDeVie;
 
   Future<void> _demarrer() async {
     final navigation = _navigation;
@@ -176,6 +183,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _cycleDeVie.dispose();
     _minuterieParole?.cancel();
     unawaited(VoixTovo.liberer());
     _scroll.dispose();
@@ -228,42 +236,113 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!mounted || navigation != _navigation) return;
       if (categories.ok) _showCategories(categories);
     }
-    final commandes = await ordersRequest;
     if (!mounted || navigation != _navigation) return;
-
-    Map<String, dynamic>? enCours;
-    if (commandes.ok) {
-      final liste = ((commandes.raw['orders'] as List?) ?? const [])
-          .cast<Map<String, dynamic>>();
-      // Au-delà de 12 heures, une commande « en cours » est une commande
-      // oubliée (jamais confirmée) : on ne la ressort plus à chaque ouverture.
-      final limite = DateTime.now().subtract(const Duration(hours: 12));
-      enCours = liste.where((o) {
-        final s = '${o['status']}';
-        final le = DateTime.tryParse('${o['placed_at'] ?? ''}');
-        return s != 'delivered' &&
-            s != 'cancelled' &&
-            (le == null || le.isAfter(limite));
-      }).firstOrNull;
-      // Un colis ne se « recommande » pas : l'adresse et le destinataire
-      // changent à chaque fois. Sans articles (serveur plus ancien), il n'y
-      // aurait rien à montrer.
-      final derniere = liste.where((o) {
-        return '${o['status']}' == 'delivered' &&
-            '${o['type']}' != 'courier' &&
-            ((o['articles'] as List?)?.isNotEmpty ?? false);
-      }).firstOrNull;
-      if (derniere != null) setState(() => _derniereCommande = derniere);
-    }
-
     // L'app ne saute plus d'elle-même dans le suivi quelques secondes après
     // l'ouverture : le client venait peut-être faire autre chose. Une carte
     // sur l'accueil propose de suivre ; la Live Activity suit déjà, app
     // fermée.
-    if (enCours != null && mounted) {
-      unawaited(TovoPush.enregistrer('client'));
-      setState(() => _commandeEnCours = enCours);
+    await _rafraichirCommandes(ordersRequest);
+  }
+
+  /// La commande en cours et la dernière commande livrée, relues du serveur.
+  ///
+  /// Lues seulement à l'ouverture, elles restaient figées : l'accueil
+  /// proposait « Recommander » pendant qu'une commande était en route, et une
+  /// commande annulée restait « en cours » jusqu'à fermer l'app (26/09).
+  /// Relues maintenant à chaque commande passée ou annulée, et au retour dans
+  /// l'app.
+  Future<void> _rafraichirCommandes([Future<TovoResponse>? requete]) async {
+    final commandes =
+        await (requete ?? widget.api.get('/orders', query: {'limit': 5}));
+    if (!mounted || !commandes.ok) return;
+    final liste = ((commandes.raw['orders'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+    // Au-delà de 12 heures, une commande « en cours » est une commande
+    // oubliée (jamais confirmée) : on ne la ressort plus à chaque ouverture.
+    final limite = DateTime.now().subtract(const Duration(hours: 12));
+    final enCours = liste.where((o) {
+      final s = '${o['status']}';
+      final le = DateTime.tryParse('${o['placed_at'] ?? ''}');
+      return s != 'delivered' &&
+          s != 'cancelled' &&
+          (le == null || le.isAfter(limite));
+    }).firstOrNull;
+    // Un colis ne se « recommande » pas : l'adresse et le destinataire
+    // changent à chaque fois. Sans articles (serveur plus ancien), il n'y
+    // aurait rien à montrer.
+    final derniere = liste.where((o) {
+      return '${o['status']}' == 'delivered' &&
+          '${o['type']}' != 'courier' &&
+          ((o['articles'] as List?)?.isNotEmpty ?? false);
+    }).firstOrNull;
+    if (enCours != null) unawaited(TovoPush.enregistrer('client'));
+    setState(() {
+      _commandeEnCours = enCours;
+      _derniereCommande = derniere;
+    });
+  }
+
+  /// Une réponse qui montre un suivi (commande passée, annulée, suivie) :
+  /// l'état des commandes a pu changer, l'accueil est remis à jour.
+  void _siSuiviRafraichir(List<TovoComponent> composants) {
+    if (composants.any((c) => c.type == 'order_tracking')) {
+      unawaited(_rafraichirCommandes());
     }
+  }
+
+  /// Une commande vient de partir : les cartes panier du fil ne proposent
+  /// plus « Commander ». Elles affichaient encore « Commander — 12 600 F »
+  /// au-dessus du suivi de la commande qu'elles venaient de passer (26/09).
+  void _panierCommande() {
+    for (var i = 0; i < _tours.length; i++) {
+      final tour = _tours[i];
+      if (!tour.composants.any(
+        (c) => c.type == 'cart_summary' && c.data['commande_passee'] != true,
+      )) {
+        continue;
+      }
+      _tours[i] = _Tour(
+        deLAssistant: tour.deLAssistant,
+        contenu: tour.contenu,
+        composants: [
+          for (final c in tour.composants)
+            c.type == 'cart_summary'
+                ? TovoComponent(
+                    type: c.type,
+                    data: {...c.data, 'commande_passee': true},
+                  )
+                : c,
+        ],
+        enErreur: tour.enErreur,
+        photoLocale: tour.photoLocale,
+      );
+    }
+  }
+
+  /// Une commande est déjà en cours : on le dit avant d'en passer une autre,
+  /// et le client choisit — la voir, ou continuer. Une seule fois par
+  /// commande en cours : le redemander à chaque geste serait du harcèlement.
+  /// Vrai : on continue.
+  String? _averti;
+
+  Future<bool> _continuerMalgreCommandeEnCours() async {
+    final enCours = _commandeEnCours;
+    if (enCours == null || _averti == '${enCours['id']}') return true;
+    final choix = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: Colors.white,
+      builder: (context) => _AvertissementCommandeEnCours(commande: enCours),
+    );
+    if (!mounted) return false;
+    if (choix == true) {
+      _averti = '${enCours['id']}';
+      return true;
+    }
+    if (choix == false) {
+      await _appeler(() => widget.api.get('/orders/${enCours['id']}'));
+    }
+    return false;
   }
 
   /// Le prénom, pour le salut d'accueil.
@@ -500,7 +579,9 @@ class _ChatScreenState extends State<ChatScreen> {
       _busyLabel = 'Mise à jour…';
     });
     final reponse = await requete();
-    if (!mounted || navigation != _navigation) return;
+    if (!mounted) return;
+    _siSuiviRafraichir(reponse.components);
+    if (navigation != _navigation) return;
 
     final tour = _Tour(
       deLAssistant: true,
@@ -569,6 +650,8 @@ class _ChatScreenState extends State<ChatScreen> {
     var responseAnchored = false;
     var partialText = '';
     List<TovoComponent> partialComponents = [];
+    await _positionAvantEnvoi();
+    if (!mounted) return;
     final response = await widget.api.chat(
       {
         'client_message_id': _nouvelIdentifiant(),
@@ -623,7 +706,12 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       },
     );
-    if (!mounted || navigation != _navigation) return;
+    if (!mounted) return;
+    // « Oui, annuler », une course commandée : l'accueil suit.
+    _siSuiviRafraichir(
+      response.components.isEmpty ? partialComponents : response.components,
+    );
+    if (navigation != _navigation) return;
     setState(() {
       _charge = false;
       _reponseCommencee = false;
@@ -857,6 +945,25 @@ class _ChatScreenState extends State<ChatScreen> {
   (double, double)? _position;
   DateTime? _dernierRelevePosition;
 
+  /// La position n'est pas encore connue : on l'attend (2,5 s au plus) avant
+  /// d'envoyer. Une seule fois par session : si le GPS ne répond pas, les
+  /// messages suivants ne paient pas cette attente, et [_rafraichirPosition]
+  /// continue de la chercher en arrière-plan.
+  bool _positionAttendue = false;
+
+  Future<void> _positionAvantEnvoi() async {
+    if (_position != null) return;
+    final recente = TovoLocation.recente;
+    if (recente != null) {
+      _position = (recente.latitude, recente.longitude);
+      return;
+    }
+    if (_positionAttendue) return;
+    _positionAttendue = true;
+    final p = await TovoLocation.avantEnvoi(const Duration(milliseconds: 2500));
+    if (p != null && mounted) _position = (p.latitude, p.longitude);
+  }
+
   Future<void> _rafraichirPosition() async {
     final maintenant = DateTime.now();
     if (_dernierRelevePosition != null &&
@@ -918,6 +1025,16 @@ class _ChatScreenState extends State<ChatScreen> {
   // ------------------------------------------------------------------
 
   void _interaction(TovoInteraction interaction, {int? sourceTourIndex}) {
+    // Commander un livreur ne se perd jamais : la carte en mode automatique
+    // commande dès qu'elle s'affiche, souvent pendant que la réponse finit
+    // d'arriver. Ignorée à ce moment-là, la commande ne partait pas, et la
+    // carte affichait pourtant « Livreur commandé » (26/09). Elle attend
+    // maintenant que l'écran soit libre.
+    if (interaction.action == 'submit_courier' &&
+        (_charge || _transcribing || _enregistreLaVoix || _voiceAction)) {
+      unawaited(_quandLibre(interaction));
+      return;
+    }
     if (_transcribing || _enregistreLaVoix || _voiceAction) return;
     if (_charge) {
       final canOpenResult =
@@ -1227,6 +1344,26 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// Attend que l'écran soit libre (réponse arrivée, voix terminée), puis
+  /// envoie la commande du livreur. Au bout de 20 s, la carte le dit et
+  /// repropose son bouton : jamais de « Livreur commandé » sans commande.
+  Future<void> _quandLibre(TovoInteraction interaction) async {
+    final limite = DateTime.now().add(const Duration(seconds: 20));
+    while (mounted &&
+        (_charge || _transcribing || _enregistreLaVoix || _voiceAction)) {
+      if (DateTime.now().isAfter(limite)) {
+        setState(
+          () => _marquerCarteLivreur({
+            'echec': DateTime.now().millisecondsSinceEpoch,
+          }),
+        );
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+    if (mounted) _interaction(interaction);
+  }
+
   Future<void> _envoyerColis(Map<String, dynamic> p) async {
     final depart = (p['pickup'] as Map?)?.cast<String, dynamic>();
     final arrivee = (p['dropoff'] as Map?)?.cast<String, dynamic>();
@@ -1234,6 +1371,11 @@ class _ChatScreenState extends State<ChatScreen> {
     // Seule la position de départ est requise : c'est là que vient le
     // livreur, et il appelle le client pour le reste.
     if (depart?['lat'] == null) {
+      setState(
+        () => _marquerCarteLivreur({
+          'echec': DateTime.now().millisecondsSinceEpoch,
+        }),
+      );
       _erreurLocalisation();
       return;
     }
@@ -1242,6 +1384,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     // Le paiement est choisi sur la carte (espèces par défaut) : plus de
     // fenêtre à part entre le geste et la commande.
+    var commandee = false;
     await _appeler(() async {
       final response = await widget.api.post('/orders', {
         'type': 'courier',
@@ -1264,22 +1407,33 @@ class _ChatScreenState extends State<ChatScreen> {
         if (p['payment_phone'] is String) 'payment_phone': p['payment_phone'],
       });
       if (response.ok) {
+        commandee = true;
         unawaited(TovoPush.enregistrer('client'));
         if (p['payment_phone'] is String) {
           unawaited(NumeroNita.retenir(p['payment_phone'] as String));
         }
-        _eteindreCarteLivreur();
+        _marquerCarteLivreur({'utilise': true});
       }
       return response;
     });
 
+    // Refusée ou perdue en route : la carte repropose son bouton, avec un
+    // mot d'explication, au lieu de rester sur « Je commande… ».
+    if (!commandee && mounted) {
+      setState(
+        () => _marquerCarteLivreur({
+          'echec': DateTime.now().millisecondsSinceEpoch,
+        }),
+      );
+    }
     _idCommandeEnCours = null;
   }
 
-  /// La carte « Appeler un livreur » qui a servi ne doit plus pouvoir
-  /// resservir : elle passe à « Livreur demandé ». Le serveur fait de même
-  /// dans la conversation enregistrée, pour la réouverture.
-  void _eteindreCarteLivreur() {
+  /// La carte « Appeler un livreur » en attente reçoit le résultat de la
+  /// commande : `utilise` — elle passe à « Livreur commandé » et ne peut plus
+  /// resservir (le serveur fait de même dans la conversation enregistrée) ;
+  /// `echec` — elle repropose son bouton.
+  void _marquerCarteLivreur(Map<String, dynamic> resultat) {
     for (var i = _tours.length - 1; i >= 0; i--) {
       final tour = _tours[i];
       final index = tour.composants.indexWhere(
@@ -1289,7 +1443,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final composants = [...tour.composants];
       composants[index] = TovoComponent(
         type: 'courier_form',
-        data: {...composants[index].data, 'utilise': true},
+        data: {...composants[index].data, ...resultat},
       );
       _tours[i] = _Tour(
         deLAssistant: tour.deLAssistant,
@@ -1414,8 +1568,9 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Remet une commande livrée au panier, sans passer par l'assistant : le
   /// geste dit déjà tout. En cas de panier d'une autre boutique, le serveur
   /// propose « Vider et recommander », qui revient ici avec [vider].
-  void _recommander(String orderId, {bool vider = false}) {
-    _appeler(
+  Future<void> _recommander(String orderId, {bool vider = false}) async {
+    if (!await _continuerMalgreCommandeEnCours()) return;
+    await _appeler(
       () => widget.api.post('/cart/reorder', {
         'order_id': orderId,
         if (vider) 'vider': true,
@@ -1467,10 +1622,14 @@ class _ChatScreenState extends State<ChatScreen> {
           initialAddressId: initialAddressId,
           initialCart: cartPreview,
           conversationId: _conversationId,
+          avantDeCommander: _continuerMalgreCommandeEnCours,
         ),
       ),
     );
-    if (mounted && order != null) await _appeler(() async => order);
+    if (mounted && order != null) {
+      setState(_panierCommande);
+      await _appeler(() async => order);
+    }
   }
 
   Future<void> _ouvrirCatalogue({
@@ -1522,7 +1681,10 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
       ),
     );
-    if (mounted && order != null) await _appeler(() async => order);
+    if (mounted && order != null) {
+      setState(_panierCommande);
+      await _appeler(() async => order);
+    }
   }
 
   Future<void> _chercherPuisDemander(String texte) => _parler(texte: texte);
@@ -1754,19 +1916,26 @@ class _ChatScreenState extends State<ChatScreen> {
                                   onSuggestion: _envoyerSuggestion,
                                   onBrowseShops: () =>
                                       _ouvrirCatalogue(directory: true),
-                                  lastOrder: _derniereCommande,
+                                  // Une commande en cours : on la suit, on
+                                  // ne propose pas d'en recommander une.
+                                  lastOrder: _commandeEnCours == null
+                                      ? _derniereCommande
+                                      : null,
                                   activeOrder: _commandeEnCours,
                                   onTrack: (commande) => _appeler(
                                     () => widget.api.get(
                                       '/orders/${commande['id']}',
                                     ),
                                   ),
-                                  onReorder: (commande) {
+                                  onReorder: (commande) async {
+                                    if (!await _continuerMalgreCommandeEnCours()) {
+                                      return;
+                                    }
                                     _ajouterTourUtilisateur(
                                       'Recommander ma commande'
                                       '${commande['merchant_name'] == null ? '' : ' chez ${commande['merchant_name']}'}',
                                     );
-                                    _recommander('${commande['id']}');
+                                    await _recommander('${commande['id']}');
                                   },
                                 );
                               }
@@ -2219,6 +2388,91 @@ class _TexteAssistant extends StatelessWidget {
         height: 1.4,
         fontWeight: FontWeight.w400,
         color: couleur,
+      ),
+    );
+  }
+}
+
+/// « Vous avez déjà une commande en cours » : la voir, ou continuer.
+///
+/// Rendu : `false` — voir la commande ; `true` — commander quand même ;
+/// `null` — fenêtre fermée, rien ne se passe.
+class _AvertissementCommandeEnCours extends StatelessWidget {
+  const _AvertissementCommandeEnCours({required this.commande});
+
+  final Map<String, dynamic> commande;
+
+  static const _etats = {
+    'pending': 'en attente de confirmation',
+    'confirmed': 'confirmée',
+    'preparing': 'en préparation',
+    'ready': 'prête, un livreur arrive',
+    'assigned': 'un livreur arrive',
+    'picked_up': 'récupérée par le livreur',
+    'delivering': 'en route vers vous',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final colis = commande['type'] == 'courier';
+    final boutique = (commande['merchant_name'] as String?)?.trim() ?? '';
+    final etat = _etats['${commande['status']}'] ?? 'en cours';
+    final total = (commande['total'] as num?)?.toInt();
+    final quoi = colis
+        ? 'Votre course'
+        : boutique.isEmpty
+        ? 'Votre commande'
+        : 'Votre commande chez $boutique';
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Vous avez déjà une commande en cours',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.4,
+                color: TovoTheme.ink,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '$quoi est $etat'
+              '${total == null ? '' : ' (${Money.format(total)})'}.',
+              style: const TextStyle(
+                fontSize: 15,
+                height: 1.4,
+                color: TovoTheme.inkDoux,
+              ),
+            ),
+            const SizedBox(height: 22),
+            FilledButton(
+              key: const Key('avertissement-voir'),
+              onPressed: () => Navigator.pop(context, false),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                backgroundColor: TovoTheme.ink,
+                foregroundColor: Colors.white,
+                shape: const StadiumBorder(),
+              ),
+              child: const Text('Voir ma commande'),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              key: const Key('avertissement-continuer'),
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                foregroundColor: TovoTheme.ink,
+              ),
+              child: const Text('Commander quand même'),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -74,7 +74,18 @@ class _CourierFormState extends State<CourierForm> {
   /// Nita choisi sans numéro complet : l'achat ne pourrait pas être réglé.
   bool get _nitaIncomplet => _paiement == 'mobile_money' && _numeroNita == null;
   bool _localisation = false;
-  late bool _envoye = widget.component.data['utilise'] == true;
+
+  /// La commande est partie et attend la réponse du serveur. « Livreur
+  /// commandé » ne s'affiche qu'avec `utilise`, posé par l'écran quand le
+  /// serveur a CONFIRMÉ : la carte l'affichait dès l'envoi, même quand la
+  /// commande n'était jamais partie (26/09).
+  bool _envoye = false;
+
+  bool get _commandee => widget.component.data['utilise'] == true;
+
+  /// La dernière tentative a échoué (`echec` posé par l'écran) : on le dit,
+  /// et le bouton revient. Jamais de nouvel essai automatique.
+  bool get _echec => widget.component.data['echec'] != null;
 
   /// « Je veux un livreur », sans plus : la carte commande d'elle-même dès
   /// que la position est connue. Le client l'a déjà dit ; lui faire toucher
@@ -82,9 +93,19 @@ class _CourierFormState extends State<CourierForm> {
   bool get _auto => widget.component.data['auto'] == true;
 
   @override
+  void didUpdateWidget(CourierForm ancien) {
+    super.didUpdateWidget(ancien);
+    // Un nouvel échec : la tentative en cours est terminée.
+    if (widget.component.data['echec'] != ancien.component.data['echec'] &&
+        _echec) {
+      _envoye = false;
+    }
+  }
+
+  @override
   void initState() {
     super.initState();
-    if (_envoye) return;
+    if (_commandee) return;
     if (_lat == null || _lng == null) {
       // Le client a demandé un livreur : chercher sa position est la suite
       // logique, pas un geste de plus à lui demander. Déjà connue depuis
@@ -103,7 +124,13 @@ class _CourierFormState extends State<CourierForm> {
   }
 
   void _commanderSiAuto() {
-    if (!_auto || _envoye || _recuperer || _lat == null || _lng == null) {
+    if (!_auto ||
+        _envoye ||
+        _commandee ||
+        _echec ||
+        _recuperer ||
+        _lat == null ||
+        _lng == null) {
       return;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -232,9 +259,7 @@ class _CourierFormState extends State<CourierForm> {
     final mobileMoney = widget.component.data['mobile_money'] == true;
     final positionConnue = _lat != null && _lng != null;
 
-    if (_envoye || widget.component.data['utilise'] == true) {
-      return _demande(minutes);
-    }
+    if (_commandee) return _demande(minutes);
 
     return Container(
       decoration: BoxDecoration(
@@ -407,6 +432,14 @@ class _CourierFormState extends State<CourierForm> {
             ],
           ],
 
+          if (_echec && !_envoye) ...[
+            const SizedBox(height: 12),
+            const Text(
+              'La commande n’est pas partie. Touchez le bouton pour réessayer.',
+              key: Key('livreur-echec'),
+              style: TextStyle(fontSize: 13, color: TovoTheme.inkDoux),
+            ),
+          ],
           const Divider(height: 26),
           Row(
             children: [
@@ -453,7 +486,9 @@ class _CourierFormState extends State<CourierForm> {
               shape: const StadiumBorder(),
             ),
             child: Text(
-              _localisation && _auto
+              _envoye
+                  ? 'Je commande le livreur…'
+                  : _localisation && _auto
                   ? 'Je cherche votre position…'
                   : 'Commander le livreur',
               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),

@@ -25,6 +25,9 @@ class CartSummary extends StatelessWidget {
     final peutCommander = component.flag('can_checkout');
     final blocage = component.str('blocked_reason');
     final merchant = enPhrase(component.str('merchant_name'));
+    // Ce panier a été commandé : la carte reste lisible dans le fil, mais ne
+    // propose plus « Commander » (on croyait pouvoir le repasser, 26/09).
+    final commande = component.flag('commande_passee');
 
     return Container(
       decoration: BoxDecoration(
@@ -63,7 +66,11 @@ class CartSummary extends StatelessWidget {
               ),
             ),
           for (final item in items)
-            _Ligne(data: item, onInteraction: onInteraction),
+            _Ligne(
+              data: item,
+              onInteraction: onInteraction,
+              modifiable: !commande,
+            ),
           const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
@@ -84,33 +91,53 @@ class CartSummary extends StatelessWidget {
                   fort: true,
                 ),
                 const SizedBox(height: 16),
-                if (!peutCommander && blocage.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                if (commande)
+                  const Row(
+                    key: Key('panier-commande'),
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.check_circle, size: 18, color: TovoTheme.teal),
+                      SizedBox(width: 8),
+                      Text(
+                        'Commande passée',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: TovoTheme.inkDoux,
+                        ),
+                      ),
+                    ],
+                  )
+                else ...[
+                  if (!peutCommander && blocage.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        blocage,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: TovoTheme.danger,
+                        ),
+                      ),
+                    ),
+                  FilledButton(
+                    onPressed: peutCommander
+                        ? () => onInteraction(
+                            const TovoInteraction('place_order'),
+                          )
+                        : null,
                     child: Text(
-                      blocage,
+                      component.str(
+                        'checkout_label',
+                        'Commander — ${Money.format(component.money('total'))}',
+                      ),
                       style: const TextStyle(
-                        fontSize: 12,
-                        color: TovoTheme.danger,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
-                FilledButton(
-                  onPressed: peutCommander
-                      ? () =>
-                            onInteraction(const TovoInteraction('place_order'))
-                      : null,
-                  child: Text(
-                    component.str(
-                      'checkout_label',
-                      'Commander — ${Money.format(component.money('total'))}',
-                    ),
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
+                ],
               ],
             ),
           ),
@@ -121,10 +148,15 @@ class CartSummary extends StatelessWidget {
 }
 
 class _Ligne extends StatelessWidget {
-  const _Ligne({required this.data, required this.onInteraction});
+  const _Ligne({
+    required this.data,
+    required this.onInteraction,
+    this.modifiable = true,
+  });
 
   final Map<String, dynamic> data;
   final InteractionCallback onInteraction;
+  final bool modifiable;
 
   @override
   Widget build(BuildContext context) {
@@ -163,7 +195,7 @@ class _Ligne extends StatelessWidget {
               ],
             ),
           ),
-          if (itemId != null)
+          if (itemId != null && modifiable)
             _Stepper(
               quantite: quantite,
               onChanged: (valeur) => onInteraction(
@@ -174,6 +206,11 @@ class _Ligne extends StatelessWidget {
                       : {'item_id': itemId, 'quantity': valeur},
                 ),
               ),
+            )
+          else
+            Text(
+              '× $quantite',
+              style: const TextStyle(fontSize: 13, color: TovoTheme.inkDoux),
             ),
           const SizedBox(width: 8),
           Text(

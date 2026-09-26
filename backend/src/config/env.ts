@@ -110,10 +110,15 @@ const schema = z.object({
   CLASSIFIEUR_SEUIL: z.coerce.number().min(0).max(1).default(0.7),
 
   // Le cerveau (ai/decideur.ts) : Gemini comprend chaque message et décide
-  // de la route. Banc du 26/09 (193 phrases) : 94-95 % de justesse, 1 à 2
-  // actions coûteuses à tort, contre 6 pour classifieur + Jev.
-  // 'cascade' rend la main à l'ancien aiguillage (classifieur local + Jev).
-  AIGUILLAGE: sansVide(z.enum(['cerveau', 'cascade']).default('cerveau')),
+  // de la route. Banc du 26/09 (193 phrases) : 96 % de justesse, aucune
+  // action coûteuse à tort, contre 85 % et 6 pour classifieur + Jev.
+  // Seul « cascade » rend la main à l'ancien aiguillage : toute autre valeur
+  // (vide, « 1 », une faute de frappe) garde le cerveau et n'empêche jamais
+  // le démarrage. JEV_AIGUILLAGE n'a d'effet qu'en mode cascade.
+  AIGUILLAGE: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim().toLowerCase() === 'cascade' ? 'cascade' : 'cerveau'),
+    z.enum(['cerveau', 'cascade']),
+  ),
   // « modèle:réflexion » (réflexion : aucune, courte ou low). Banc du 26/09
   // avec la consigne du cerveau, 0 action coûteuse à tort pour tous :
   //   3.1-flash-lite:aucune  96 %, médiane 0,93 s, 95 % sous 1,27 s ← choisi

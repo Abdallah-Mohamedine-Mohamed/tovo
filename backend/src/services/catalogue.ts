@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { boutiquesCorrespondantes, boutiquesMentionnees, demandeBoutiqueOuverte, normaliserIntention, nomBoutiqueApresMarqueur, requeteProduitUtilisateur } from '../ai/intents.js';
 import { categoryGrid, merchantCard, productCarousel, type Component, type MerchantRow, type ProductRow } from '../components/builders.js';
 import { embed, embeddingsEnabled } from './embeddings.js';
+import { commandesRecentes, marquerLePlusCommande, parPopularite } from './popularite.js';
 
 export interface CataloguePage {
   items: ProductRow[];
@@ -121,7 +122,12 @@ export function filtrerSuggestionsProches(query: string, items: ProductRow[]): P
 // Les mots d'une QUESTION sur la boutique (« qu'est-ce que … a comme
 // produit ? ») comptent aussi : restés dans la requête, ils devenaient la
 // recherche de « qu est comme » chez Garba d'Or.
-const MENU_WORDS = new Set('je j veux voudrais souhaite aimerais peux pourrais voir consulter regarder manger commander prendre acheter montre montrez donne donnez moi la le les de du des d chez a au en carte menu menus produit produits article articles plat plats propose proposes proposer proposez boutique restaurant resto enseigne tous toutes tout toute un une svp merci ce que qu est quoi quel quelle quels quelles comme il y avez as vous ont avoir vend vendez vendent quoi'.split(' '));
+const MENU_WORDS = new Set(('je j veux voudrais souhaite aimerais peux pourrais voir consulter regarder manger commander prendre acheter montre montrez donne donnez moi la le les de du des d chez a au en carte menu menus produit produits article articles plat plats propose proposes proposer proposez boutique restaurant resto enseigne tous toutes tout toute un une svp merci ce que qu est quoi quel quelle quels quelles comme il y avez as vous ont avoir vend vendez vendent quoi '
+  // « Je VAIS manger chez O'TAKOSS » : « vais » restait seul, pris pour le
+  // produit cherché, et la carte s'ouvrait filtrée sur « vais » — aucun
+  // résultat — au lieu de la page de l'enseigne (26/09).
+  + 'vais vas va allons allez vont aller irai ira passer passe faire fais bouffer boire diner dejeuner '
+  + 'aime ai envie faim ma mon mes ici aujourd hui soir midi maintenant juste aussi encore bien').split(' '));
 
 /** Les mots qui décrivent le commerce sans le nommer. */
 const MOTS_GENERIQUES_ENSEIGNE = new Set(['restaurant', 'restau', 'resto', 'boutique', 'supermarche', 'magasin', 'chez', 'le', 'la', 'les', 'l', 'd', 'de', 'du', 'des', 'et']);
@@ -171,7 +177,22 @@ export function requeteSansEnseigne(message: string, merchants: Array<{ id: stri
     && !nomsColles.has(word) && !MENU_WORDS.has(word)).join(' ');
 }
 
+/**
+ * Une page du catalogue, et ce que les autres commandent (services/
+ * popularite.ts) — sans jamais un chiffre. Chez UNE enseigne, ses produits
+ * les plus commandés remontent en tête. Partout, le plus commandé de la liste
+ * est marqué (`plus_commande`) ; une recherche générale garde son ordre de
+ * pertinence.
+ */
 export async function cataloguePage(db: SupabaseClient, filter: CatalogueFilter, semantic = true): Promise<CataloguePage> {
+  const [page, parProduit] = await Promise.all([cataloguePageBrute(db, filter, semantic), commandesRecentes()]);
+  if (parProduit.size === 0) return page;
+  const uneEnseigne = filter.merchant_ids?.length === 1;
+  const items = uneEnseigne ? parPopularite(page.items, parProduit) : page.items;
+  return { ...page, items: marquerLePlusCommande(items, parProduit) };
+}
+
+async function cataloguePageBrute(db: SupabaseClient, filter: CatalogueFilter, semantic = true): Promise<CataloguePage> {
   const query = requeteProduitUtilisateur(filter.q ?? '');
   const parameters = {
     p_query: query, p_embedding: null as string | null,

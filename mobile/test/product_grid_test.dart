@@ -44,7 +44,7 @@ Future<List<TovoInteraction>> afficher(
 }
 
 void main() {
-  testWidgets('quatre produits, et « Tout voir » en haut à droite', (
+  testWidgets('quatre produits qui glissent, et la suite dite en clair', (
     tester,
   ) async {
     final gestes = await afficher(
@@ -53,12 +53,26 @@ void main() {
       browse: {'query': 'tacos', 'total': 38},
     );
 
-    expect(find.text('Produit 3'), findsOneWidget);
-    expect(find.text('Produit 4'), findsNothing);
+    // Une seule rangée : les produits côte à côte.
+    expect(
+      tester.getTopLeft(find.text('Produit 1')).dy,
+      tester.getTopLeft(find.text('Produit 0')).dy,
+    );
+    expect(find.text('Produit 3', skipOffstage: false), findsOneWidget);
+    expect(find.text('Produit 4', skipOffstage: false), findsNothing);
     expect(find.text('38 produits'), findsOneWidget);
-    // Plus de barre « Parcourir » ni de « Voir les autres » en bas.
-    expect(find.textContaining('Parcourir'), findsNothing);
-    expect(find.textContaining('Voir les'), findsNothing);
+    // La suite : une tuile au bout de la rangée, et un bouton dessous.
+    // La tuile au bout de la rangée, et le bouton dessous.
+    expect(
+      find.bySemanticsLabel(
+        'Parcourir les 34 autres produits',
+        skipOffstage: false,
+      ),
+      findsNWidgets(2),
+    );
+    await tester.tap(find.byKey(const Key('parcourir-produits')));
+    expect(gestes.last.action, 'browse_catalog');
+    gestes.clear();
 
     final fleche = find.bySemanticsLabel('Tout voir, 38 produits');
     // À droite du titre, au-dessus du premier produit.
@@ -76,16 +90,44 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('sans catalogue derrière, la suite se déplie sur place', (
+  testWidgets('sans catalogue derrière, tout est dans la rangée', (
     tester,
   ) async {
     await afficher(tester, [for (var i = 0; i < 6; i++) produit(i)]);
     expect(find.bySemanticsLabel(RegExp('Tout voir')), findsNothing);
-    await tester.ensureVisible(find.text('Voir les 2 autres'));
+    expect(find.byKey(const Key('parcourir-produits')), findsNothing);
+    await tester.drag(find.text('Produit 0'), const Offset(-1200, 0));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Voir les 2 autres'));
-    await tester.pumpAndSettle();
-    expect(find.text('Produit 5', skipOffstage: false), findsOneWidget);
+    expect(find.text('Produit 5'), findsOneWidget);
+  });
+
+  // Ce que les autres commandent : le produit est désigné, jamais le nombre
+  // de commandes (demande du client, 26/09).
+  testWidgets('le plus commandé est désigné, sans aucun chiffre', (
+    tester,
+  ) async {
+    final gestes = await afficher(tester, [
+      produit(0),
+      {...produit(1), 'plus_commande': true},
+      produit(2),
+    ]);
+    expect(
+      find.textContaining(
+        'Le plus commandé en ce moment : Produit 1',
+        findRichText: true,
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('commandes'), findsNothing);
+    expect(find.textContaining(RegExp(r'\d+ commande')), findsNothing);
+    await tester.tap(find.byKey(const Key('vedette-produits')));
+    expect(gestes.last.action, 'select_product');
+    expect(gestes.last.payload['product_id'], 'p1');
+  });
+
+  testWidgets('sans produit marqué : aucune phrase', (tester) async {
+    await afficher(tester, [produit(0), produit(1)]);
+    expect(find.byKey(const Key('vedette-produits')), findsNothing);
   });
 
   testWidgets('« + » ajoute sans ouvrir la fiche, sauf produit à options', (
@@ -109,10 +151,10 @@ void main() {
   ) async {
     await afficher(tester, [produit(1, dispo: false), produit(2), produit(3)]);
 
-    final x1 = tester.getTopLeft(find.text('Produit 1'));
+    final x1 = tester.getTopLeft(find.text('Produit 1', skipOffstage: false));
     final x2 = tester.getTopLeft(find.text('Produit 2'));
-    // Produit 2 prend la première place, Produit 1 passe à la ligne.
-    expect(x1.dy, greaterThan(x2.dy));
+    // Produit 2 prend la première place, Produit 1 passe au bout.
+    expect(x1.dx, greaterThan(x2.dx));
     expect(find.byTooltip('Ajouter Produit 1'), findsNothing);
     expect(find.text('Indisponible pour le moment'), findsOneWidget);
   });

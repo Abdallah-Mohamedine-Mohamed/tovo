@@ -52,6 +52,7 @@ class CartScreen extends StatefulWidget {
     this.initialAddressId,
     this.initialCart,
     this.conversationId,
+    this.avantDeCommander,
   });
   final TovoApi api;
   final String? initialAddressId;
@@ -60,6 +61,11 @@ class CartScreen extends StatefulWidget {
   /// La conversation d'où vient le client : la commande y est inscrite,
   /// et son suivi y sera encore quand il la rouvrira.
   final String? conversationId;
+
+  /// Appelé juste avant de commander. Faux : on ne commande pas (le client
+  /// a une commande en cours et préfère la voir) — l'écran se ferme sur le
+  /// fil, où son suivi s'affiche.
+  final Future<bool> Function()? avantDeCommander;
 
   @override
   State<CartScreen> createState() => _CartScreenState();
@@ -330,6 +336,12 @@ class _CartScreenState extends State<CartScreen> {
       setState(() => _erreurCommande = 'Indiquez le numéro Nita qui paiera.');
       return;
     }
+    final avant = widget.avantDeCommander;
+    if (avant != null && !await avant()) {
+      if (mounted) Navigator.of(context).pop();
+      return;
+    }
+    if (!mounted) return;
     _orderId ??= _nouvelIdentifiant();
     setState(() {
       _commandeEnCours = true;

@@ -399,6 +399,12 @@ describe('catalogue complet', () => {
     expect(requeteSansEnseigne('Otakoss centre aéré', merchants)).toBe('');
     expect(requeteSansEnseigne("Montre la carte de Garba d'or", merchants)).toBe('');
     expect(requeteSansEnseigne('tacos poulet chez otakoss', merchants)).toBe('tacos poulet');
+    // Aucun produit dans la phrase : rien ne reste, et c'est la page de
+    // l'enseigne qui s'ouvre (au lieu d'une carte filtrée sur « vais »).
+    expect(requeteSansEnseigne("Je vais manger chez O'TAKOSS.", merchants)).toBe('');
+    expect(requeteSansEnseigne('Je vais aller chez otakoss ce soir', merchants)).toBe('');
+    expect(requeteSansEnseigne("J'ai envie de manger chez otakoss", merchants)).toBe('');
+    expect(requeteSansEnseigne('Je vais prendre un tacos chez otakoss', merchants)).toBe('tacos');
   });
 
   // « RESTAURANT AFC » se dit « AFC » : trois lettres, et le mot générique

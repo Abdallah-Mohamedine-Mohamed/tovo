@@ -1,4 +1,6 @@
 import type { FastifyInstance } from 'fastify';
+import { commandesParBoutique, commandesRecentes, parPopularite } from '../services/popularite.js';
+import { graineDuJour, rotationPonderee } from '../services/rotation.js';
 import { z } from 'zod';
 import { toHttpFailure } from '../lib/errors.js';
 import {
@@ -396,17 +398,19 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       // Tout ce qui ne dépend que de la liste part en même temps (~350 ms
       // gagnés par rapport à deux vagues, mesuré).
       const PAGE = 1000;
-      const [fiches, ouvertes, ...pages] = await Promise.all([
-        database.from('merchants').select('id, cover_url').in('id', ids),
+      const [fiches, ouvertes, commandes, ...pages] = await Promise.all([
+        database.from('merchants').select('id, cover_url, created_at').in('id', ids),
         avecOuvertureReelle(database, brutes.map((m) => ({
           id: m['id'] as string, is_open: (m['is_open'] as boolean) ?? false,
         }))),
+        commandesParBoutique(),
         ...[0, 1, 2, 3].map((n) => database.from('products')
           .select('merchant_id, categories(name)')
           .in('merchant_id', ids).eq('is_available', true)
           .order('id').range(n * PAGE, n * PAGE + PAGE - 1)),
       ]);
       const couvertures = new Map((fiches.data ?? []).map((f) => [f.id as string, (f.cover_url as string | null) ?? null]));
+      const creations = new Map((fiches.data ?? []).map((f) => [f.id as string, (f.created_at as string | null) ?? null]));
       const ouverte = new Map(ouvertes.map((o) => [o.id, o.is_open]));
 
       const rayonsParBoutique = new Map<string, Set<string>>();
@@ -421,7 +425,7 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      const merchants = brutes.map((m, i) => ({
+      const merchants = rotationPonderee(brutes.map((m) => ({
         id: m['id'] as string,
         name: m['name'] as string,
         logo_url: (m['logo_url'] as string | null) ?? null,
@@ -431,11 +435,10 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
         prep_time_min: (m['prep_time_min'] as number | null) ?? null,
         distance_m: (m['distance_m'] as number | null) ?? null,
         rayons: [...(rayonsParBoutique.get(m['id'] as string) ?? [])],
-        rang: i,
-      }))
-        // Les vraiment ouvertes d'abord ; l'ordre de la base ensuite.
-        .sort((a, b) => Number(b.is_open) - Number(a.is_open) || a.rang - b.rang)
-        .map(({ rang: _rang, ...m }) => m);
+        created_at: creations.get(m['id'] as string) ?? null,
+      })), { commandes, graine: graineDuJour(request) })
+        // Les ouvertes d'abord, puis la rotation du jour (services/rotation.ts).
+        .map(({ created_at: _creee, ...m }) => m);
 
       const GENERIQUES = new Set(['BOISSONS', 'PLATS', 'ENTREES', 'ENTRÉES', 'DESSERTS', 'ACCOMPAGNEMENTS',
         'SUPPLEMENTS', 'SUPPLÉMENTS', 'AUTRES', 'DIVERS', 'MENU', 'MENUS']);
@@ -468,14 +471,14 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
    * la liste sont lus en une requête.
    */
   app.get('/merchants', async (request, reply) => {
-    const { data, error } = await db(request)
+    const [{ data, error }, commandes] = await Promise.all([db(request)
       .from('merchants')
-      .select('id, name, description, logo_url, address_hint, is_open, rating, prep_time_min')
+      .select('id, name, description, logo_url, address_hint, is_open, rating, prep_time_min, created_at')
       .eq('is_approved', true)
       .order('is_open', { ascending: false })
       .order('rating', { ascending: false })
       .order('name')
-      .limit(200);
+      .limit(200), commandesParBoutique()]);
 
     if (error) {
       const failure = toHttpFailure(error);
@@ -492,12 +495,11 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       rating: Number(m['rating'] ?? 5),
       prep_time_min: (m['prep_time_min'] as number) ?? 20,
       distance_m: null,
+      created_at: (m['created_at'] as string | null) ?? null,
     }));
-    // Tri stable : les vraiment ouvertes d'abord, l'ordre des notes conservé.
-    const boutiques = (await avecOuvertureReelle(db(request), brutes))
-      .map((b, i) => ({ b, i }))
-      .sort((x, y) => Number(y.b.is_open) - Number(x.b.is_open) || x.i - y.i)
-      .map(({ b }) => b);
+    // Les vraiment ouvertes d'abord, puis la rotation du jour.
+    const boutiques = rotationPonderee(await avecOuvertureReelle(db(request), brutes),
+      { commandes, graine: graineDuJour(request) });
     const ouvertes = boutiques.filter((b) => b.is_open).length;
     return reply.send(envelope(
       ouvertes > 0 ? `${ouvertes} boutique${ouvertes > 1 ? 's' : ''} ouverte${ouvertes > 1 ? 's' : ''} en ce moment` : 'Tout est fermé pour l’instant',
@@ -517,10 +519,10 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       // La liste, les catégories de l'accueil, l'arbre des catégories et
       // les produits partent ensemble : tout ne dépend que de la base.
       const PAGE = 1000;
-      const [{ data, error }, navigables, arbre, ...pages] = await Promise.all([
+      const [{ data, error }, navigables, arbre, commandes, ...pages] = await Promise.all([
         database
           .from('merchants')
-          .select('id, name, logo_url, cover_url, address_hint, is_open, rating, prep_time_min')
+          .select('id, name, logo_url, cover_url, address_hint, is_open, rating, prep_time_min, created_at')
           .eq('is_approved', true)
           .order('is_open', { ascending: false })
           .order('rating', { ascending: false })
@@ -528,6 +530,7 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
           .limit(200),
         database.rpc('browsable_categories'),
         database.from('categories').select('id, parent_id'),
+        commandesParBoutique(),
         ...[0, 1, 2, 3, 4].map((n) => database.from('products')
           .select('merchant_id, category_id')
           .eq('is_available', true)
@@ -566,13 +569,13 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
         prep_time_min: (m['prep_time_min'] as number | null) ?? null,
         distance_m: null,
         rayons: [...(categoriesParBoutique.get(m['id'] as string) ?? [])],
+        created_at: (m['created_at'] as string | null) ?? null,
       }));
       // « Ouverte » = interrupteur ET horaires du jour ; les vraiment
-      // ouvertes d'abord, l'ordre de la base ensuite.
-      const merchants = (await avecOuvertureReelle(database, brutes))
-        .map((b, i) => ({ b, i }))
-        .sort((x, y) => Number(y.b.is_open) - Number(x.b.is_open) || x.i - y.i)
-        .map(({ b }) => b);
+      // ouvertes d'abord, puis la rotation du jour (services/rotation.ts).
+      const merchants = rotationPonderee(await avecOuvertureReelle(database, brutes),
+        { commandes, graine: graineDuJour(request) })
+        .map(({ created_at: _creee, ...m }) => m);
       // Dans l'ordre de l'accueil ; une catégorie sans boutique ne filtre rien.
       const compte = new Map<string, number>();
       for (const m of merchants) for (const r of m.rayons) compte.set(r, (compte.get(r) ?? 0) + 1);
@@ -675,7 +678,7 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
     const merchantId = params.data.merchantId;
     try {
       const database = db(request);
-      const [fiche, ouverte, rayons, produits] = await Promise.all([
+      const [fiche, ouverte, rayons, produits, parProduit] = await Promise.all([
         database.from('merchants')
           .select('id, name, description, logo_url, cover_url, address_hint, prep_time_min, rating')
           .eq('id', merchantId).eq('is_approved', true).maybeSingle(),
@@ -687,6 +690,7 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
           .select('id, name, description, image_url, price, is_available, category_id, product_options(is_required)')
           .eq('merchant_id', merchantId).eq('is_available', true)
           .order('name').limit(500),
+        commandesRecentes(),
       ]);
       if (fiche.error) throw fiche.error;
       if (!fiche.data) return reply.code(404).send({ error: 'boutique introuvable' });
@@ -709,7 +713,9 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
         merchant_open: merchant.is_open, requires_options: aOptions.has(p.id as string),
       });
       const parRayon = new Map<string | null, Record<string, unknown>[]>();
-      for (const p of lignes) {
+      // Dans chaque rayon, les plus commandés d'abord (services/popularite.ts,
+      // aucun chiffre envoyé) ; les autres restent par ordre alphabétique.
+      for (const p of parPopularite(lignes as Array<Record<string, unknown> & { id: string }>, parProduit)) {
         const cle = (p.category_id as string | null) ?? null;
         parRayon.set(cle, [...(parRayon.get(cle) ?? []), item(p)]);
       }
@@ -720,7 +726,18 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       const sansRayon = parRayon.get(null);
       if (sansRayon?.length) sections.push({ id: null, name: 'Autres', produits: sansRayon.length, items: sansRayon });
 
-      return reply.send({ merchant, sections, total: lignes.length });
+      // Avant les rayons (pas un rayon de plus) : ce que les clients de cette
+      // enseigne commandent le plus — ce que les autres choisissent donne
+      // envie de le choisir. Vide s'il n'y a aucune commande : l'app n'affiche
+      // alors rien. Aucun chiffre n'est envoyé.
+      const populaires = parPopularite(lignes as Array<Record<string, unknown> & { id: string }>, parProduit)
+        .filter((p) => (parProduit.get(p.id) ?? 0) > 0)
+        // Six : deux tuiles visibles et une qui dépasse, deux ou trois
+        // glissements. Au-delà, le bloc devient un rayon de plus.
+        .slice(0, 6)
+        .map(item);
+
+      return reply.send({ merchant, populaires, sections, total: lignes.length });
     } catch (error) {
       const failure = toHttpFailure(error);
       return reply.code(failure.status).send(failure.body);

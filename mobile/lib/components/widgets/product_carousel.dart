@@ -8,10 +8,11 @@ import '../registry.dart';
 
 /// Les produits trouvés, dans le fil.
 ///
-/// Une grille de deux colonnes, et non plus un carrousel : dans un carrousel
-/// on voyait un produit et demi, le reste caché hors de l'écran — « 38
-/// produits » annoncés, deux visibles, et rien ne disait qu'il fallait
-/// glisser. Ici, quatre produits d'un coup d'œil, et le reste à un geste.
+/// Une rangée qui glisse : quatre produits, deux visibles et le troisième qui
+/// dépasse — on comprend qu'il faut glisser. Au bout, une tuile « Parcourir
+/// les 34 autres », et le même appel en bouton sous la rangée : la suite est
+/// DITE, pas seulement suggérée par une flèche (retour du client, 26/09).
+/// Tous deux ouvrent l'explorateur de produits.
 ///
 /// Le « + » sur la photo ajoute au panier sans ouvrir la fiche. Un produit à
 /// personnaliser ouvre sa fiche : ses options ne se devinent pas.
@@ -34,7 +35,6 @@ class ProductCollection extends StatefulWidget {
 
 class _ProductCollectionState extends State<ProductCollection> {
   static const _visibles = 4;
-  bool _tout = false;
 
   @override
   Widget build(BuildContext context) {
@@ -50,11 +50,13 @@ class _ProductCollectionState extends State<ProductCollection> {
       );
     if (items.isEmpty) return const SizedBox.shrink();
     final browse = component.map('browse');
-    final montres = _tout || items.length <= _visibles
-        ? items
-        : items.take(_visibles).toList();
-    final caches = items.length - montres.length;
     final total = (browse['total'] as num?)?.toInt() ?? items.length;
+    // Avec un catalogue derrière : quatre ici, la suite dans l'explorateur.
+    // Sans : tout ce qu'on a, dans la rangée.
+    final montres = browse.isNotEmpty && items.length > _visibles
+        ? items.take(_visibles).toList()
+        : items;
+    final reste = total - montres.length;
     // « Tout voir » en haut à droite, à côté du titre (comme les rangées
     // d'Uber Eats) : on voit d'abord quelques produits, et la suite est
     // annoncée là où l'œil commence, pas dans une barre grise tout en bas.
@@ -102,6 +104,7 @@ class _ProductCollectionState extends State<ProductCollection> {
                   ),
                   if (toutVoir)
                     Semantics(
+                      container: true,
                       button: true,
                       label: 'Tout voir, $total produits',
                       excludeSemantics: true,
@@ -129,44 +132,94 @@ class _ProductCollectionState extends State<ProductCollection> {
               ),
             ),
           ),
-        if (widget.horizontal)
-          for (var ligne = 0; ligne < montres.length; ligne += 2)
-            Padding(
-              padding: EdgeInsets.only(top: ligne == 0 ? 0 : 20),
-              child: IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (var colonne = 0; colonne < 2; colonne++) ...[
-                      if (colonne == 1) const SizedBox(width: 14),
-                      Expanded(
-                        child: ligne + colonne < montres.length
-                            ? ViewportReveal(
-                                delay: Duration(
-                                  milliseconds: ligne + colonne < _visibles
-                                      ? 200 + (ligne + colonne) * 120
-                                      : 0,
-                                ),
-                                child: ProductTile(
-                                  data: montres[ligne + colonne],
-                                  onOpen: () => _open(
-                                    montres[ligne + colonne],
-                                    onInteraction,
-                                  ),
-                                  onAdd: () => _ajouter(
-                                    montres[ligne + colonne],
-                                    onInteraction,
-                                  ),
-                                ),
-                              )
-                            : const SizedBox.shrink(),
-                      ),
+        if (widget.horizontal) ...[
+          LayoutBuilder(
+            builder: (context, contraintes) {
+              // Deux tuiles et le début d'une troisième : on voit qu'il y a
+              // une suite à glisser.
+              final largeur = ((contraintes.maxWidth - 14) / 2 * 0.9).clamp(
+                120.0,
+                260.0,
+              );
+              return SizedBox(
+                height: hauteurTuileProduit(context, largeur),
+                // Une rangée simple (quatre tuiles au plus, plus « la
+                // suite ») : une liste paresseuse, imbriquée dans celle du
+                // fil, faisait disparaître la flèche « Tout voir » de
+                // l'accessibilité.
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  clipBehavior: Clip.none,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (var i = 0; i < montres.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 14),
+                        SizedBox(
+                          width: largeur,
+                          child: ViewportReveal(
+                            delay: Duration(
+                              milliseconds: i < _visibles ? 200 + i * 120 : 0,
+                            ),
+                            child: ProductTile(
+                              data: montres[i],
+                              onOpen: () => _open(montres[i], onInteraction),
+                              onAdd: () => _ajouter(montres[i], onInteraction),
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (toutVoir) ...[
+                        const SizedBox(width: 14),
+                        SizedBox(
+                          width: largeur,
+                          child: _TuileSuite(
+                            reste: reste,
+                            onTap: () => onInteraction(
+                              TovoInteraction('browse_catalog', browse),
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
+                ),
+              );
+            },
+          ),
+          if (_vedette(items) case final vedette?)
+            Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: _LigneVedette(
+                produit: vedette,
+                onTap: () => _open(vedette, onInteraction),
+              ),
+            ),
+          if (toutVoir)
+            Padding(
+              padding: const EdgeInsets.only(top: 18),
+              child: OutlinedButton.icon(
+                key: const Key('parcourir-produits'),
+                onPressed: () =>
+                    onInteraction(TovoInteraction('browse_catalog', browse)),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                  foregroundColor: TovoTheme.ink,
+                  side: const BorderSide(color: Color(0xFFDADDDD)),
+                  shape: const StadiumBorder(),
+                ),
+                iconAlignment: IconAlignment.end,
+                icon: const Icon(Icons.arrow_forward_rounded, size: 19),
+                label: Text(
+                  _parcourir(reste),
+                  style: const TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-            )
-        else
+            ),
+        ] else
           for (final item in items)
             ListTile(
               contentPadding: EdgeInsets.zero,
@@ -184,32 +237,151 @@ class _ProductCollectionState extends State<ProductCollection> {
                   ? null
                   : () => _open(item, onInteraction),
             ),
-        // Sans catalogue derrière (aperçu complet), la suite se déplie sur
-        // place : un simple lien, pas une barre.
-        if (!toutVoir && widget.horizontal && caches > 0)
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: TextButton.icon(
-              style: TextButton.styleFrom(
-                foregroundColor: TovoTheme.ink,
-                padding: EdgeInsets.zero,
+      ],
+    );
+  }
+}
+
+/// Le produit marqué « le plus commandé » par le serveur (`plus_commande`).
+/// Aucun chiffre ne quitte le serveur : on ne montre pas de nombre de
+/// commandes (demande du client, 26/09).
+Map<String, dynamic>? _vedette(List<Map<String, dynamic>> items) => items
+    .where((i) => i['plus_commande'] == true && i['is_available'] != false)
+    .firstOrNull;
+
+/// Sous la rangée : « Le plus commandé en ce moment : Royal tacos ».
+/// Le client voit ce que les autres choisissent, et y va d'un geste.
+class _LigneVedette extends StatelessWidget {
+  const _LigneVedette({required this.produit, required this.onTap});
+
+  final Map<String, dynamic> produit;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      key: const Key('vedette-produits'),
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.trending_up_rounded,
+              size: 18,
+              color: TovoTheme.ink,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  text: 'Le plus commandé en ce moment : ',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    height: 1.35,
+                    color: TovoTheme.inkDoux,
+                  ),
+                  children: [
+                    TextSpan(
+                      text: enPhrase('${produit['name'] ?? ''}'),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: TovoTheme.ink,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              onPressed: () => setState(() => _tout = true),
-              icon: const Icon(Icons.expand_more_rounded, size: 18),
-              label: Text(
-                caches == 1
-                    ? 'Voir l’autre produit'
-                    : 'Voir les $caches autres',
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: TovoTheme.inkDoux,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _parcourir(int reste) => reste == 1
+    ? 'Parcourir l’autre produit'
+    : 'Parcourir les $reste autres produits';
+
+/// La dernière tuile de la rangée : « Parcourir les 34 autres ».
+class _TuileSuite extends StatelessWidget {
+  const _TuileSuite({required this.reste, required this.onTap});
+
+  final int reste;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    button: true,
+    label: _parcourir(reste),
+    excludeSemantics: true,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AspectRatio(
+            aspectRatio: 1,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: const Color(0xFFF4F5F5),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '+$reste',
+                      style: const TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.8,
+                        color: TovoTheme.ink,
+                      ),
+                    ),
+                    const Text(
+                      'autres produits',
+                      style: TextStyle(fontSize: 14, color: TovoTheme.inkDoux),
+                    ),
+                    const Spacer(),
+                    const Align(
+                      alignment: Alignment.bottomRight,
+                      child: CircleAvatar(
+                        radius: 22,
+                        backgroundColor: TovoTheme.ink,
+                        foregroundColor: Colors.white,
+                        child: Icon(Icons.arrow_forward_rounded, size: 21),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
-      ],
-    );
-  }
+          const SizedBox(height: 10),
+          const Text(
+            'Tout parcourir',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: TovoTheme.ink,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 String _majuscule(String texte) =>

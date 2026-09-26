@@ -41,6 +41,8 @@ void main() {
   final requetes = <Uri>[];
   late TovoApi api;
   var sansCouverture = false;
+  // Les produits les plus commandés renvoyés par le serveur (aucun par défaut).
+  var populaires = <Map<String, dynamic>>[];
 
   setUpAll(() async {
     final polices = FontLoader(TovoTheme.fontFamily);
@@ -76,6 +78,7 @@ void main() {
     PanierEnDirect.instance.vider();
     requetes.clear();
     sansCouverture = false;
+    populaires = [];
     CatalogImage.providerOverride = (url) => NetworkImage(url);
     api = TovoApi(
       tokenProvider: () => null,
@@ -89,6 +92,7 @@ void main() {
               ...fixture['merchant'] as Map<String, dynamic>,
               if (sansCouverture) 'cover_url': null,
             },
+            'populaires': populaires,
           };
         }
         return http.Response(
@@ -274,6 +278,46 @@ void main() {
     expect(find.text('Restaurant albarka food'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await capturer(tester, '3-sans-couverture');
+  });
+
+  // Demande du client (26/09) : les plus commandés AVANT les rayons, en
+  // rangée horizontale, et rien du tout sans commandes.
+  testVisuel('les plus commandés : avant les rayons, en rangée', (
+    tester,
+  ) async {
+    final rayons = (fixture['sections'] as List).cast<Map<String, dynamic>>();
+    final produits = (rayons.first['items'] as List)
+        .cast<Map<String, dynamic>>();
+    populaires = produits.take(3).toList();
+    await ouvrir(tester);
+
+    final bloc = find.byKey(const Key('les-plus-commandes'));
+    expect(bloc, findsOneWidget);
+    expect(find.text('Les plus commandés'), findsOneWidget);
+    // Avant le premier rayon.
+    final premierRayon = find.text(enPhrase(rayons.first['name'] as String));
+    expect(
+      tester.getTopLeft(bloc).dy,
+      lessThan(tester.getTopLeft(premierRayon.first).dy),
+    );
+    // Côte à côte, pas en colonne.
+    final tuiles = find.descendant(
+      of: bloc,
+      matching: find.byType(ProductTile),
+    );
+    expect(tuiles, findsNWidgets(3));
+    expect(
+      tester.getTopLeft(tuiles.at(0)).dy,
+      tester.getTopLeft(tuiles.at(1)).dy,
+    );
+    // Aucun chiffre de commandes.
+    expect(find.textContaining('commande'), findsNothing);
+  });
+
+  testVisuel('sans commandes : le bloc disparaît', (tester) async {
+    await ouvrir(tester);
+    expect(find.byKey(const Key('les-plus-commandes')), findsNothing);
+    expect(find.text('Les plus commandés'), findsNothing);
   });
 }
 

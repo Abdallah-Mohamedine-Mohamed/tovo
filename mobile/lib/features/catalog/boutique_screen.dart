@@ -55,6 +55,10 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
   final _clesOnglets = <int, GlobalKey>{};
   Map<String, dynamic> _boutique = {};
   List<Map<String, dynamic>> _rayons = [];
+
+  /// Les produits les plus commandés de la boutique, du plus au moins
+  /// commandé. Vide sans commandes : le bloc disparaît.
+  List<Map<String, dynamic>> _populaires = [];
   bool _charge = true;
   String? _erreur;
   int _actif = 0;
@@ -101,6 +105,7 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
       final fiche = reponse.raw['merchant'];
       if (fiche is Map<String, dynamic>) _boutique = fiche;
       _rayons = reponse.list('sections');
+      _populaires = reponse.list('populaires');
     });
   }
 
@@ -271,6 +276,10 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
                     : _enTete(couverture),
               ),
               SliverToBoxAdapter(child: _fiche()),
+              // Avant les rayons, et pas comme un rayon de plus (demande du
+              // client, 26/09). Aucune commande : rien du tout.
+              if (_populaires.isNotEmpty)
+                SliverToBoxAdapter(child: _lesPlusCommandes()),
               if (_rayons.length > 1)
                 SliverPersistentHeader(
                   pinned: true,
@@ -610,6 +619,58 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
                         afficherBoutique: false,
                         onOpen: () => _ouvrirProduit(montres[k]),
                         onAdd: () => _ouvrirProduit(montres[k]),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// « Les plus commandés » : ce que les autres clients de la boutique
+  /// choisissent, en tête, sur une rangée qu'on fait glisser. Aucun chiffre :
+  /// l'ordre dit tout.
+  Widget _lesPlusCommandes() {
+    final largeur = (MediaQuery.sizeOf(context).width - 40 - 14) / 2 * 0.92;
+    return Padding(
+      key: const Key('les-plus-commandes'),
+      padding: const EdgeInsets.only(top: 28, bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20),
+            child: Text(
+              'Les plus commandés',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.4,
+                color: TovoTheme.ink,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var k = 0; k < _populaires.length; k++) ...[
+                    if (k > 0) const SizedBox(width: 14),
+                    SizedBox(
+                      width: largeur,
+                      child: ProductTile(
+                        data: _populaires[k],
+                        afficherBoutique: false,
+                        onOpen: () => _ouvrirProduit(_populaires[k]),
+                        onAdd: () => _ouvrirProduit(_populaires[k]),
                       ),
                     ),
                   ],

@@ -76,6 +76,33 @@ class TovoLocation {
     return _derniere;
   }
 
+  /// Avant d'envoyer un message : la position, en l'attendant au plus
+  /// [attente].
+  ///
+  /// Sans elle, « Je veux un livreur » ne pouvait pas partir directement : le
+  /// message était envoyé pendant que le GPS cherchait encore, et le serveur
+  /// renvoyait une carte à la place de la commande (26/09).
+  ///
+  /// L'autorisation est demandée si elle ne l'a jamais été ; la fenêtre du
+  /// système n'est pas comptée dans l'attente (le client y répond à son
+  /// rythme). Passé le délai, `null` : le message part sans position, et la
+  /// recherche continue en arrière-plan pour le suivant. Jamais de position
+  /// ancienne : envoyer un livreur à l'endroit d'hier est pire que rien.
+  static Future<Position?> avantEnvoi(Duration attente) async {
+    final deja = recente;
+    if (deja != null) return deja;
+    try {
+      if (!await ensurePermission(requestPermission: true)) return null;
+    } on Exception {
+      return null;
+    }
+    try {
+      return await current().timeout(attente);
+    } on TimeoutException {
+      return null;
+    }
+  }
+
   /// À l'ouverture de l'application : prend la position en arrière-plan,
   /// SANS demander l'autorisation (aucune fenêtre au démarrage). Si elle est
   /// déjà accordée, la carte livreur et le panier l'ont tout de suite.

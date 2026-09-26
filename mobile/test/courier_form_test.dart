@@ -49,11 +49,16 @@ void main() {
     expect(gestes.single.payload['payment_method'], 'cash');
     expect(gestes.single.payload.containsKey('dropoff'), isFalse);
 
-    // La carte s'éteint : plus de bouton, donc pas de second livreur.
-    expect(find.text('Commander le livreur'), findsNothing);
+    // En attente du serveur : bouton bloqué (pas de second livreur), et
+    // jamais « Livreur commandé » avant sa confirmation.
+    expect(find.text('Je commande le livreur…'), findsOneWidget);
+    expect(
+      tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+      isNull,
+    );
     expect(
       find.textContaining('Livreur commandé', findRichText: true),
-      findsOneWidget,
+      findsNothing,
     );
   });
 
@@ -169,11 +174,79 @@ void main() {
     await tester.pump();
     expect(gestes.single.action, 'submit_courier');
     expect(gestes.single.payload['pickup'], containsPair('lat', 13.51));
-    expect(find.text('Commander le livreur'), findsNothing);
+    expect(find.text('Je commande le livreur…'), findsOneWidget);
+    expect(
+      find.textContaining('Livreur commandé', findRichText: true),
+      findsNothing,
+    );
+  });
+
+  // Le résultat vient de l'écran, qui a la réponse du serveur : la carte
+  // reçoit `utilise` (confirmé) ou `echec` (pas partie).
+  testWidgets('« Livreur commandé » seulement quand le serveur a confirmé', (
+    tester,
+  ) async {
+    final data = <String, dynamic>{
+      'auto': true,
+      'pickup': {'lat': 13.51, 'lng': 2.11},
+      'callback_minutes': 7,
+    };
+    late StateSetter reconstruire;
+    final gestes = <TovoInteraction>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) {
+              reconstruire = setState;
+              return SingleChildScrollView(
+                child: CourierForm(
+                  component: TovoComponent(
+                    type: 'courier_form',
+                    data: {...data},
+                  ),
+                  onInteraction: gestes.add,
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(gestes, hasLength(1));
+
+    // Échec : la carte le dit, le bouton revient, rien ne repart tout seul.
+    reconstruire(() => data['echec'] = 1);
+    await tester.pump();
+    expect(find.byKey(const Key('livreur-echec')), findsOneWidget);
+    expect(find.text('Commander le livreur'), findsOneWidget);
+    expect(gestes, hasLength(1));
+
+    // Le client réessaie ; cette fois le serveur confirme.
+    await tester.tap(find.text('Commander le livreur'));
+    await tester.pump();
+    expect(gestes, hasLength(2));
+    expect(find.byKey(const Key('livreur-echec')), findsNothing);
+    reconstruire(() => data['utilise'] = true);
+    await tester.pump();
     expect(
       find.textContaining('Livreur commandé', findRichText: true),
       findsOneWidget,
     );
+  });
+
+  testWidgets('rouverte après un échec : pas de nouvel essai automatique', (
+    tester,
+  ) async {
+    final gestes = await _afficher(tester, {
+      'auto': true,
+      'echec': 1,
+      'pickup': {'lat': 13.51, 'lng': 2.11},
+    });
+    await tester.pump();
+    expect(gestes, isEmpty);
+    expect(find.byKey(const Key('livreur-echec')), findsOneWidget);
   });
 
   testWidgets('« aller chercher » attend toujours le geste du client', (
