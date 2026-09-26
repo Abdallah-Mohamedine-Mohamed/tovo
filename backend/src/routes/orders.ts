@@ -32,12 +32,23 @@ const positionSchema = z.object({
   lng: z.number().min(-180).max(180),
 });
 
+/**
+ * Le numéro Nita qui paiera, quand ce n'est pas celui du compte : 8
+ * chiffres, un numéro du Niger (Nita ne connaît qu'eux). Un compte étranger,
+ * ou un numéro sans Nita, paie ainsi avec le numéro de son choix.
+ */
+const numeroNita = z.preprocess(
+  (v) => (typeof v === 'string' ? v.replace(/\D/g, '') : v),
+  z.string().regex(/^\d{8}$/, 'numéro Nita : 8 chiffres').nullable().optional(),
+);
+
 const deliverySchema = z.object({
   type: z.literal('delivery'),
   client_order_id: z.string().uuid(),
   dropoff_hint: z.string().min(1).max(300),
   dropoff: positionSchema,
   payment_method: z.enum(['cash', 'mobile_money']).default('cash'),
+  payment_phone: numeroNita,
   note: z.string().max(500).nullable().default(null),
 });
 
@@ -66,6 +77,7 @@ const courierSchema = z.object({
   dropoff: positionSchema.nullable().default(null),
   parcel: z.enum(['small', 'medium', 'large']).default('small'),
   payment_method: z.enum(['cash', 'mobile_money']).default('cash'),
+  payment_phone: numeroNita,
   scheduled_for: z.string().datetime().nullable().default(null),
   parcel_note: facultatif(300),
   /** Qui appeler à l'arrivée ; à défaut, le livreur appelle le client. */
@@ -258,11 +270,16 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       const point = (body.data.type === 'courier' ? body.data.dropoff : null)
         ?? (body.data.type === 'courier' ? body.data.pickup : body.data.dropoff);
       try {
-        const achat = await ouvrirPaiement(orderId as string, {
-          adresseIp: request.ip,
-          lat: String(point.lat),
-          lng: String(point.lng),
-        });
+        const achat = await ouvrirPaiement(
+          orderId as string,
+          {
+            adresseIp: request.ip,
+            lat: String(point.lat),
+            lng: String(point.lng),
+          },
+          // Le numéro choisi par le client ; à défaut, celui du compte.
+          body.data.payment_phone ?? null,
+        );
         codeAchat = achat.codeAchat;
       } catch (cause) {
         // Le MESSAGE explicitement : `message` n'est pas énumérable sur une
@@ -286,21 +303,20 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(failure.status).send(failure.body);
     }
 
-    // La commande est déjà partie ; le code sert à régler d'avance plutôt
-    // qu'à la débloquer. On le dit dans ces termes, sinon le client croit
-    // devoir payer avant que la boutique ne commence.
+    // La commande est déjà partie : le paiement se règle d'avance, il ne la
+    // débloque pas. On le dit simplement, SANS code ni jargon (retour du
+    // client, 26/09) : la demande attend le client dans MyNita, et à défaut
+    // la carte de suivi lui dira comment payer son livreur.
+    const nita = codeAchat !== null;
     const message = body.data.type === 'courier'
-      ? await messageLivreurEnRoute(db, codeAchat)
-      : codeAchat
-        ? `Commande enregistrée, la boutique la prépare. Vous pouvez régler dès maintenant ` +
-          `avec le code ${codeAchat} depuis MYNITA, ou payer à la livraison.`
+      ? await messageLivreurEnRoute(db, nita)
+      : nita
+        ? 'Commande enregistrée, la boutique la prépare. Confirmez le paiement dans MyNita, ' +
+          'ou payez à la livraison.'
         : 'Commande enregistrée. Je vous tiens au courant.';
 
     const reponse = envelope(message, [
-      orderTracking({
-        ...(suivi.data as Record<string, unknown>),
-        ...(codeAchat ? { payment_code: codeAchat } : {}),
-      }),
+      orderTracking(suivi.data as Record<string, unknown>),
     ]);
 
     if (body.data.conversation_id) {

@@ -139,4 +139,53 @@ void main() {
       expect(find.text('Destination à préciser au livreur'), findsOneWidget);
     },
   );
+
+  testWidgets('Nita pas encore payé : envoyer au livreur, sans code', (
+    tester,
+  ) async {
+    await afficherSuivi(
+      tester,
+      type: 'delivery',
+      statut: 'picked_up',
+      extra: {
+        'payment_method': 'mobile_money',
+        'payment_status': 'pending',
+        'total': 3500,
+        'driver': {'name': 'Moussa Issoufou', 'phone': '22796123456'},
+      },
+    );
+    expect(find.textContaining('Pas encore payé ? Envoyez'), findsOneWidget);
+    expect(find.textContaining('Moussa, votre livreur'), findsOneWidget);
+    expect(find.textContaining('96 12 34 56'), findsOneWidget);
+    expect(find.text('Copier'), findsOneWidget);
+    // Pas de jargon : jamais de « code ».
+    expect(find.textContaining('code'), findsNothing);
+  });
+
+  testWidgets('Nita payé : une ligne, sans rien à faire', (tester) async {
+    await afficherSuivi(
+      tester,
+      type: 'delivery',
+      statut: 'delivering',
+      extra: {
+        'payment_method': 'mobile_money',
+        'payment_status': 'paid',
+        'driver': {'name': 'Moussa', 'phone': '22796123456'},
+      },
+    );
+    expect(find.text('Payé par Nita'), findsOneWidget);
+    expect(find.textContaining('Pas encore payé'), findsNothing);
+  });
+
+  testWidgets('Nita sans livreur encore : personne à qui envoyer', (
+    tester,
+  ) async {
+    await afficherSuivi(
+      tester,
+      type: 'delivery',
+      statut: 'preparing',
+      extra: {'payment_method': 'mobile_money', 'payment_status': 'pending'},
+    );
+    expect(find.textContaining('Pas encore payé'), findsNothing);
+  });
 }

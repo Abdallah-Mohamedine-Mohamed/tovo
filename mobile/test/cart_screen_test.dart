@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:tovo/core/panier.dart';
@@ -224,8 +225,27 @@ void main() {
   testWidgets('le paiement se choisit d’un geste, sans liste à cocher', (
     tester,
   ) async {
+    SharedPreferences.setMockInitialValues({});
     await open(tester);
     await tester.tap(find.text('Nita'));
+    await tester.pumpAndSettle();
+    // Aucun numéro nigérien connu : Nita ne pourrait pas être réglé, la
+    // commande attend le numéro.
+    await tester.tap(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    expect(requests.where((r) => r.url.path == '/orders'), isEmpty);
+    expect(find.text('Indiquez le numéro Nita qui paiera.'), findsOneWidget);
+
+    // Le champ est plus bas dans le panier : on y descend.
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('numero-nita')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('numero-nita')),
+      '90123456',
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byType(FilledButton));
     await tester.pumpAndSettle();
@@ -233,6 +253,7 @@ void main() {
         jsonDecode(requests.singleWhere((r) => r.url.path == '/orders').body)
             as Map<String, dynamic>;
     expect(corps['payment_method'], 'mobile_money');
+    expect(corps['payment_phone'], '90123456');
   });
 
   testWidgets(

@@ -34,12 +34,11 @@ export async function offreVille(db: SupabaseClient): Promise<OffreVille> {
   }
 }
 
-export async function messageLivreurEnRoute(db: SupabaseClient, codeAchat: string | null = null): Promise<string> {
+export async function messageLivreurEnRoute(db: SupabaseClient, nita = false): Promise<string> {
   const { minutes } = await offreVille(db);
   const base = `C’est parti. Un livreur vous appelle dans les **${minutes} minutes**.`;
-  return codeAchat
-    ? `${base} Vous pouvez régler dès maintenant avec le code ${codeAchat} depuis MYNITA, ou payer au livreur.`
-    : base;
+  // Sans code ni jargon : la demande attend le client dans MyNita.
+  return nita ? `${base} Confirmez le paiement dans MyNita, ou payez au livreur.` : base;
 }
 
 export { demandeUnLivreur } from '../ai/intents.js';

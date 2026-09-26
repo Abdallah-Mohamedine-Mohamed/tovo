@@ -7,6 +7,8 @@ import '../../core/theme.dart';
 import '../../core/noms.dart';
 import '../../core/live_activity.dart';
 import '../registry.dart';
+import 'package:flutter/services.dart';
+import 'numero_nita.dart';
 
 /// Quatre moments pour un repas. « Prête » et « récupérée » sont dites par
 /// le titre au-dessus ; six étapes empilées faisaient une liste à lire.
@@ -85,6 +87,10 @@ class _OrderTrackingState extends State<OrderTracking>
 
   late String _statut;
   Map<String, dynamic>? _livreur;
+
+  /// L'état du paiement : « paid » dès que Nita l'a constaté, ou que le
+  /// livreur l'a déclaré reçu.
+  late String _paiement = widget.component.str('payment_status', 'pending');
   DateTime? _dernierePosition;
 
   /// Note déposée pendant cette session, pour remplacer aussitôt les étoiles
@@ -172,6 +178,7 @@ class _OrderTrackingState extends State<OrderTracking>
         _statut = statut;
         _livreur =
             (etat['driver'] as Map?)?.cast<String, dynamic>() ?? _livreur;
+        _paiement = (etat['payment_status'] as String?) ?? _paiement;
       });
       unawaited(
         TovoLiveActivity.sync(
@@ -218,7 +225,11 @@ class _OrderTrackingState extends State<OrderTracking>
           callback: (payload) {
             final nouveau = payload.newRecord['status'] as String?;
             if (nouveau == null || !mounted) return;
-            setState(() => _statut = nouveau);
+            setState(() {
+              _statut = nouveau;
+              _paiement =
+                  (payload.newRecord['payment_status'] as String?) ?? _paiement;
+            });
             unawaited(
               TovoLiveActivity.sync(
                 _orderId,
@@ -438,6 +449,21 @@ class _OrderTrackingState extends State<OrderTracking>
                   'phone': _livreur!['phone'] ?? '',
                 }),
               ),
+            ),
+          ],
+          // Nita : payé, ou la façon la plus simple de le faire — envoyer au
+          // livreur, comme on lui donnerait des espèces. Seulement quand un
+          // livreur est là : avant, il n'y a personne à qui envoyer.
+          if (widget.component.str('payment_method') == 'mobile_money' &&
+              !annulee &&
+              (_paiement == 'paid' ||
+                  (_livreur != null && _statut != 'delivered'))) ...[
+            const SizedBox(height: 14),
+            _PaiementNita(
+              paye: _paiement == 'paid',
+              montant: widget.component.money('total'),
+              prenom: _prenomLivreur,
+              telephone: (_livreur?['phone'] as String?) ?? '',
             ),
           ],
           if (details.isNotEmpty) ...[
@@ -699,6 +725,120 @@ class _BlocLivreur extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Le paiement Nita, en une ligne, sans jargon.
+///
+/// Payé : « Payé par Nita ✓ ». Sinon : « Pas encore payé ? Envoyez 3 500 F à
+/// Moussa, votre livreur » et son numéro, à copier d'un geste — comme on
+/// lui tendrait des espèces. Pas de « code », pas de relance (retour du
+/// client, 26/09) : la ligne disparaît d'elle-même une fois le paiement
+/// constaté, par MyNita ou par le livreur.
+class _PaiementNita extends StatelessWidget {
+  const _PaiementNita({
+    required this.paye,
+    required this.montant,
+    required this.prenom,
+    required this.telephone,
+  });
+
+  final bool paye;
+  final int montant;
+  final String prenom;
+  final String telephone;
+
+  @override
+  Widget build(BuildContext context) {
+    if (paye) {
+      return const Row(
+        children: [
+          LogoNita(taille: 18),
+          SizedBox(width: 8),
+          Text(
+            'Payé par Nita',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: TovoTheme.ink,
+            ),
+          ),
+          SizedBox(width: 6),
+          Icon(Icons.check_rounded, size: 18, color: TovoTheme.success),
+        ],
+      );
+    }
+    final local =
+        NumeroNita.nigerien(telephone) ??
+        telephone.replaceAll(RegExp(r'\D'), '');
+    final qui = prenom.isEmpty ? 'votre livreur' : '$prenom, votre livreur';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F5F5),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          const LogoNita(taille: 26),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                text: 'Pas encore payé ? Envoyez ',
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  height: 1.4,
+                  color: TovoTheme.inkDoux,
+                ),
+                children: [
+                  TextSpan(
+                    text: montant > 0 ? Money.format(montant) : 'le montant',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: TovoTheme.ink,
+                    ),
+                  ),
+                  TextSpan(text: ' à $qui'),
+                  if (local.length == 8) ...[
+                    const TextSpan(text: ' · '),
+                    TextSpan(
+                      text: NumeroNita.lisible(local),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: TovoTheme.ink,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          if (local.isNotEmpty)
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: local));
+                if (!context.mounted) return;
+                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                  const SnackBar(
+                    content: Text('Numéro copié'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: TovoTheme.ink,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 36),
+              ),
+              child: const Text(
+                'Copier',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

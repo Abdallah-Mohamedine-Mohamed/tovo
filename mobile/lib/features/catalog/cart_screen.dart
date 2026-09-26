@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../components/registry.dart';
 import '../../components/widgets/read_placeholder.dart';
+import '../../components/widgets/numero_nita.dart';
 import '../../core/api.dart';
 import '../../core/noms.dart';
 import '../../core/location.dart';
@@ -87,6 +88,9 @@ class _CartScreenState extends State<CartScreen> {
   _DeliveryPoint? _position;
   final _repere = TextEditingController();
   String _paiement = 'cash';
+
+  /// Le numéro Nita qui paiera (8 chiffres), quand le paiement est Nita.
+  String? _numeroNita;
   String? _orderId;
 
   /// Seule la réponse à la DERNIÈRE demande de devis compte : un client qui
@@ -320,6 +324,12 @@ class _CartScreenState extends State<CartScreen> {
   Future<void> _commander() async {
     final destination = _destination;
     if (_commandeEnCours || destination == null || !_devisPret) return;
+    // Nita ne connaît que les numéros du Niger : sans numéro complet, l'achat
+    // ne pourrait pas être réglé.
+    if (_paiement == 'mobile_money' && _numeroNita == null) {
+      setState(() => _erreurCommande = 'Indiquez le numéro Nita qui paiera.');
+      return;
+    }
     _orderId ??= _nouvelIdentifiant();
     setState(() {
       _commandeEnCours = true;
@@ -331,12 +341,17 @@ class _CartScreenState extends State<CartScreen> {
       'dropoff_hint': destination.hint,
       'dropoff': {'lat': destination.lat, 'lng': destination.lng},
       'payment_method': _paiement,
+      if (_paiement == 'mobile_money' && _numeroNita != null)
+        'payment_phone': _numeroNita,
       if (widget.conversationId != null)
         'conversation_id': widget.conversationId,
     });
     if (!mounted) return;
     if (reponse.ok) {
       unawaited(HapticFeedback.mediumImpact());
+      if (_paiement == 'mobile_money' && _numeroNita != null) {
+        unawaited(NumeroNita.retenir(_numeroNita!));
+      }
       unawaited(TovoPush.enregistrer('client'));
       // Commande partie : plus de panier, plus de pastille.
       PanierEnDirect.instance.vider();
@@ -519,6 +534,12 @@ class _CartScreenState extends State<CartScreen> {
                   if (_position != null) _champRepere(),
                   const _Separation(),
                   _lignePaiement(),
+                  if (_paiement == 'mobile_money')
+                    NumeroNita(
+                      actif: !_commandeEnCours,
+                      onChanged: (numero) =>
+                          setState(() => _numeroNita = numero),
+                    ),
                   const _Separation(),
                   const SizedBox(height: 8),
                   _totaux(),
@@ -639,6 +660,8 @@ class _CartScreenState extends State<CartScreen> {
         ]) ...[
           const SizedBox(width: 8),
           ChoiceChip(
+            // Le logo MyNita : on reconnaît le moyen de paiement d'un coup d'œil.
+            avatar: valeur == 'mobile_money' ? const LogoNita() : null,
             label: Text(libelle),
             selected: _paiement == valeur,
             showCheckmark: false,

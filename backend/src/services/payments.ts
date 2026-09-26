@@ -44,6 +44,8 @@ interface CommandeAPayer {
 export async function ouvrirPaiement(
   orderId: string,
   contexte: ContexteAppel,
+  /** Le numéro Nita choisi par le client (8 chiffres, Niger), sinon celui du compte. */
+  numeroPaiement: string | null = null,
 ): Promise<{ codeAchat: string; montant: number }> {
   const db = serviceClient();
 
@@ -64,7 +66,7 @@ export async function ouvrirPaiement(
     .eq('id', (commande as { user_id: string }).user_id)
     .single();
 
-  const telephone = (profil as { phone: string | null } | null)?.phone;
+  const telephone = numeroPaiement ?? (profil as { phone: string | null } | null)?.phone;
   if (!telephone) {
     throw new NitaError('Aucun numéro sur le compte : paiement mobile impossible', 400, false);
   }

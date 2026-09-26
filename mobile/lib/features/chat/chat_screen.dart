@@ -26,6 +26,7 @@ import 'photo_capture_sheet.dart';
 import '../catalog/catalog_screen.dart';
 import '../catalog/product_sheet.dart';
 import '../../components/widgets/pastille_panier.dart';
+import '../../components/widgets/numero_nita.dart';
 import '../../core/panier.dart';
 import '../catalog/cart_screen.dart';
 import '../catalog/boutique_screen.dart';
@@ -1259,9 +1260,14 @@ class _ChatScreenState extends State<ChatScreen> {
           'pickup_contact': p['pickup_contact'],
         'parcel': p['parcel'] ?? 'small',
         'payment_method': p['payment_method'] ?? 'cash',
+        // Le numéro Nita qui paiera, quand il n'est pas celui du compte.
+        if (p['payment_phone'] is String) 'payment_phone': p['payment_phone'],
       });
       if (response.ok) {
         unawaited(TovoPush.enregistrer('client'));
+        if (p['payment_phone'] is String) {
+          unawaited(NumeroNita.retenir(p['payment_phone'] as String));
+        }
         _eteindreCarteLivreur();
       }
       return response;

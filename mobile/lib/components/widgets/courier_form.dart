@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/location.dart';
 import '../../core/theme.dart';
 import '../registry.dart';
+import 'numero_nita.dart';
 
 /// `courier_form` — la carte livreur, dans ses deux sortes.
 ///
@@ -66,6 +67,12 @@ class _CourierFormState extends State<CourierForm> {
   late bool _details =
       _destination.text.isNotEmpty || _destinataire.text.isNotEmpty;
   String _paiement = 'cash';
+
+  /// Le numéro Nita qui paiera (8 chiffres), quand le paiement est Nita.
+  String? _numeroNita;
+
+  /// Nita choisi sans numéro complet : l'achat ne pourrait pas être réglé.
+  bool get _nitaIncomplet => _paiement == 'mobile_money' && _numeroNita == null;
   bool _localisation = false;
   late bool _envoye = widget.component.data['utilise'] == true;
 
@@ -153,6 +160,8 @@ class _CourierFormState extends State<CourierForm> {
           'dropoff': {'lat': _lat, 'lng': _lng},
           'dropoff_hint': 'Chez le client',
           'payment_method': _paiement,
+          if (_paiement == 'mobile_money' && _numeroNita != null)
+            'payment_phone': _numeroNita,
         }),
       );
       return;
@@ -173,6 +182,8 @@ class _CourierFormState extends State<CourierForm> {
           'dropoff': {'lat': dropLat, 'lng': dropLng},
         'dropoff_contact': _destinataire.text.trim(),
         'payment_method': _paiement,
+        if (_paiement == 'mobile_money' && _numeroNita != null)
+          'payment_phone': _numeroNita,
       }),
     );
   }
@@ -379,12 +390,21 @@ class _CourierFormState extends State<CourierForm> {
                   ('mobile_money', 'Nita'),
                 ])
                   ChoiceChip(
+                    avatar: valeur == 'mobile_money' ? const LogoNita() : null,
                     label: Text(libelle),
                     selected: _paiement == valeur,
+                    showCheckmark: false,
                     onSelected: (_) => setState(() => _paiement = valeur),
                   ),
               ],
             ),
+            if (_paiement == 'mobile_money') ...[
+              const SizedBox(height: 10),
+              NumeroNita(
+                actif: !_envoye,
+                onChanged: (numero) => setState(() => _numeroNita = numero),
+              ),
+            ],
           ],
 
           const Divider(height: 26),
@@ -422,7 +442,9 @@ class _CourierFormState extends State<CourierForm> {
           // texte blanc, pilule) : commander, c'est un seul geste dans l'app,
           // une seule couleur. « Commander le livreur » : explicite et court.
           FilledButton(
-            onPressed: positionConnue && !_envoye ? _appeler : null,
+            onPressed: positionConnue && !_envoye && !_nitaIncomplet
+                ? _appeler
+                : null,
             style: FilledButton.styleFrom(
               minimumSize: const Size.fromHeight(46),
               backgroundColor: TovoTheme.teal,
