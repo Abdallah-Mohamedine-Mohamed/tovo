@@ -806,6 +806,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
+      if (resultat.inventions?.length) {
+        // Le modèle a affirmé un prix, une durée ou un nom absent de la
+        // base : la phrase a été retirée avant d'être vue. Ces lignes
+        // alimentent le banc (npm run banc:recolter).
+        request.log.warn(
+          { ref: body.data.client_message_id, message: texteClient ?? message, inventions: resultat.inventions },
+          'invention bloquée',
+        );
+      }
+
       request.log.info(
         { usage: resultat.usage, conversationId, duration_ms: Math.round(performance.now() - started),
           first_result_ms: firstResultMs, first_text_ms: firstTextMs },

@@ -20,6 +20,7 @@ import { DispatchList } from './pages/dispatch';
 import { MerchantList } from './pages/merchants';
 import { CashList, DriverList } from './pages/drivers';
 import { SettingsEdit } from './pages/settings';
+import { QualiteIa } from './pages/qualiteIa';
 
 /**
  * Administration Tovo.
@@ -88,6 +89,11 @@ export const App = () => (
               meta: { label: 'Prix concurrents' },
             },
             {
+              name: 'banc_cas',
+              list: '/qualite-ia',
+              meta: { label: 'Qualité de l’IA' },
+            },
+            {
               name: 'platform_settings',
               edit: '/settings',
               meta: { label: 'Paramètres' },
@@ -117,6 +123,7 @@ export const App = () => (
               <Route path="/cash" element={<CashList />} />
               <Route path="/offers" element={<OfferList />} />
               <Route path="/settings" element={<SettingsEdit />} />
+              <Route path="/qualite-ia" element={<QualiteIa />} />
               <Route path="*" element={<ErrorComponent />} />
             </Route>
 

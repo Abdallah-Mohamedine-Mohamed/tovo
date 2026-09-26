@@ -17,6 +17,7 @@ import {
 import { resumeAffichage } from './memoire.js';
 import type { Intention } from './jev.js';
 import { avecOuvertureReelle } from '../services/ouverture.js';
+import { Faits, FluxVerifie, verifierTexte, type Verification } from './verificateur.js';
 
 /**
  * Boucle d'orchestration.
@@ -88,6 +89,12 @@ export interface OrchestrateOutput extends ChatEnvelope {
   messageId: string | null;
   /** Rejets du validateur — un pic signale un prompt qui dérive. */
   rejected: string[];
+  /**
+   * Phrases retirées par le vérificateur : elles affirmaient un prix, une
+   * durée ou un nom qui ne venait pas de la base. Journalisées, et récoltées
+   * pour le banc.
+   */
+  inventions?: Verification['retirees'];
   usage: { input: number; output: number; cached: number; cycles: number };
 }
 
@@ -306,6 +313,12 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
 
   const composantsDuTour: Component[] = [];
   const idsAutorises = new Set<string>();
+  // Ce qui est vrai pendant ce tour : la phrase du client, ce qui était déjà
+  // à l'écran, puis tout ce que les outils renverront (verificateur.ts).
+  const faits = new Faits();
+  faits.ajouter(input.message);
+  for (const tour of previous.history) faits.ajouter(tour.content);
+  const inventions: Verification['retirees'] = [];
   let texteFinal = '';
   let entree = 0;
   let sortie = 0;
@@ -317,6 +330,9 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     let reponseOutil: string | undefined;
     input.onEvent?.({ type: 'text_start' });
 
+    // Au fil de l'eau, mais phrase par phrase : une phrase ne s'affiche que
+    // complète et vérifiée.
+    const flux = new FluxVerifie(faits, (text) => input.onEvent?.({ type: 'text', text }));
     const reponse = await client.generate({
       system: SYSTEM_PROMPT,
       history,
@@ -324,9 +340,11 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
       tools: dernierCycle ? [] : TOOL_DEFINITIONS,
       ...(input.onEvent ? {
         cachePrompt: !dernierCycle,
-        onText: (text: string) => input.onEvent?.({ type: 'text', text }),
+        onText: (text: string) => flux.pousser(text),
       } : {}),
     });
+    flux.terminer();
+    inventions.push(...flux.retirees);
 
     entree += reponse.usage?.input ?? 0;
     sortie += reponse.usage?.output ?? 0;
@@ -358,6 +376,9 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
       try {
         const resultat = await executeur(appel.args, ctx);
         if (resultat.content?.trim()) reponseOutil = resultat.content.trim();
+        faits.ajouter(resultat.summary);
+        faits.ajouter(resultat.content);
+        for (const composant of resultat.components) faits.ajouter(composant.data);
 
         // Les identifiants viennent d'ici, et de nulle part ailleurs.
         collectIds(resultat.summary, idsAutorises);
@@ -408,6 +429,16 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
 
   const { components, rejected } = validateComponents(composantsDuTour, idsAutorises);
 
+  // Le texte enregistré et renvoyé passe le même contrôle que celui qui
+  // s'est affiché : aucune phrase n'affirme un fait absent de la base.
+  if (texteFinal) {
+    const verifie = verifierTexte(texteFinal, faits);
+    for (const r of verifie.retirees) {
+      if (!inventions.some((i) => i.phrase === r.phrase)) inventions.push(r);
+    }
+    texteFinal = verifie.texte;
+  }
+
   if (!texteFinal) {
     // Un carrousel sans un mot laisse croire que la question a trouvé sa
     // réponse. Vu sur « de la crème fraîche » : trois cartes de yaourt
@@ -429,6 +460,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     ...envelope(texteFinal, components),
     messageId,
     rejected,
+    ...(inventions.length ? { inventions } : {}),
     usage: { input: entree, output: sortie, cached: misEnCache, cycles: cycles + 1 },
   };
 }

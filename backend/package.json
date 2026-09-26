@@ -38,7 +38,8 @@
     "classifieur:indexer": "tsx --env-file=.env scripts/classifieur/indexer.ts",
     "classifieur:distiller": "tsx --env-file=.env scripts/classifieur/distiller.ts",
     "banc:ia": "tsx --env-file=.env scripts/banc-ia/banc.ts",
-    "banc:recolter": "tsx --env-file=.env scripts/banc-ia/recolter.ts"
+    "banc:recolter": "tsx --env-file=.env scripts/banc-ia/recolter.ts",
+    "banc:boucle": "tsx --env-file=.env scripts/banc-ia/boucle.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",

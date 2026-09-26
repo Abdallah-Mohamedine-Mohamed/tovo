@@ -16,7 +16,7 @@
  * Toute erreur vue en production vient s'ajouter ici — c'est ce qui empêche
  * qu'elle revienne.
  */
-import type { Intention } from '../../src/ai/jev.js';
+import type { Intention } from '../jev.js';
 
 export interface Cas {
   texte: string;

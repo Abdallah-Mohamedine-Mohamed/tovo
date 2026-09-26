@@ -18,7 +18,7 @@
  * Lecture seule : ne modifie rien en base.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { JEU } from './jeu.js';
+import { JEU } from '../../src/ai/banc/jeu.js';
 
 const { serviceClient } = await import('../../src/services/supabase.js');
 const { comprendre } = await import('../../src/ai/decideur.js');
