@@ -1,6 +1,7 @@
 import { serviceClient } from '../../services/supabase.js';
 import type { FastifyBaseLogger } from 'fastify';
 import { cleDe } from './boucle.js';
+import { toutLire } from './lire.js';
 
 /**
  * Les EXEMPLES TIRÉS AU BON MOMENT : à chaque message, le cerveau voit les
@@ -117,13 +118,15 @@ export function modeleLocal(): Promise<Empreinter> {
 /** Les exemples montrables : validés, et pas réservés à l'examen. */
 export async function lireBanque(): Promise<Exemple[]> {
   const db = serviceClient();
-  let lecture = await db.from('banc_cas').select('texte, avant, attendu, reponse, tuiles, cle').eq('statut', 'valide').limit(50_000);
+  let lecture = await toutLire((de, a) => db.from('banc_cas').select('texte, avant, attendu, reponse, tuiles, cle')
+    .eq('statut', 'valide').order('cle').range(de, a));
   // Migration 0066 pas encore appliquée : tout est « un sens unique ».
   if (lecture.error) {
-    lecture = await db.from('banc_cas').select('texte, avant, attendu, cle').eq('statut', 'valide').limit(50_000) as typeof lecture;
+    lecture = await toutLire((de, a) => db.from('banc_cas').select('texte, avant, attendu, cle')
+      .eq('statut', 'valide').order('cle').range(de, a)) as typeof lecture;
   }
   if (lecture.error) return [];
-  return ((lecture.data ?? []) as Array<Record<string, unknown>>)
+  return (lecture.data as unknown as Array<Record<string, unknown>>)
     .map((l) => ({
       texte: String(l.texte),
       avant: (l.avant as string | null) ?? null,

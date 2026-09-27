@@ -13,6 +13,7 @@ const { comprendre, COUTEUSES } = await import('../../src/ai/decideur.js');
 const { IndexExemples, estReserve, modeleLocal } = await import('../../src/ai/banc/exemples.js');
 const { cleDe, memeSens } = await import('../../src/ai/banc/boucle.js');
 const { JEU } = await import('../../src/ai/banc/jeu.js');
+const { toutLire } = await import('../../src/ai/banc/lire.js');
 type Exemple = import('../../src/ai/banc/exemples.js').Exemple;
 type Etiquette = import('../../src/ai/banc/guide.js').Etiquette;
 
@@ -25,9 +26,13 @@ const K = valeur('--k', 8);
 const SEUIL = valeur('--seuil', 0.8);
 
 const db = serviceClient();
-let lecture = await db.from('banc_cas').select('texte, avant, attendu, reponse, tuiles, cle').eq('statut', 'valide').limit(50_000);
-if (lecture.error) lecture = await db.from('banc_cas').select('texte, avant, attendu, cle').eq('statut', 'valide').limit(50_000) as typeof lecture;
-const banque: Exemple[] = ((lecture.data ?? []) as Array<Record<string, unknown>>).map((l) => ({
+let lecture = await toutLire((de, a) => db.from('banc_cas').select('texte, avant, attendu, reponse, tuiles, cle')
+  .eq('statut', 'valide').order('cle').range(de, a));
+if (lecture.error) {
+  lecture = await toutLire((de, a) => db.from('banc_cas').select('texte, avant, attendu, cle')
+    .eq('statut', 'valide').order('cle').range(de, a)) as typeof lecture;
+}
+const banque: Exemple[] = (lecture.data as unknown as Array<Record<string, unknown>>).map((l) => ({
   texte: String(l.texte), avant: (l.avant as string | null) ?? null, attendu: String(l.attendu),
   reponse: (l.reponse as Exemple['reponse'] | undefined) ?? 'intention', tuiles: (l.tuiles as string[] | null) ?? null, cle: String(l.cle),
 }));

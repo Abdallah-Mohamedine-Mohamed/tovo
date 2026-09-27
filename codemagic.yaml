@@ -186,6 +186,21 @@ workflows:
             sleep 20
           done
 
+      # CLÉ GOOGLE MAPS (carte de suivi).
+      #
+      # Inscrite dans Info.plist au moment du build, depuis la variable
+      # GOOGLE_MAPS_IOS_KEY du groupe tovo_config : jamais dans le dépôt.
+      # AppDelegate.swift la lit et la donne au SDK. Absente, le build passe
+      # et la carte reste grise — on le signale sans échouer.
+      - name: Clé Google Maps
+        script: |
+          if [ -z "$GOOGLE_MAPS_IOS_KEY" ]; then
+            echo "GOOGLE_MAPS_IOS_KEY absente : la carte de suivi restera grise."
+            exit 0
+          fi
+          /usr/libexec/PlistBuddy -c "Delete :GMSApiKey" ios/Runner/Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :GMSApiKey string $GOOGLE_MAPS_IOS_KEY" ios/Runner/Info.plist
+
       # LA SIGNATURE SE RÉAPPLIQUE ICI, APRÈS LES MIGRATIONS.
       #
       # Codemagic signe avant les scripts, à partir du bloc `ios_signing` :

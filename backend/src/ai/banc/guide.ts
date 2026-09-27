@@ -21,7 +21,7 @@ export const GUIDE_ETIQUETAGE = [
   '1. recherche : le client nomme un produit ou un plat, même mal écrit ou mal transcrit, même avec « livre-moi », « apporte-moi », « envoie … chez ma mère » (c’est un achat livré, pas un colis). Un objet qui ressemble à un mot de livraison reste un produit : un livre, un litre, un paquet de biscuits, un sac ou un « colis » de riz.',
   '2. envie : une envie ou un besoin général sans produit précis (« j’ai faim », « je veux faire mes courses », « quels restaurants sont ouverts ? », « montre-moi tout »).',
   '3. boutique : le client nomme une enseigne précise et veut la voir, voir sa carte, savoir si elle est ouverte, ou y commander sans nommer de produit. « Tacos chez Otakoss » est une recherche (un produit est nommé).',
-  '4. livreur : le client veut qu’un livreur SE DÉPLACE pour lui, sans commande de boutique (« envoie-moi un coursier », « j’ai une course », « il me faut une moto »).',
+  '4. livreur : le client veut qu’un livreur SE DÉPLACE pour lui, sans commande de boutique (« envoie-moi un coursier », « j’ai une course », « il me faut une moto »). Tovo ne transporte pas de personnes : un taxi ou un Uber pour le client lui-même, c’est social.',
   '5. colis : le client veut envoyer, faire déposer ou aller chercher un objet À LUI (document, sac, téléphone) chez quelqu’un. Livreur et colis sont proches ; en cas de doute entre les deux, choisis colis si un objet ou un destinataire est mentionné, sinon livreur.',
   '6. designe : le client désigne un article qu’il voit à l’écran ou dans son panier (« le deuxième », « le moins cher », « enlève le jus », « annule le coca »).',
   '7. panier : voir, vérifier ou valider son panier (« où est mon panier ? », « je veux payer », « valide ma commande »).',

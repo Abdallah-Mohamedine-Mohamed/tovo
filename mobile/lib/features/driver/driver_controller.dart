@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/api.dart';
@@ -162,15 +163,18 @@ class DriverController extends ChangeNotifier {
 
   /// Cadence du ping de position.
   ///
-  /// 10 s en course : c'est ce qui alimente la carte du client, et une
-  /// position vieille d'une minute ne sert à rien pour suivre une moto.
+  /// 5 s en course : c'est ce qui alimente la carte du client, où la moto
+  /// glisse d'un point au suivant. Un envoi est sauté si le livreur n'a pas
+  /// bougé de 10 m (feu rouge, attente devant la boutique), sans jamais
+  /// laisser passer plus de 20 s sans nouvelle.
   /// 60 s au repos : le dispatch a seulement besoin de savoir dans quel
   /// quartier se trouve le livreur.
   /// Rien hors ligne : la batterie et le forfait data d'un livreur sont des
   /// ressources qu'il paie lui-même.
-  Duration get _cadencePing => course != null
-      ? const Duration(seconds: 10)
-      : const Duration(seconds: 60);
+  Duration get _cadencePing =>
+      course != null ? const Duration(seconds: 5) : const Duration(seconds: 60);
+
+  ({double lat, double lng, DateTime quand})? _dernierEnvoi;
 
   void _programmerPing() {
     _ping?.cancel();
@@ -185,6 +189,28 @@ class DriverController extends ChangeNotifier {
 
     final position = await TovoLocation.current();
     if (position == null) return;
+
+    // Immobile depuis le dernier envoi (moins de 10 m, moins de 20 s) : on
+    // économise le forfait du livreur, la carte du client n'y perd rien.
+    final avant = _dernierEnvoi;
+    if (course != null && avant != null) {
+      final metres = Geolocator.distanceBetween(
+        avant.lat,
+        avant.lng,
+        position.latitude,
+        position.longitude,
+      );
+      if (metres < 10 &&
+          DateTime.now().difference(avant.quand) <
+              const Duration(seconds: 20)) {
+        return;
+      }
+    }
+    _dernierEnvoi = (
+      lat: position.latitude,
+      lng: position.longitude,
+      quand: DateTime.now(),
+    );
 
     // Le ping n'entre PAS dans la file de synchronisation : une position
     // vieille de vingt minutes rejouée au retour du réseau serait fausse et

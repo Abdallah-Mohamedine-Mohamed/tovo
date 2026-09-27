@@ -244,6 +244,9 @@ void main() {
         requests.where((request) => request.method == 'DELETE'),
         hasLength(1),
       );
+      // La transition de sortie dure plus de 400 ms depuis Flutter 3.47 :
+      // l'écran se ferme bien, on attend simplement la fin de l'animation.
+      await tester.pumpAndSettle();
       expect(find.byType(ProductScreen), findsNothing);
     },
   );

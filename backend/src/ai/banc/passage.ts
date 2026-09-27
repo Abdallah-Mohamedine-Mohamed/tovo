@@ -5,6 +5,7 @@ import { LIBELLES } from '../aiguillage.js';
 import type { Intention } from '../jev.js';
 import type { Etiquette } from './guide.js';
 import { JEU } from './jeu.js';
+import { toutLire } from './lire.js';
 import { ecrivain, juge } from './modelesForts.js';
 import { SCENARIOS, cleDe, ecrirePhrases, etiqueterALAveugle, memeSens, scenariosDuPassage } from './boucle.js';
 
@@ -121,10 +122,10 @@ export async function passageDuBanc(options: OptionsPassage = {}) {
     // doublons sont écartés par leur clé).
     if (le) depuis = new Date(Date.parse(le) - 5 * 60_000).toISOString();
   }
-  const { data: messages, error: erreurMessages } = await db.from('messages')
-    .select('conversation_id, role, content, created_at')
+  const { data: messages, error: erreurMessages } = await toutLire((de, a) => db.from('messages')
+    .select('id, conversation_id, role, content, created_at')
     .in('role', ['user', 'assistant']).gte('created_at', depuis)
-    .order('created_at', { ascending: true }).limit(10_000);
+    .order('created_at', { ascending: true }).order('id').range(de, a), 20_000);
   if (erreurMessages) throw erreurMessages;
   const tuiles = new Set([...Object.values(LIBELLES), 'Autre chose', 'Oui, annuler', 'Non, la garder'].map((t) => cleDe(t)));
   const technique = /^(📷|🎤|J'ai envoyé une photo|L'utilisateur a parlé|Action :|Recommander ma commande|Commander)/;
@@ -241,10 +242,14 @@ export async function passageDuBanc(options: OptionsPassage = {}) {
     ? JEU.map((c) => ({ texte: c.texte, avant: c.avant ?? null, attendu: c.attendu, origine: c.source }))
     : [];
   if (!sec && examiner) {
-    let lecture = await db.from('banc_cas').select('texte, avant, attendu, origine, reponse').eq('statut', 'valide').limit(50_000);
+    let lecture = await toutLire((de, a) => db.from('banc_cas').select('texte, avant, attendu, origine, reponse')
+      .eq('statut', 'valide').order('id').range(de, a));
     // Migration 0066 pas encore appliquée : sans la colonne reponse.
-    if (lecture.error) lecture = await db.from('banc_cas').select('texte, avant, attendu, origine').eq('statut', 'valide').limit(50_000) as typeof lecture;
-    const base = (lecture.data ?? []) as CasExamen[];
+    if (lecture.error) {
+      lecture = await toutLire((de, a) => db.from('banc_cas').select('texte, avant, attendu, origine')
+        .eq('statut', 'valide').order('id').range(de, a)) as typeof lecture;
+    }
+    const base = lecture.data as unknown as CasExamen[];
     const reelsBase = base.filter((c) => c.origine !== 'synthetique');
     const synth = auHasard(base.filter((c) => c.origine === 'synthetique'), Math.max(0, echantillon - reelsBase.length));
     examen = [...examen, ...reelsBase, ...synth];

@@ -13,6 +13,7 @@ import { ouvrirPaiement } from '../services/payments.js';
 import { paiementMobileActif } from '../config/env.js';
 import { messageLivreurEnRoute } from '../services/livreur.js';
 import { serviceClient } from '../services/supabase.js';
+import { itinerairePour } from '../services/itineraire.js';
 
 /**
  * Commandes — sans tour LLM, et c'est délibéré.
@@ -360,6 +361,45 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
         orderTracking(data as Record<string, unknown>),
       ]),
     );
+  });
+
+  /**
+   * L'itinéraire du livreur, pour le trait de la carte de suivi.
+   *
+   * Même contrôle d'accès que le suivi : order_tracking, sous la RLS de
+   * l'appelant, ne renvoie rien d'une commande qui ne le regarde pas. La
+   * destination suit l'étape : la boutique (ou le colis) tant que le
+   * livreur n'a rien récupéré, puis le client. 204 quand il n'y a rien à
+   * tracer — pas de livreur, pas de position, pas de clé Google.
+   */
+  app.get('/orders/:orderId/itineraire', { preHandler: app.requireAuth }, async (request, reply) => {
+    const params = z.object({ orderId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'identifiant invalide' });
+
+    const { data } = await request.supabase!.rpc('order_tracking', {
+      p_order_id: params.data.orderId,
+    });
+    const suivi = data as Record<string, any> | null;
+    if (!suivi) return reply.code(404).send({ error: 'commande introuvable' });
+
+    const point = (v: any): { lat: number; lng: number } | null =>
+      v && typeof v.lat === 'number' && typeof v.lng === 'number' ? { lat: v.lat, lng: v.lng } : null;
+    const livreur = point(suivi.driver?.position);
+    const recupere = ['picked_up', 'delivering'].includes(String(suivi.status));
+    const destination = recupere
+      ? point(suivi.dropoff)
+      : suivi.type === 'courier'
+        ? point(suivi.pickup)
+        : point(suivi.merchant);
+    if (!livreur || !destination) return reply.code(204).send();
+
+    const itineraire = await itinerairePour(params.data.orderId, livreur, destination);
+    if (!itineraire) return reply.code(204).send();
+    return reply.send({
+      polyline: itineraire.polyline,
+      distance_m: itineraire.distanceM,
+      duree_s: itineraire.dureeS,
+    });
   });
 
   /**

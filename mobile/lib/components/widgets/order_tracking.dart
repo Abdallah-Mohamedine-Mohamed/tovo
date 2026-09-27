@@ -6,6 +6,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme.dart';
 import '../../core/noms.dart';
 import '../../core/live_activity.dart';
+import '../../core/position_livreur.dart';
+import 'carte_suivi.dart';
+import 'suivi_sheet.dart';
 import '../registry.dart';
 import 'package:flutter/services.dart';
 import 'numero_nita.dart';
@@ -69,10 +72,15 @@ class OrderTracking extends StatefulWidget {
     super.key,
     required this.component,
     required this.onInteraction,
+    this.grandFormat = false,
   });
 
   final TovoComponent component;
   final InteractionCallback onInteraction;
+
+  /// Dans la feuille de suivi : la grande carte en tête. Dans le fil de la
+  /// conversation (par défaut), pas de carte — un bouton ouvre la feuille.
+  final bool grandFormat;
 
   @override
   State<OrderTracking> createState() => _OrderTrackingState();
@@ -93,6 +101,12 @@ class _OrderTrackingState extends State<OrderTracking>
   late String _paiement = widget.component.str('payment_status', 'pending');
   DateTime? _dernierePosition;
 
+  /// La moto sur la carte : glisse d'une position reçue à la suivante.
+  final MotoAnimee moto = MotoAnimee();
+
+  /// Change à chaque position reçue : la carte relance la glisse et recadre.
+  int _revision = 0;
+
   /// Note déposée pendant cette session, pour remplacer aussitôt les étoiles
   /// par un remerciement. Sans ça le client ne sait pas si son geste a porté
   /// et note une deuxième fois.
@@ -105,6 +119,7 @@ class _OrderTrackingState extends State<OrderTracking>
     super.initState();
     _statut = widget.component.str('status', 'pending');
     _livreur = widget.component.data['driver'] as Map<String, dynamic>?;
+    _prendrePosition(_livreur);
     WidgetsBinding.instance.addObserver(this);
     if (_orderId.isNotEmpty && !_termine.contains(_statut)) {
       unawaited(
@@ -179,6 +194,7 @@ class _OrderTrackingState extends State<OrderTracking>
         _livreur =
             (etat['driver'] as Map?)?.cast<String, dynamic>() ?? _livreur;
         _paiement = (etat['payment_status'] as String?) ?? _paiement;
+        _prendrePosition(_livreur);
       });
       unawaited(
         TovoLiveActivity.sync(
@@ -258,12 +274,56 @@ class _OrderTrackingState extends State<OrderTracking>
             column: 'order_id',
             value: _orderId,
           ),
-          callback: (_) {
+          callback: (payload) {
             if (!mounted) return;
-            setState(() => _dernierePosition = DateTime.now());
+            final point = lirePoint(payload.newRecord['location']);
+            final capDonne = (payload.newRecord['heading'] as num?)?.toDouble();
+            setState(() {
+              _dernierePosition = DateTime.now();
+              if (point != null) {
+                moto.recevoir(point, capDonne: capDonne);
+                _revision++;
+              }
+            });
           },
         )
         .subscribe();
+  }
+
+  /// La dernière position connue, donnée par le serveur (order_tracking,
+  /// migration 0069) : la moto est sur la carte dès l'ouverture.
+  void _prendrePosition(Map<String, dynamic>? livreur) {
+    final position = livreur?['position'];
+    final point = lirePoint(position);
+    if (point == null) return;
+    final quand = DateTime.tryParse('${(position as Map)['at'] ?? ''}');
+    // Relue au retour dans l'app : plus ancienne que la dernière reçue en
+    // direct, elle ramènerait la moto en arrière.
+    final connue = _dernierePosition;
+    if (moto.position() != null &&
+        (quand == null || (connue != null && !quand.isAfter(connue)))) {
+      return;
+    }
+    final capDonne = (position['heading'] as num?)?.toDouble();
+    moto.recevoir(point, capDonne: capDonne);
+    _revision++;
+    if (quand != null) _dernierePosition = quand;
+  }
+
+  /// Où va la moto en ce moment : chercher (la boutique, ou le colis),
+  /// puis livrer. Sans coordonnées connues, la carte montre la moto seule.
+  /// Tant que rien n'est récupéré — livreur assigné pendant que la boutique
+  /// prépare compris — il va au départ. Même règle que le serveur
+  /// (GET /orders/:id/itineraire).
+  Point? get _arrivee {
+    final versLeDepart = !const {'picked_up', 'delivering'}.contains(_statut);
+    final colis = widget.component.str('type', '') == 'courier';
+    final lieu = !versLeDepart
+        ? widget.component.map('dropoff')
+        : colis
+        ? widget.component.map('pickup')
+        : widget.component.map('merchant');
+    return lirePoint(lieu);
   }
 
   void _desabonner() {
@@ -394,8 +454,10 @@ class _OrderTrackingState extends State<OrderTracking>
         Money.format(widget.component.money('total')),
     ];
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 14),
+    final contenu = Padding(
+      padding: widget.grandFormat
+          ? const EdgeInsets.fromLTRB(24, 22, 24, 28)
+          : const EdgeInsets.symmetric(vertical: 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -443,7 +505,14 @@ class _OrderTrackingState extends State<OrderTracking>
             const SizedBox(height: 18),
             _BlocLivreur(
               prenom: _prenomLivreur,
-              positionRecue: _dernierePosition != null,
+              positionRecue: moto.position() != null,
+              onVoirLaCarte: widget.grandFormat
+                  ? null
+                  : () => ouvrirSuivi(
+                      context,
+                      component: widget.component,
+                      onInteraction: widget.onInteraction,
+                    ),
               onAppeler: () => widget.onInteraction(
                 TovoInteraction('call_driver', {
                   'phone': _livreur!['phone'] ?? '',
@@ -506,6 +575,61 @@ class _OrderTrackingState extends State<OrderTracking>
             ),
           ],
         ],
+      ),
+    );
+    if (!widget.grandFormat) return contenu;
+
+    // La feuille : la carte, et rien d'autre (retour du 27/09). L'étape,
+    // le livreur, le paiement sont déjà dans le fil, sur l'écran verrouillé
+    // et dans la Dynamic Island : les répéter ici était de la redondance.
+    final carte =
+        _livreur != null &&
+        !annulee &&
+        _statut != 'delivered' &&
+        moto.position() != null;
+    if (carte) {
+      return CarteSuivi(
+        moto: moto,
+        revision: _revision,
+        orderId: _orderId,
+        statut: _statut,
+        arrivee: _arrivee,
+      );
+    }
+    // Pas encore de livreur sur la route : l'illustration, et une phrase.
+    return ColoredBox(
+      color: const Color(0xFF1B2940),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Image(
+              image: AssetImage('assets/icons/3d/scooter-livraison.png'),
+              height: 150,
+            ),
+            const SizedBox(height: 18),
+            Text(
+              annulee
+                  ? 'Commande annulée'
+                  : _statut == 'delivered'
+                  ? 'Commande livrée'
+                  : 'Le livreur n’est pas encore en route',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+            if (!annulee && _statut != 'delivered') ...[
+              const SizedBox(height: 6),
+              const Text(
+                'La carte s’animera dès son départ.',
+                style: TextStyle(fontSize: 14, color: Color(0xFF9FB0C8)),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -679,42 +803,45 @@ class _BlocLivreur extends StatelessWidget {
     required this.prenom,
     required this.positionRecue,
     required this.onAppeler,
+    this.onVoirLaCarte,
   });
 
   final String prenom;
   final bool positionRecue;
   final VoidCallback onAppeler;
 
+  /// Dans le fil seulement : ouvre la feuille avec la grande carte.
+  final VoidCallback? onVoirLaCarte;
+
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            const Icon(
-              Icons.two_wheeler_outlined,
-              size: 20,
-              color: TovoTheme.inkDoux,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                // La carte viendra avec l'intégration cartographique. En
-                // attendant, dire simplement si la position arrive vaut
-                // mieux qu'un cadre vide.
-                positionRecue
-                    ? 'Position du livreur mise à jour'
-                    : 'Position du livreur en attente',
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  color: TovoTheme.inkDoux,
+        // La carte, au-dessus, montre déjà la moto : la ligne ne sert que
+        // tant qu'aucune position n'est arrivée.
+        if (!positionRecue) ...[
+          Row(
+            children: [
+              const Icon(
+                Icons.two_wheeler_outlined,
+                size: 20,
+                color: TovoTheme.inkDoux,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Position du livreur en attente',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: TovoTheme.inkDoux,
+                  ),
                 ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
+            ],
+          ),
+          const SizedBox(height: 10),
+        ],
         FilledButton.icon(
           onPressed: onAppeler,
           style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
@@ -724,6 +851,22 @@ class _BlocLivreur extends StatelessWidget {
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
           ),
         ),
+        if (onVoirLaCarte != null) ...[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: onVoirLaCarte,
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              foregroundColor: TovoTheme.ink,
+              side: const BorderSide(color: TovoTheme.line),
+            ),
+            icon: const Icon(Icons.map_outlined, size: 19),
+            label: const Text(
+              'Suivre sur la carte',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
       ],
     );
   }

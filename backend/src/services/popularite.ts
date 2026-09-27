@@ -1,5 +1,6 @@
 import { env } from '../config/env.js';
 import { serviceClient } from './supabase.js';
+import { toutLire } from '../ai/banc/lire.js';
 
 /**
  * Ce que les autres commandent : de quoi CLASSER, jamais un chiffre affiché.
@@ -25,12 +26,14 @@ let enCours: Promise<Map<string, number>> | null = null;
 
 async function lire(): Promise<Map<string, number>> {
   const depuis = new Date(Date.now() - FENETRE_JOURS * 86_400_000).toISOString();
-  const { data, error } = await serviceClient()
+  // Page par page : Supabase plafonne une réponse à 1 000 lignes.
+  const { data, error } = await toutLire((de, a) => serviceClient()
     .from('order_items')
-    .select('product_id, order_id, orders!inner(placed_at, status)')
+    .select('id, product_id, order_id, orders!inner(placed_at, status)')
     .gte('orders.placed_at', depuis)
     .neq('orders.status', 'cancelled')
-    .limit(20_000);
+    .order('id')
+    .range(de, a), 20_000);
   if (error) throw error;
   const commandes = new Map<string, Set<string>>();
   for (const ligne of (data ?? []) as Array<{ product_id: string | null; order_id: string }>) {
@@ -112,13 +115,14 @@ export async function commandesParBoutique(): Promise<Map<string, number>> {
   if (cacheBoutiques && Date.now() - cacheBoutiques.quand < DUREE_CACHE_MS) return cacheBoutiques.parBoutique;
   boutiquesEnCours ??= (async () => {
     const depuis = new Date(Date.now() - FENETRE_JOURS * 86_400_000).toISOString();
-    const { data, error } = await serviceClient()
+    const { data, error } = await toutLire((de, a) => serviceClient()
       .from('orders')
-      .select('merchant_id')
+      .select('id, merchant_id')
       .gte('placed_at', depuis)
       .neq('status', 'cancelled')
       .not('merchant_id', 'is', null)
-      .limit(20_000);
+      .order('id')
+      .range(de, a), 20_000);
     if (error) throw error;
     const parBoutique = new Map<string, number>();
     for (const { merchant_id: id } of (data ?? []) as Array<{ merchant_id: string }>) {

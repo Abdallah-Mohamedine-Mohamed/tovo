@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
 import '../../components/registry.dart';
 import '../../core/api.dart';
@@ -438,7 +439,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
       body: RefreshIndicator(
         onRefresh: () => _directory ? _start() : _load(reset: true),
         child: CustomScrollView(
-          cacheExtent: 700,
+          scrollCacheExtent: const ScrollCacheExtent.pixels(700),
           controller: _scroll,
           physics: const AlwaysScrollableScrollPhysics(),
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,

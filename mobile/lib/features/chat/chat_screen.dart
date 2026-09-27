@@ -11,6 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../components/registry.dart';
+import '../../components/widgets/suivi_sheet.dart';
 import '../../components/widgets/read_placeholder.dart';
 import '../../core/api.dart';
 import '../../core/catalog_image.dart';
@@ -175,6 +176,23 @@ class _ChatScreenState extends State<ChatScreen> {
 
   late final AppLifecycleListener _cycleDeVie;
 
+  /// Tant qu'une commande est en cours, la pastille de l'accueil relit son
+  /// étape toutes les 20 s : « En cuisine » ne doit pas rester affiché
+  /// quand le livreur est déjà en route.
+  Timer? _suiviAccueil;
+
+  void _surveillerCommande() {
+    final active = _commandeEnCours != null;
+    if (active && _suiviAccueil == null) {
+      _suiviAccueil = Timer.periodic(const Duration(seconds: 20), (_) {
+        if (mounted && _homeVisible) unawaited(_rafraichirCommandes());
+      });
+    } else if (!active) {
+      _suiviAccueil?.cancel();
+      _suiviAccueil = null;
+    }
+  }
+
   Future<void> _demarrer() async {
     final navigation = _navigation;
     await _accueil();
@@ -184,6 +202,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _cycleDeVie.dispose();
+    _suiviAccueil?.cancel();
     _minuterieParole?.cancel();
     unawaited(VoixTovo.liberer());
     _scroll.dispose();
@@ -280,6 +299,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _commandeEnCours = enCours;
       _derniereCommande = derniere;
     });
+    _surveillerCommande();
   }
 
   /// Une réponse qui montre un suivi (commande passée, annulée, suivie) :
@@ -1922,11 +1942,19 @@ class _ChatScreenState extends State<ChatScreen> {
                                       ? _derniereCommande
                                       : null,
                                   activeOrder: _commandeEnCours,
-                                  onTrack: (commande) => _appeler(
-                                    () => widget.api.get(
-                                      '/orders/${commande['id']}',
-                                    ),
-                                  ),
+                                  // La pastille ouvre la feuille et sa
+                                  // grande carte, sans rien écrire dans le
+                                  // fil. Refermée, l'accueil se remet à jour.
+                                  onTrack: (commande) async {
+                                    await ouvrirSuiviCommande(
+                                      context,
+                                      orderId: '${commande['id']}',
+                                      onInteraction: _interaction,
+                                    );
+                                    if (mounted) {
+                                      unawaited(_rafraichirCommandes());
+                                    }
+                                  },
                                   onReorder: (commande) async {
                                     if (!await _continuerMalgreCommandeEnCours()) {
                                       return;

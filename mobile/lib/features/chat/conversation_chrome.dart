@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show File;
 
 import 'package:flutter/material.dart';
@@ -6,7 +7,6 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../components/registry.dart' show Money;
 import '../../core/theme.dart';
-import '../../core/noms.dart';
 import '../../core/viewport_reveal.dart';
 
 enum ConversationSymbol {
@@ -436,9 +436,21 @@ class ConversationBackdrop extends StatelessWidget {
   );
 }
 
-/// « Commande en cours » : l'étape en une ligne, touchée pour suivre.
-class _ActiveOrderCard extends StatelessWidget {
-  const _ActiveOrderCard({required this.order, required this.onTap});
+/// La pastille « commande en cours », posée en bas de l'accueil.
+///
+/// Inspirée d'Uber (27/09) : une vignette, l'étape en cours, le temps écoulé
+/// depuis la commande — comme la Live Activity, jamais d'heure d'arrivée,
+/// qu'on ne sait pas promettre. Touchée, elle ouvre la feuille de suivi et
+/// sa grande carte.
+///
+/// Le vert Tovo, ici seulement : c'est la seule chose vivante de l'accueil,
+/// elle doit se voir sans crier. Aucune ombre, aucun dégradé.
+class _PastilleCommande extends StatefulWidget {
+  const _PastilleCommande({
+    super.key,
+    required this.order,
+    required this.onTap,
+  });
 
   final Map<String, dynamic> order;
   final VoidCallback onTap;
@@ -464,33 +476,73 @@ class _ActiveOrderCard extends StatelessWidget {
   }
 
   @override
+  State<_PastilleCommande> createState() => _PastilleCommandeState();
+}
+
+class _PastilleCommandeState extends State<_PastilleCommande> {
+  Timer? _seconde;
+
+  @override
+  void initState() {
+    super.initState();
+    _seconde = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _seconde?.cancel();
+    super.dispose();
+  }
+
+  /// « 12:34 », puis « 1:02:34 » au-delà d'une heure.
+  String? get _ecoule {
+    final depuis = DateTime.tryParse('${widget.order['placed_at'] ?? ''}');
+    if (depuis == null) return null;
+    final d = DateTime.now().difference(depuis);
+    if (d.isNegative) return '0:00';
+    String deux(int n) => n.toString().padLeft(2, '0');
+    final h = d.inHours;
+    final m = d.inMinutes % 60;
+    final sec = d.inSeconds % 60;
+    return h > 0 ? '$h:${deux(m)}:${deux(sec)}' : '$m:${deux(sec)}';
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final order = widget.order;
+    final statut = '${order['status']}';
     final colis = order['type'] == 'courier';
-    final boutique = enPhrase(order['merchant_name'] as String?);
+    // Le repas tant qu'il est en cuisine ; le scooter dès qu'il roule.
+    final roule =
+        colis || const {'assigned', 'picked_up', 'delivering'}.contains(statut);
+    final ecoule = _ecoule;
+    final etape = _PastilleCommande.etape(statut, colis: colis);
     return Semantics(
       button: true,
-      label: 'Suivre ma commande',
+      label: 'Suivre ma commande. $etape',
       child: Material(
-        color: const Color(0xFFF4F5F5),
-        borderRadius: BorderRadius.circular(20),
+        color: TovoTheme.teal,
+        borderRadius: BorderRadius.circular(22),
         child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: onTap,
+          borderRadius: BorderRadius.circular(22),
+          onTap: widget.onTap,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 14, 16, 14),
+            padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
             child: Row(
               children: [
                 Container(
-                  width: 52,
-                  height: 52,
-                  padding: const EdgeInsets.all(8),
-                  decoration: const BoxDecoration(
+                  width: 54,
+                  height: 54,
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
                     color: Colors.white,
-                    shape: BoxShape.circle,
+                    borderRadius: BorderRadius.circular(15),
                   ),
                   child: Image.asset(
-                    colis
-                        ? 'assets/icons/3d/colis.png'
+                    roule
+                        ? 'assets/icons/3d/scooter-livraison.png'
                         : 'assets/icons/3d/repas.png',
                   ),
                 ),
@@ -498,47 +550,54 @@ class _ActiveOrderCard extends StatelessWidget {
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        colis ? 'Votre livreur' : 'Commande en cours',
-                        style: const TextStyle(
-                          fontSize: 12.5,
-                          color: TovoTheme.inkDoux,
+                      AnimatedSwitcher(
+                        duration: TovoTheme.normal,
+                        child: Text(
+                          etape,
+                          key: ValueKey(etape),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            height: 1.25,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        etape('${order['status']}', colis: colis),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: TovoTheme.ink,
-                        ),
-                      ),
-                      if (!colis && boutique.isNotEmpty)
+                      if (ecoule != null) ...[
+                        const SizedBox(height: 2),
                         Text(
-                          boutique,
+                          '$ecoule min depuis la commande',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 13,
-                            color: TovoTheme.inkDoux,
+                            height: 1.3,
+                            color: Color(0xCCFFFFFF),
+                            fontFeatures: [FontFeature.tabularFigures()],
                           ),
                         ),
+                      ],
                     ],
                   ),
                 ),
-                const Text(
-                  'Suivre',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: TovoTheme.ink,
+                const SizedBox(width: 10),
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: const BoxDecoration(
+                    color: Color(0x24FFFFFF),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.arrow_forward_rounded,
+                    size: 21,
+                    color: Colors.white,
                   ),
                 ),
-                const Icon(Icons.chevron_right_rounded, color: TovoTheme.ink),
               ],
             ),
           ),
@@ -590,13 +649,16 @@ class ConversationHome extends StatelessWidget {
       offset: 16,
       child: child,
     );
-    return LayoutBuilder(
+    final suivie = activeOrder != null && onTrack != null;
+    final accueil = LayoutBuilder(
       builder: (context, constraints) => SingleChildScrollView(
         key: const PageStorageKey('conversation-home'),
         child: ConstrainedBox(
           constraints: BoxConstraints(minHeight: constraints.maxHeight),
           child: Padding(
-            padding: const EdgeInsets.only(top: 28, bottom: 68),
+            // Avec la pastille, de quoi faire défiler la dernière rangée
+            // au-dessus d'elle : elle ne cache jamais rien.
+            padding: EdgeInsets.only(top: 28, bottom: suivie ? 150 : 68),
             child: Column(
               mainAxisAlignment:
                   recent.isEmpty && lastOrder == null && activeOrder == null
@@ -642,17 +704,6 @@ class ConversationHome extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (activeOrder != null && onTrack != null)
-                  entre(
-                    1,
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(26, 28, 26, 0),
-                      child: _ActiveOrderCard(
-                        order: activeOrder!,
-                        onTap: () => onTrack!(activeOrder!),
-                      ),
-                    ),
-                  ),
                 if (lastOrder != null && onReorder != null)
                   entre(
                     1,
@@ -769,6 +820,27 @@ class ConversationHome extends StatelessWidget {
           ),
         ),
       ),
+    );
+    if (!suivie) return accueil;
+    return Stack(
+      children: [
+        accueil,
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: 12,
+          child: ViewportReveal(
+            delay: const Duration(milliseconds: 140),
+            duration: const Duration(milliseconds: 420),
+            offset: 16,
+            child: _PastilleCommande(
+              key: ValueKey(activeOrder!['id']),
+              order: activeOrder!,
+              onTap: () => onTrack!(activeOrder!),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

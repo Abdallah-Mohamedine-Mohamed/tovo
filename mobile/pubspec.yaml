@@ -63,6 +63,8 @@ dependencies:
   # compris sur les écrans à forte densité que le catalogue de demain
   # utilisera.
   flutter_svg: ^2.0.10
+  google_maps_flutter: ^2.18.2
+  google_maps_flutter_ios_sdk10: ^2.19.0
 
 dev_dependencies:
   flutter_test:

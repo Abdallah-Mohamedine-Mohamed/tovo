@@ -13,12 +13,13 @@
 const { serviceClient } = await import('../../src/services/supabase.js');
 const { ecrivain, juge } = await import('../../src/ai/banc/modelesForts.js');
 const { etiqueterALAveugle, memeSens } = await import('../../src/ai/banc/boucle.js');
+const { toutLire } = await import('../../src/ai/banc/lire.js');
 type Etiquette = import('../../src/ai/banc/guide.js').Etiquette;
 
 const sec = process.argv.includes('--sec');
 const db = serviceClient();
-const { data, error } = await db.from('banc_cas').select('id, texte, avant, attendu, statut')
-  .eq('statut', 'valide').in('attendu', ['social', 'suivi', 'designe']).limit(20_000);
+const { data, error } = await toutLire((de, a) => db.from('banc_cas').select('id, texte, avant, attendu, statut')
+  .eq('statut', 'valide').in('attendu', ['social', 'suivi', 'designe']).order('id').range(de, a));
 if (error) throw error;
 const cas = (data ?? []) as Array<{ id: string; texte: string; avant: string | null; attendu: string }>;
 console.log(`${cas.length} phrases à reprendre (social, suivi, designe)`);

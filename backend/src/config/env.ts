@@ -53,6 +53,12 @@ const schema = z.object({
   WHATSAPP_TEMPLATE_BUTTON: z.enum(['none', 'copy_code', 'url']).default('none'),
   WHATSAPP_GRAPH_VERSION: z.string().default('v21.0'),
 
+  // Tracé de l'itinéraire du livreur sur la carte de suivi (Routes API,
+  // Compute Routes « Essentials » : 10 000 calculs gratuits par mois). Clé
+  // serveur, restreinte à la seule Routes API. Absente : pas de tracé, la
+  // carte montre quand même le livreur.
+  GOOGLE_ROUTES_API_KEY: vide(z.string()),
+
   GEMINI_API_KEY: z.string().optional(),
   // Version explicite, jamais un alias comme `gemini-flash-latest` : un
   // alias change de modèle sans prévenir, et le comportement du function

@@ -30,6 +30,20 @@ if (hasReleaseKeystore) {
     keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
 }
 
+// ----------------------------------------------------------------------
+// Clé Google Maps (carte de suivi)
+// ----------------------------------------------------------------------
+// Dans android/local.properties (hors du dépôt) : MAPS_API_KEY=…
+// ou, sur une machine de build, la variable d'environnement MAPS_API_KEY.
+// Sans clé, l'app compile quand même : la carte reste simplement grise.
+val localProperties = Properties()
+rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use {
+    localProperties.load(it)
+}
+val mapsApiKey = (localProperties["MAPS_API_KEY"] as String?)
+    ?: System.getenv("MAPS_API_KEY")
+    ?: ""
+
 android {
     // Le namespace est celui de l'app CLIENT publiée. Il ne doit pas changer :
     // voir docs/app_identity.md.
@@ -54,6 +68,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["mapsApiKey"] = mapsApiKey
 
         // armeabi-v7a conservé volontairement : beaucoup d'appareils
         // d'entrée de gamme sont encore 32 bits. Les retirer économiserait
