@@ -45,6 +45,9 @@ enum VueCarte {
   /// Juste derrière le livreur, la carte tournée dans son sens de marche.
   derriere,
 
+  /// Vue aérienne : tout le trajet d'en haut, à plat, nord en haut.
+  aerienne,
+
   /// Le client a pris la main (zoom, rotation, inclinaison au doigt).
   libre,
 }
@@ -59,11 +62,12 @@ enum VueCarte {
 ///   « derrière le livreur », tournée dans son sens de marche.
 /// - Le livreur avance à chaque image le long de la route
 ///   (LivreurSurRoute), sans bonds.
-/// - Le livreur est un Vespa 3D (« Vespa », Jasmine Roberts, CC-BY), rendu
+/// - Le livreur est une moto 3D (« Motorcycle », Poly by Google, CC-BY), rendue
 ///   sous 4 inclinaisons × 36 directions : on affiche la vue qui correspond
 ///   à l'angle réel de la caméra — de profil dans un virage, de dos quand
 ///   il s'éloigne. Debout face à l'écran, il ne s'écrase jamais.
-/// - La nuit, ses phares éclairent la route devant lui.
+/// - En route, l'arrivée estimée : « Arrivée dans 12 min » (durée Google
+///   Routes du trajet, au prorata de ce qui reste).
 ///
 /// Le logo Google reste visible : les conditions de Google Maps l'exigent.
 class CarteSuivi extends StatefulWidget {
@@ -112,7 +116,7 @@ class _CarteSuiviState extends State<CarteSuivi>
     with SingleTickerProviderStateMixin {
   static const _fondu = Duration(milliseconds: 600);
 
-  /// Les inclinaisons de caméra sous lesquelles le Vespa a été rendu.
+  /// Les inclinaisons de caméra sous lesquelles la moto a été rendue.
   static const _inclinaisons = [0, 30, 45, 60];
 
   final _api = TovoApi();
@@ -126,9 +130,11 @@ class _CarteSuiviState extends State<CarteSuivi>
   final Map<String, Offset> _ancres = {};
   ThemeCarte? _pastillesDuTheme;
 
-  /// [inclinaison][direction] : 4 × 36 vues du Vespa.
+  /// [inclinaison][direction] : 4 × 36 vues de la moto.
   List<List<BitmapDescriptor>> _vespa = const [];
-  BitmapDescriptor? _phares;
+
+  /// Durée du trajet selon Google Routes, en secondes (pour l'arrivée).
+  double? _dureeTrajetS;
 
   TraceMesure? _trajet;
   TraceMesure? _approche;
@@ -204,8 +210,8 @@ class _CarteSuiviState extends State<CarteSuivi>
     return estLeJour(ici.lat, ici.lng) ? ThemeCarte.clair : ThemeCarte.sombre;
   }
 
-  /// Les 144 vues du Vespa, 100 points de côté (il y fait ~80 points de
-  /// long, quel que soit le zoom), et le faisceau de ses phares.
+  /// Les 144 vues de la moto, 100 points de côté (elle y fait ~80 points de
+  /// long, quel que soit le zoom).
   Future<void> _chargerVespa() async {
     Future<BitmapDescriptor> vue(int inclinaison, int direction) =>
         BitmapDescriptor.asset(
@@ -219,48 +225,8 @@ class _CarteSuiviState extends State<CarteSuivi>
       for (final t in _inclinaisons)
         Future.wait([for (var i = 0; i < 36; i++) vue(t, i)]),
     ]);
-    final phares = await _dessinerPhares();
     if (!mounted) return;
-    setState(() {
-      _vespa = vues;
-      _phares = phares;
-    });
-  }
-
-  /// Le faisceau des phares, couché sur la route devant le livreur : blanc
-  /// chaud qui s'estompe au loin. Posé à plat, il suit la perspective.
-  Future<BitmapDescriptor> _dessinerPhares() async {
-    final ratio = MediaQuery.maybeDevicePixelRatioOf(context) ?? 3;
-    const largeur = 110.0;
-    const longueur = 170.0;
-    final r = ui.PictureRecorder();
-    final c = Canvas(r)..scale(ratio);
-    final faisceau = Path()
-      ..moveTo(largeur / 2 - 7, longueur)
-      ..lineTo(4, 18)
-      ..quadraticBezierTo(largeur / 2, -6, largeur - 4, 18)
-      ..lineTo(largeur / 2 + 7, longueur)
-      ..close();
-    c.drawPath(
-      faisceau,
-      Paint()
-        ..shader = ui.Gradient.linear(
-          const Offset(0, longueur),
-          Offset.zero,
-          const [Color(0x99FFF1C4), Color(0x33FFE9A8), Color(0x00FFE9A8)],
-          const [0, 0.55, 1],
-        )
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
-    );
-    final image = await r.endRecording().toImage(
-      (largeur * ratio).round(),
-      (longueur * ratio).round(),
-    );
-    final octets = await image.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.bytes(
-      octets!.buffer.asUint8List(),
-      imagePixelRatio: ratio,
-    );
+    setState(() => _vespa = vues);
   }
 
   Future<void> _preparerPastilles() async {
@@ -342,6 +308,10 @@ class _CarteSuiviState extends State<CarteSuivi>
 
     setState(() {
       _trajet = lire(reponse.raw['trajet']);
+      final trajet = reponse.raw['trajet'];
+      _dureeTrajetS = trajet is Map
+          ? (trajet['duree_s'] as num?)?.toDouble()
+          : null;
       _approche = lire(reponse.raw['approche']);
       _cleTraces = '';
     });
@@ -485,6 +455,27 @@ class _CarteSuiviState extends State<CarteSuivi>
     final client = widget.client;
     CameraPosition vue(Point p, double zoom, double tilt) =>
         CameraPosition(target: LatLng(p.lat, p.lng), zoom: zoom, tilt: tilt);
+
+    // Vue aérienne : tout ce qui compte encore — le livreur, la boutique
+    // tant qu'il n'y est pas passé, le client — d'en haut, à plat.
+    if (_vue == VueCarte.aerienne) {
+      final points = [
+        if (_livreurVisible(etape, livreur)) livreur!,
+        if (!_recupere && depart != null) depart,
+        ?client,
+      ];
+      if (points.isEmpty) return null;
+      var sud = points.first;
+      var nord = points.first;
+      for (final p in points) {
+        sud = (lat: math.min(sud.lat, p.lat), lng: math.min(sud.lng, p.lng));
+        nord = (lat: math.max(nord.lat, p.lat), lng: math.max(nord.lng, p.lng));
+      }
+      return CameraPosition(
+        target: LatLng((sud.lat + nord.lat) / 2, (sud.lng + nord.lng) / 2),
+        zoom: points.length == 1 ? 15.5 : _zoomPour(sud, nord, marge: 110),
+      );
+    }
 
     // Derrière le livreur : la carte tournée dans son sens de marche,
     // inclinée, le livreur un peu en bas de l'écran pour voir la route
@@ -725,7 +716,7 @@ class _CarteSuiviState extends State<CarteSuivi>
     }
     final cap = _capLisse ?? 0;
     final camera = _camera;
-    // La vue du Vespa qui correspond à la caméra : son cap VU DE LA CAMÉRA
+    // La vue de la moto qui correspond à la caméra : son cap VU DE LA CAMÉRA
     // (cap − orientation de la carte), sous l'inclinaison la plus proche.
     final relatif = (cap - (camera?.bearing ?? 0) + 720) % 360;
     final direction = (relatif / 10).round() % 36;
@@ -736,22 +727,6 @@ class _CarteSuiviState extends State<CarteSuivi>
           (_inclinaisons[rang] - tilt).abs()) {
         rang = i;
       }
-    }
-    final phares = _phares;
-    if (_theme.nuit && phares != null) {
-      marqueurs.add(
-        Marker(
-          markerId: const MarkerId('phares'),
-          position: LatLng(livreur!.lat, livreur.lng),
-          icon: phares,
-          // La base du faisceau sous l'avant du scooter.
-          anchor: const Offset(0.5, 0.93),
-          rotation: cap,
-          flat: true,
-          zIndexInt: 3,
-          consumeTapEvents: true,
-        ),
-      );
     }
     marqueurs.add(
       Marker(
@@ -769,6 +744,30 @@ class _CarteSuiviState extends State<CarteSuivi>
 
   void _changerDeVue(VueCarte vue) => setState(() => _vue = vue);
 
+  /// Minutes avant l'arrivée, en route seulement : avant, l'attente à la
+  /// boutique rendrait toute heure fausse. La durée Google du trajet, au
+  /// prorata de ce qui reste ; sans elle, la distance à 22 km/h, détours
+  /// compris (comme la Live Activity).
+  int? _minutesRestantes(EtapeCarte etape, Point? livreur) {
+    if (etape != EtapeCarte.enRoute && etape != EtapeCarte.proche) return null;
+    final surRoute = _surRoute;
+    final trajet = _trajet;
+    final duree = _dureeTrajetS;
+    double? secondes;
+    if (surRoute != null &&
+        trajet != null &&
+        identical(surRoute.trace, trajet) &&
+        surRoute.d != null &&
+        duree != null &&
+        trajet.longueur > 0) {
+      secondes = duree * (trajet.longueur - surRoute.d!) / trajet.longueur;
+    } else if (livreur != null && widget.client != null) {
+      secondes = metres(livreur, widget.client!) * 1.35 / (22 / 3.6);
+    }
+    if (secondes == null) return null;
+    return math.max(1, (secondes / 60).ceil());
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_pastillesDuTheme != _theme) unawaited(_preparerPastilles());
@@ -778,6 +777,7 @@ class _CarteSuiviState extends State<CarteSuivi>
     final fondAvant = _fondAvant;
     final marges = MediaQuery.paddingOf(context);
     final visible = _livreurVisible(etape, livreur);
+    final minutes = _minutesRestantes(etape, livreur);
     return LayoutBuilder(
       builder: (context, contraintes) {
         _taille = contraintes.biggest;
@@ -887,30 +887,61 @@ class _CarteSuiviState extends State<CarteSuivi>
                     ),
                   ),
                 ),
-              // Derrière le livreur ⇄ vue d'ensemble.
-              if (visible)
+              // Arrivée estimée, en haut à droite, à hauteur du retour.
+              if (minutes != null)
                 Positioned(
+                  top: marges.top + 8,
                   right: 16,
-                  bottom: marges.bottom + 28,
-                  child: _BoutonRond(
-                    theme: t,
-                    etiquette: _vue == VueCarte.derriere
-                        ? 'Vue d’ensemble'
-                        : 'Suivre derrière le livreur',
-                    onTap: () => _changerDeVue(
-                      _vue == VueCarte.derriere
-                          ? VueCarte.ensemble
-                          : VueCarte.derriere,
-                    ),
-                    child: Icon(
-                      _vue == VueCarte.derriere
-                          ? CupertinoIcons.map
-                          : CupertinoIcons.location_north_fill,
-                      size: 20,
-                      color: t.boutonTexte,
-                    ),
-                  ),
+                  child: _Arrivee(theme: t, minutes: minutes),
                 ),
+              // Deux vues au choix ; touchée à nouveau, la vue active rend
+              // la main à la caméra automatique.
+              Positioned(
+                right: 16,
+                bottom: marges.bottom + 28,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _BoutonRond(
+                      theme: t,
+                      actif: _vue == VueCarte.aerienne,
+                      etiquette: 'Vue aérienne',
+                      onTap: () => _changerDeVue(
+                        _vue == VueCarte.aerienne
+                            ? VueCarte.ensemble
+                            : VueCarte.aerienne,
+                      ),
+                      child: Icon(
+                        CupertinoIcons.map,
+                        size: 20,
+                        color: _vue == VueCarte.aerienne
+                            ? t.boutonFond.withValues(alpha: 1)
+                            : t.boutonTexte,
+                      ),
+                    ),
+                    if (visible) ...[
+                      const SizedBox(height: 10),
+                      _BoutonRond(
+                        theme: t,
+                        actif: _vue == VueCarte.derriere,
+                        etiquette: 'Suivre derrière le livreur',
+                        onTap: () => _changerDeVue(
+                          _vue == VueCarte.derriere
+                              ? VueCarte.ensemble
+                              : VueCarte.derriere,
+                        ),
+                        child: Icon(
+                          CupertinoIcons.location_north_fill,
+                          size: 20,
+                          color: _vue == VueCarte.derriere
+                              ? t.boutonFond.withValues(alpha: 1)
+                              : t.boutonTexte,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
               Positioned(
                 left: 16,
                 bottom: marges.bottom + 28,
@@ -939,9 +970,13 @@ class _BoutonRond extends StatelessWidget {
     required this.etiquette,
     required this.onTap,
     required this.child,
+    this.actif = false,
   });
 
   final ThemeCarte theme;
+
+  /// La vue en cours : bouton plein, en contraste inversé.
+  final bool actif;
   final String etiquette;
   final VoidCallback onTap;
   final Widget child;
@@ -953,8 +988,10 @@ class _BoutonRond extends StatelessWidget {
     child: Tooltip(
       message: etiquette,
       child: Material(
-        color: theme.boutonFond,
-        shape: CircleBorder(side: BorderSide(color: theme.boutonBord)),
+        color: actif ? theme.boutonTexte : theme.boutonFond,
+        shape: CircleBorder(
+          side: BorderSide(color: actif ? theme.boutonTexte : theme.boutonBord),
+        ),
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: onTap,
@@ -994,6 +1031,47 @@ class _BoutonRecentrer extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    ),
+  );
+}
+
+/// « Arrivée dans 12 min », à hauteur du bouton retour.
+class _Arrivee extends StatelessWidget {
+  const _Arrivee({required this.theme, required this.minutes});
+
+  final ThemeCarte theme;
+  final int minutes;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    label: 'Arrivée dans $minutes minutes',
+    child: ExcludeSemantics(
+      child: Container(
+        height: 46,
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        decoration: ShapeDecoration(
+          color: theme.boutonFond,
+          shape: StadiumBorder(side: BorderSide(color: theme.boutonBord)),
+        ),
+        alignment: Alignment.center,
+        child: Text.rich(
+          TextSpan(
+            children: [
+              const TextSpan(text: 'Arrivée dans '),
+              TextSpan(
+                text: '$minutes min',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          style: TextStyle(
+            fontSize: 15,
+            color: theme.boutonTexte,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
         ),
       ),
     ),
