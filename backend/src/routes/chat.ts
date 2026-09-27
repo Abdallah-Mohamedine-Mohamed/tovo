@@ -24,9 +24,12 @@ import { ombreJev, type Intention } from '../ai/jev.js';
 import { ouvrirSessionVoix, vocabulaire } from '../services/voixDirecte.js';
 import { decider, indication, intentionChoisie, routeDuCerveau, type Route } from '../ai/aiguillage.js';
 import { cerveauActif, comprendre } from '../ai/decideur.js';
+import { exemplesPour } from '../ai/banc/exemples.js';
 import { aiguiller, cascadeActive } from '../ai/cascade.js';
 import { rechercheProduitRapide } from '../ai/orchestrator.js';
 import { cataloguePage, type CataloguePage } from '../services/catalogue.js';
+import { serviceClient } from '../services/supabase.js';
+import { orderTracking, type Component } from '../components/builders.js';
 
 /**
  * POST /chat — le fil conversationnel.
@@ -361,10 +364,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // répond peut-être à « Où récupérer le colis ? ».
     // AIGUILLAGE=cascade : l'ancien aiguillage (classifieur local + Jev).
     const cerveau = Boolean(body.data.text) && cerveauActif();
+    // En même temps : le dernier message de Tovo, et les phrases validées de
+    // la banque les plus proches (ai/banc/exemples.ts, ~20 ms, sans réseau).
     const decisionCerveau = cerveau
-      ? dernierMessageTovo(db, body.data.conversation_id)
-        .catch(() => null)
-        .then((avant) => comprendre(body.data.text!, { avant }))
+      ? Promise.all([
+        dernierMessageTovo(db, body.data.conversation_id).catch(() => null),
+        env.CERVEAU_EXEMPLES === 'oui' ? exemplesPour(body.data.text!).catch(() => []) : Promise.resolve([]),
+      ])
+        .then(([avant, exemples]) => comprendre(body.data.text!, { avant, exemples }))
         .catch(() => null)
       : Promise.resolve(null);
     const decisionCascade = body.data.text && !cerveau && cascadeActive()
@@ -704,6 +711,57 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         conversation_id: conversationId, role: 'assistant', content: contenu, components: resultat.components,
       });
       request.log.info({ conversationId }, 'annulation : confirmation demandée');
+      return output.finish({ conversation_id: conversationId, ...envelope(contenu, resultat.components) });
+    }
+
+    // « On m'a livré du poulet au lieu du poisson », « le paiement Nita est
+    // bloqué » : des excuses claires, la commande concernée, et le problème
+    // remonte à l'admin (table signalements). Pas de modèle : il n'y a rien à
+    // interpréter, et surtout rien à promettre à la place de l'équipe.
+    if (intention === 'aide' && texteClient) {
+      const depuis48h = new Date(Date.now() - 48 * 3_600_000).toISOString();
+      const { data: recentes } = await db.from('orders').select('id').gte('placed_at', depuis48h)
+        .order('placed_at', { ascending: false }).limit(1);
+      const orderId = (recentes?.[0]?.id as string | undefined) ?? null;
+      const suivi = orderId ? await db.rpc('order_tracking', { p_order_id: orderId }) : null;
+      const composants: Component[] = suivi?.data ? [orderTracking(suivi.data as Record<string, unknown>)] : [];
+      const { error: erreurSignalement } = await serviceClient().from('signalements').insert({
+        user_id: userId, conversation_id: conversationId, order_id: orderId, message: texteClient.slice(0, 2000),
+      });
+      if (erreurSignalement) {
+        request.log.error({ erreur: erreurSignalement.message }, 'signalement impossible (migration 0067 appliquée ?)');
+      }
+      const contenu = erreurSignalement
+        ? 'Désolé pour ce souci. Je n’arrive pas à le transmettre pour le moment : réessayez dans un instant.'
+        : `Désolé pour ce souci. Je l’ai transmis à l’équipe Tovo, qui va s’en occuper.${orderId ? ' Voici la commande concernée.' : ''}`;
+      emit({ type: 'conversation', conversation_id: conversationId });
+      emit({ type: 'results', components: composants });
+      emit({ type: 'text', text: contenu });
+      await db.from('messages').insert({
+        conversation_id: conversationId, role: 'user', content: contenuClient, client_message_id: body.data.client_message_id,
+      });
+      await db.from('messages').insert({
+        conversation_id: conversationId, role: 'assistant', content: contenu, components: composants,
+      });
+      request.log.info({ conversationId, orderId, signale: !erreurSignalement }, 'aide : problème signalé');
+      return output.finish({ conversation_id: conversationId, ...envelope(contenu, composants) });
+    }
+
+    // « Où est mon panier ? », « je veux payer » : le panier, sans modèle.
+    if (intention === 'panier') {
+      const resultat = await EXECUTORS['voir_panier']!({}, {
+        db, userId, currentMessage: texteClient, ...(body.data.context ? { position: body.data.context } : {}),
+      });
+      const contenu = resultat.components.length > 0 ? 'Voici votre panier.' : 'Votre panier est vide pour le moment.';
+      emit({ type: 'conversation', conversation_id: conversationId });
+      emit({ type: 'results', components: resultat.components });
+      emit({ type: 'text', text: contenu });
+      await db.from('messages').insert({
+        conversation_id: conversationId, role: 'user', content: contenuClient, client_message_id: body.data.client_message_id,
+      });
+      await db.from('messages').insert({
+        conversation_id: conversationId, role: 'assistant', content: contenu, components: resultat.components,
+      });
       return output.finish({ conversation_id: conversationId, ...envelope(contenu, resultat.components) });
     }
 

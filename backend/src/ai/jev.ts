@@ -20,11 +20,17 @@ export const INTENTIONS = {
   boutique: 'Veut voir une boutique ou un restaurant précis, nommé (sa carte, ses produits, s’il est ouvert)',
   livreur: 'Demande qu’un livreur ou un coursier vienne le voir, sans commande de boutique',
   colis: 'Veut envoyer ou faire livrer un colis, un paquet ou un document à quelqu’un',
-  designe: 'Désigne un article qu’on vient de lui montrer (le deuxième, celui-là, ajoute-le, le moins cher)',
+  designe: 'Désigne un article qu’on vient de lui montrer (le deuxième, celui-là, ajoute-le, le moins cher, enlève le jus)',
+  panier: 'Veut voir, vérifier ou valider son panier (où est mon panier, je veux payer, valider ma commande)',
   habitude: 'Veut refaire une commande passée (comme d’habitude, la même chose que la dernière fois)',
-  suivi: 'Demande où en est sa commande en cours ou son livreur actuel',
+  suivi: 'Demande où en est sa commande en cours ou son livreur actuel (quand elle arrive, où est le livreur)',
   annuler: 'Veut annuler sa commande',
-  social: 'Salutation, remerciement, plainte ou bavardage, sans demande',
+  // Ajoutées le 27/09 : la rafale de 1 000 phrases montrait des réclamations
+  // et des questions sans bonne case (« on m'a amené une crêpe au lieu du
+  // chawarma » finissait en « suivi »).
+  aide: 'Signale un problème ou réclame : mauvaise commande, article manquant ou abîmé, paiement Nita bloqué, monnaie, souci avec un livreur, veut modifier une commande déjà passée',
+  question: 'Pose une question sur Tovo lui-même : frais de livraison, zones, horaires, moyens de paiement, comment ça marche, devenir livreur ou boutique partenaire',
+  social: 'Salutation, remerciement, humeur ou bavardage, ou sujet sans rapport avec Tovo, sans demande',
 } as const;
 
 export type Intention = keyof typeof INTENTIONS;

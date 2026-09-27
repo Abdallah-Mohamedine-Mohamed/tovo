@@ -300,7 +300,8 @@ describe('POST /chat — le cerveau', () => {
     const db = fausseBase();
     const app = await appAvec(db);
     await envoyer(app, { text: 'Yantala.', conversation_id: '33333333-3333-4333-8333-333333333333' });
-    expect(cerveau.contextes[0]).toEqual({ avant: 'Où le livreur doit-il récupérer le colis ?' });
+    // Aucun exemple ici : CERVEAU_EXEMPLES est éteint par défaut.
+    expect(cerveau.contextes[0]).toEqual({ avant: 'Où le livreur doit-il récupérer le colis ?', exemples: [] });
     await app.close();
   });
 });

@@ -8,6 +8,7 @@ import { chargerClassifieur } from './ai/classifieur.js';
 import { lireReglage } from './ai/decideur.js';
 import { entretenirLigneGoogle } from './lib/ligneGoogle.js';
 import { demarrerBancIa } from './services/bancIa.js';
+import { demarrerExemples } from './ai/banc/exemples.js';
 
 const app = await buildApp();
 
@@ -34,6 +35,10 @@ entretenirLigneGoogle(env.GEMINI_API_KEY, lireReglage(env.CERVEAU_MODELE)[0]);
 // L'examen du cerveau grandit en continu : un passage toutes les 30 minutes
 // par défaut, réglable dans l'admin (services/bancIa.ts).
 demarrerBancIa(app.log);
+
+// Les exemples tirés au bon moment : l'index se charge en arrière-plan et se
+// complète toutes les 10 minutes (CERVEAU_EXEMPLES=oui).
+if (env.CERVEAU_EXEMPLES === 'oui') demarrerExemples(app.log);
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {

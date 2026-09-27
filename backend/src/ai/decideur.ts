@@ -1,6 +1,7 @@
 import { env } from '../config/env.js';
 import { INTENTIONS, type Intention } from './jev.js';
 import { viaLigneGoogle } from '../lib/ligneGoogle.js';
+import { blocExemples, type Exemple } from './banc/exemples.js';
 
 /**
  * Le cerveau : un modèle COMPREND le message et décide de la route.
@@ -43,13 +44,19 @@ export const CONSIGNE_CERVEAU = [
   'Règles :',
   '- livreur / colis : le client veut qu’un livreur SE DÉPLACE pour lui (venir le voir, aller chercher ou déposer un objet à lui). Faire livrer un PRODUIT du catalogue, même avec « livre-moi », « apporte-moi » ou « envoie … chez ma mère », c’est recherche.',
   '- Un objet qui ressemble à un mot de livraison reste un produit : un livre, un litre, un paquet de biscuits, un sac ou un « colis » de riz → recherche.',
-  '- Parler d’un livreur DÉJÀ en route (où il est, retard, ne répond pas) → suivi. Parler du MÉTIER de livreur (travailler, être recruté, « je suis livreur ») ou le remercier → social.',
-  '- annuler : annuler TOUTE la commande. Retirer ou changer UN article (« enlève le jus », « annule la fanta », « pas de frites ») → designe.',
+  '- Où en est la commande, quand elle arrive, où est le livreur → suivi. Un PROBLÈME (mauvaise commande, article manquant, livreur injoignable depuis longtemps, monnaie, paiement Nita bloqué, modifier une commande déjà passée) → aide.',
+  '- question : SEULEMENT le service Tovo lui-même (frais de livraison, zones desservies, horaires de livraison, comment payer, devenir livreur ou boutique partenaire). Une question sur ce que Tovo PROPOSE (boutiques ouvertes, produits, catégories, prix d’un produit) → envie, recherche ou boutique, jamais question.',
+  '- Remercier, saluer, bavarder, parler à l’assistant de lui-même ou de ce qu’il vient de dire (« d’où tu tiens ça ? », « tu connais ? », « tu es bête ») → social.',
+  '- annuler : annuler TOUTE la commande. Retirer ou changer UN article du panier ou de l’écran (« enlève le jus », « annule la fanta », « pas de frites ») → designe. Voir ou valider son panier → panier.',
   '- Un message court qui répond à la question précédente de Tovo s’interprète avec elle (un quartier après « Où récupérer le colis ? » → livreur).',
   '- Fautes, français parlé, transcriptions vocales approximatives, haoussa et zarma : comprends le sens.',
   '',
   'Exemples :',
-  '« Je suis coursier, vous recrutez ? » → social',
+  '« Je suis coursier, vous recrutez ? » → question',
+  '« On m’a livré du poulet alors que j’ai pris du poisson » → aide',
+  '« C’est combien la livraison à Kalley ? » → question',
+  '« Quels restaurants sont ouverts là ? » → envie',
+  '« Je veux payer maintenant » → panier',
   '« Apporte-moi des brochettes » → recherche',
   '« un sac de sucre de 50 kg » → recherche',
   '« Le coursier ne décroche pas » → suivi',
@@ -64,6 +71,11 @@ export const CONSIGNE_CERVEAU = [
 export interface ContexteCerveau {
   /** Le dernier message de Tovo : ce à quoi le client répond peut-être. */
   avant?: string | null;
+  /**
+   * Les phrases validées de la banque les plus proches, et ce qu'elles
+   * voulaient dire (ai/banc/exemples.ts).
+   */
+  exemples?: Exemple[];
 }
 
 export interface DecisionCerveau {
@@ -103,7 +115,9 @@ export function lireDecision(texte: string): { intention: Intention; sur: boolea
 /** Le texte envoyé au modèle : le message, et ce à quoi il répond. */
 export function messagePourCerveau(message: string, contexte: ContexteCerveau = {}): string {
   const avant = contexte.avant?.replace(/\s+/g, ' ').trim().slice(0, 300);
-  return avant ? `Dernier message de Tovo : « ${avant} »\nMessage du client : « ${message} »` : message;
+  const texte = avant ? `Dernier message de Tovo : « ${avant} »\nMessage du client : « ${message} »` : message;
+  const exemples = blocExemples(contexte.exemples ?? []);
+  return exemples ? `${exemples}\n\n${avant ? texte : `Message du client : « ${message} »`}` : texte;
 }
 
 /**

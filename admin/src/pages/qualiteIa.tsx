@@ -26,9 +26,12 @@ const INTENTIONS: Record<string, string> = {
   livreur: 'Veut un livreur',
   colis: 'Envoie un colis',
   designe: 'Désigne ce qu’il voit',
+  panier: 'Voir ou valider son panier',
   habitude: 'Refaire une commande',
   suivi: 'Suivi de commande',
   annuler: 'Annuler la commande',
+  aide: 'Problème, réclamation',
+  question: 'Question sur Tovo',
   social: 'Rien à commander',
 };
 const OPTIONS = Object.entries(INTENTIONS).map(([value, label]) => ({ value, label }));

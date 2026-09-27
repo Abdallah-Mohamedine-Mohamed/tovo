@@ -66,9 +66,12 @@ export const LIBELLES: Record<Intention, string> = {
   livreur: 'Commander un livreur',
   colis: 'Envoyer un colis',
   designe: 'Choisir parmi ce que je vois',
+  panier: 'Voir mon panier',
   habitude: 'Recommander comme d’habitude',
   suivi: 'Suivre ma commande',
   annuler: 'Annuler ma commande',
+  aide: 'Signaler un problème',
+  question: 'Une question sur Tovo',
   social: 'Rien de précis',
 };
 

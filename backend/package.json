@@ -39,7 +39,11 @@
     "classifieur:distiller": "tsx --env-file=.env scripts/classifieur/distiller.ts",
     "banc:ia": "tsx --env-file=.env scripts/banc-ia/banc.ts",
     "banc:recolter": "tsx --env-file=.env scripts/banc-ia/recolter.ts",
-    "banc:boucle": "tsx --env-file=.env scripts/banc-ia/boucle.ts"
+    "banc:boucle": "tsx --env-file=.env scripts/banc-ia/boucle.ts",
+    "banc:exemples": "tsx --env-file=.env scripts/banc-ia/exemples.ts",
+    "banc:reetiqueter": "tsx --env-file=.env scripts/banc-ia/reetiqueter.ts",
+    "banc:massive": "tsx --env-file=.env scripts/banc-ia/massive.ts",
+    "lieux:importer": "tsx --env-file=.env scripts/lieux/importer.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",

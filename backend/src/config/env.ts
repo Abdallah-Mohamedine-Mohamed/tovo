@@ -133,6 +133,11 @@ const schema = z.object({
   CERVEAU_DELAI_MAX_MS: sansVide(z.coerce.number().int().positive().default(4000)),
   // Dernier recours si Google est en panne (exige OPENAI_API_KEY).
   CERVEAU_SECOURS_OPENAI: sansVide(z.string().default('gpt-5.5')),
+  // Exemples tirés au bon moment (ai/banc/exemples.ts) : le cerveau voit les
+  // phrases validées de la banque les plus proches du message. Charge le
+  // petit modèle local e5-small (~300 Mo de mémoire). Activé seulement si
+  // le banc (npm run banc:exemples) montre un gain.
+  CERVEAU_EXEMPLES: sansVide(z.enum(['oui', 'non']).default('non')),
 
   REDIS_URL: z.string().optional(),
   SENTRY_DSN: z.string().optional(),

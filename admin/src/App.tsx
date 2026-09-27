@@ -21,6 +21,7 @@ import { MerchantList } from './pages/merchants';
 import { CashList, DriverList } from './pages/drivers';
 import { SettingsEdit } from './pages/settings';
 import { QualiteIa } from './pages/qualiteIa';
+import { Signalements } from './pages/signalements';
 
 /**
  * Administration Tovo.
@@ -89,6 +90,11 @@ export const App = () => (
               meta: { label: 'Prix concurrents' },
             },
             {
+              name: 'signalements',
+              list: '/signalements',
+              meta: { label: 'Signalements' },
+            },
+            {
               name: 'banc_cas',
               list: '/qualite-ia',
               meta: { label: 'Qualité de l’IA' },
@@ -124,6 +130,7 @@ export const App = () => (
               <Route path="/offers" element={<OfferList />} />
               <Route path="/settings" element={<SettingsEdit />} />
               <Route path="/qualite-ia" element={<QualiteIa />} />
+              <Route path="/signalements" element={<Signalements />} />
               <Route path="*" element={<ErrorComponent />} />
             </Route>
 
