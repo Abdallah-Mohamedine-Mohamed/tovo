@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- App livreur seulement : pendant une course, la position part en
+         continu vers la carte du client, même écran éteint ou app en
+         arrière-plan. Un service de premier plan (notification « Course en
+         cours », geolocator) le permet ; Android 14 exige la permission de
+         son type, « location ». L'app client n'en a pas besoin et ne la
+         déclare pas. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+</manifest>

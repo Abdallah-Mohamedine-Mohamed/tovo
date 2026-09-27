@@ -113,6 +113,10 @@ flutter:
     # Icônes 3D des catégories et sous-catégories, à la Glovo : Fluent Emoji
     # de Microsoft (licence MIT, voir assets/icons/3d/LICENSE), 256 px.
     - assets/icons/3d/
+    # Le scooter de la carte de suivi, vu du dessus sous 36 angles (tous les
+    # 10°), rendu depuis « Low poly scooter » de Thomas Saint Pierre (s1pierro),
+    # Poly Pizza — licence à créditer dans les mentions légales.
+    - assets/carte/scooter/
     - assets/branding/
 
   # DM Sans, embarquée et non chargée à l'exécution.

@@ -203,6 +203,113 @@ class TraceMesure {
   }
 }
 
+/// Le livreur sur la carte du client, le long de la route : il avance à
+/// CHAQUE IMAGE, jamais par bonds (retour du 27/09 : « ça saute, puis rien »).
+///
+/// - Chaque position GPS reçue est projetée sur le tracé : c'est la distance
+///   cible.
+/// - La distance affichée avance vers la cible à vitesse constante, sur la
+///   durée moyenne entre deux positions : elle y arrive à peu près quand la
+///   suivante tombe.
+/// - La suivante tarde : il continue sur sa lancée (vitesse du GPS, sinon
+///   celle mesurée) pendant 10 s au plus, puis ralentit jusqu'à l'arrêt.
+/// - Un recul de moins de 15 m (le GPS tremble) est ignoré. Parti trop loin
+///   devant, il s'arrête et attend que la réalité le rattrape.
+/// - Le cap suit la route (entre −3 m et +3 m), lissé : il tourne, il ne
+///   pivote pas d'un coup.
+class LivreurSurRoute {
+  LivreurSurRoute(this.trace);
+
+  final TraceMesure trace;
+
+  double? _d;
+  double? _cible;
+  double _vitesseAvance = 0;
+  double _vitesseRoute = 0;
+  double _intervalle = 3;
+  DateTime? _derniereReception;
+  bool _attend = false;
+  double? _cap;
+
+  /// La distance affichée depuis le départ du tracé.
+  double? get d => _d;
+
+  Point? get position => _d == null ? null : trace.pointA(_d!);
+
+  /// Le cap lissé, en degrés (0 = nord).
+  double? get capDegres => _cap;
+
+  /// Une position reçue. Faux quand elle est à plus de 50 m de la route :
+  /// il a pris une autre rue, il faut un nouveau tracé.
+  bool recevoir(Point p, {double? vitesseKmh, DateTime? maintenant}) {
+    final t = maintenant ?? DateTime.now();
+    final projection = trace.projeter(p);
+    if (projection.ecart > 50) return false;
+    final avant = _derniereReception;
+    final ecart = avant == null
+        ? null
+        : (t.difference(avant).inMilliseconds / 1000).clamp(0.5, 20.0);
+    if (ecart != null) _intervalle = _intervalle * 0.7 + ecart * 0.3;
+    final ancienneCible = _cible;
+    if (_d == null || ancienneCible == null) {
+      _d = projection.d;
+      _cible = projection.d;
+      _vitesseAvance = 0;
+    } else {
+      final recul = ancienneCible - projection.d;
+      if (recul <= 0 || recul >= 15) _cible = projection.d;
+      final mesuree = ecart == null
+          ? 0.0
+          : ((_cible! - ancienneCible) / ecart).clamp(0.0, 25.0);
+      _vitesseRoute = vitesseKmh != null && vitesseKmh > 1
+          ? vitesseKmh / 3.6
+          : mesuree;
+      _attend = _d! - _cible! > 15;
+      _vitesseAvance = math.max(0, _cible! - _d!) / _intervalle;
+    }
+    _derniereReception = t;
+    return true;
+  }
+
+  /// Fait avancer d'une image (`dt` en secondes).
+  void avancer(double dt, {DateTime? maintenant}) {
+    final d = _d;
+    final cible = _cible;
+    if (d == null || cible == null) return;
+    final t = maintenant ?? DateTime.now();
+    final depuis = _derniereReception == null
+        ? 0.0
+        : t.difference(_derniereReception!).inMilliseconds / 1000;
+    double vitesse;
+    // En avance sur la réalité (la dernière position l'a dit) : il attend
+    // qu'elle le rattrape. Jamais de recul à l'écran.
+    if (_attend) {
+      vitesse = 0;
+    } else if (d < cible) {
+      vitesse = _vitesseAvance;
+    } else if (depuis < 10) {
+      vitesse = _vitesseRoute;
+    } else {
+      _vitesseRoute *= math.exp(-dt * 1.2);
+      vitesse = _vitesseRoute;
+    }
+    _d = math.min(trace.longueur, _d! + vitesse * dt);
+
+    final avant = trace.pointA(_d! - 3);
+    final apres = trace.pointA(_d! + 3);
+    if (metres(avant, apres) > 2) {
+      final vise = cap(avant, apres);
+      final actuel = _cap;
+      if (actuel == null) {
+        _cap = vise;
+      } else {
+        final ecart = ((vise - actuel + 540) % 360) - 180;
+        _cap = (actuel + ecart * (1 - math.exp(-dt * 7)) + 360) % 360;
+      }
+    }
+  }
+}
+
 /// La moto sur la carte : elle GLISSE d'une position reçue à la suivante,
 /// en autant de temps qu'il en a fallu pour la recevoir (≈ 5 s), au lieu de
 /// sauter. Le cap suit la route ; immobile, elle garde son dernier cap.
@@ -216,8 +323,14 @@ class MotoAnimee {
 
   /// Une nouvelle position reçue. `capDonne` : celui du GPS du livreur, s'il
   /// est fiable (en mouvement).
-  void recevoir(Point p, {double? capDonne, DateTime? maintenant}) {
+  void recevoir(
+    Point p, {
+    double? capDonne,
+    double? vitesseKmh,
+    DateTime? maintenant,
+  }) {
     final t = maintenant ?? DateTime.now();
+    _vitesseKmh = vitesseKmh;
     final actuel = position(t);
     if (actuel == null) {
       _depart = p;
@@ -268,6 +381,12 @@ class MotoAnimee {
   }
 
   double get capDegres => _cap;
+
+  double? _vitesseKmh;
+
+  /// La vitesse donnée par le GPS du livreur avec la dernière position,
+  /// quand il l'a donnée.
+  double? get vitesseKmh => _vitesseKmh;
 
   /// La dernière position reçue (là où la glisse s'arrêtera).
   Point? get derniere => _arrivee;

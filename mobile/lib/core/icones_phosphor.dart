@@ -10,6 +10,8 @@ abstract final class Phosphor {
 
   static const moped = IconData(0xe824, fontFamily: _police);
   static const storefront = IconData(0xe470, fontFamily: _police);
+  static const forkKnife = IconData(0xe262, fontFamily: _police);
+  static const houseLine = IconData(0xe2c4, fontFamily: _police);
   static const houseSimple = IconData(0xe2c6, fontFamily: _police);
   static const package = IconData(0xe390, fontFamily: _police);
   static const mapPin = IconData(0xe316, fontFamily: _police);

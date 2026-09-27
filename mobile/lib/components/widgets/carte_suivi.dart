@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -15,7 +16,7 @@ import '../../core/soleil.dart';
 import 'carte_suivi_theme.dart';
 
 /// Les étapes de la carte, lues du statut de la commande et de la position
-/// du livreur (maquette « Suivi Commande », 27/09).
+/// du livreur (handoff « Suivi livreur », 27/09).
 enum EtapeCarte {
   /// Commande confirmée, pas encore de livreur : tout le trajet, à plat.
   confirmee,
@@ -36,19 +37,20 @@ enum EtapeCarte {
   livree,
 }
 
-/// L'écran de suivi : la carte, et rien d'autre.
+/// L'écran de suivi : la carte, et rien d'autre qu'un bouton retour.
 ///
 /// - Thème clair ou sombre selon le vrai lever et coucher du soleil chez le
 ///   client ; bascule en fondu, réévaluée chaque minute.
 /// - Caméra par étape (centre, zoom, inclinaison), lissée à chaque image,
-///   jamais de saut ; nord toujours en haut, plus lisible pour un client
-///   que la rotation « GPS ». Un geste du client la libère, « Recentrer »
-///   la lui rend.
-/// - Le livreur glisse LE LONG DE LA ROUTE : chaque position reçue est
-///   projetée sur le tracé, et il avance d'une distance à l'autre.
-/// - Deux tracés (serveur, Google Routes) : l'approche du livreur vers la
-///   boutique, en pointillé ; le trajet vers le client, le restant mis en
-///   avant, le parcouru effacé.
+///   jamais de saut ; nord toujours en haut. Un geste du client la libère,
+///   « Recentrer » la lui rend.
+/// - Le livreur AVANCE À CHAQUE IMAGE le long de la route (LivreurSurRoute) :
+///   plus de bonds entre deux positions reçues, et il continue sur sa
+///   lancée quand la suivante tarde.
+/// - Le livreur est un scooter 3D vu du dessus, rendu sous 36 angles ;
+///   l'image la plus proche du cap, tournée du reste (±5°).
+/// - Tracés (serveur, Google Routes) : l'approche vers la boutique en
+///   pointillé ; le trajet vers le client, épais, le restant mis en avant.
 ///
 /// Le logo Google reste visible : les conditions de Google Maps l'exigent.
 class CarteSuivi extends StatefulWidget {
@@ -67,6 +69,8 @@ class CarteSuivi extends StatefulWidget {
     super.key,
   });
 
+  /// Les positions reçues, brutes : la dernière, sa vitesse, et une glisse
+  /// en ligne droite quand aucun tracé n'est connu.
   final MotoAnimee moto;
 
   /// Change à chaque position reçue.
@@ -93,6 +97,8 @@ class CarteSuivi extends StatefulWidget {
 
 class _CarteSuiviState extends State<CarteSuivi>
     with SingleTickerProviderStateMixin {
+  static const _fondu = Duration(milliseconds: 600);
+
   final _api = TovoApi();
   GoogleMapController? _carte;
   late final Ticker _images;
@@ -100,27 +106,27 @@ class _CarteSuiviState extends State<CarteSuivi>
 
   ThemeCarte _theme = ThemeCarte.sombre;
   Color? _fondAvant;
-  final Map<String, BitmapDescriptor> _icones = {};
+  final Map<String, BitmapDescriptor> _pastilles = {};
   final Map<String, Offset> _ancres = {};
-  ThemeCarte? _iconesDuTheme;
+  ThemeCarte? _pastillesDuTheme;
+  List<BitmapDescriptor> _scooter = const [];
 
   TraceMesure? _trajet;
   TraceMesure? _approche;
   DateTime? _derniereDemande;
 
-  // La glisse du livreur le long du tracé qu'il suit.
-  TraceMesure? _suivie;
-  double? _dDepart;
-  double? _dCible;
-  DateTime _debutGlisse = DateTime.now();
-  Duration _dureeGlisse = const Duration(seconds: 4);
-  double _cap = 90;
-  bool _versLOuest = false;
+  /// Le livreur sur le tracé qu'il suit ; nul hors tracé (glisse droite).
+  LivreurSurRoute? _surRoute;
 
-  // La caméra, lissée vers sa cible à chaque image.
+  // Passage d'une source à l'autre (tracé ↔ ligne droite) : un fondu de
+  // 600 ms depuis le dernier point affiché, jamais de saut.
+  Point? _dernierAffiche;
+  Point? _fonduDepuis;
+  DateTime? _debutFondu;
+  double? _capLisse;
+
   CameraPosition? _camera;
   Duration _derniereImage = Duration.zero;
-  Duration _dernierDessin = Duration.zero;
   Size _taille = const Size(390, 800);
 
   bool _libre = false;
@@ -140,6 +146,7 @@ class _CarteSuiviState extends State<CarteSuivi>
         });
       }
     });
+    unawaited(_chargerScooter());
     unawaited(_demanderTraces(force: true));
   }
 
@@ -171,13 +178,28 @@ class _CarteSuiviState extends State<CarteSuivi>
     return estLeJour(ici.lat, ici.lng) ? ThemeCarte.clair : ThemeCarte.sombre;
   }
 
-  Future<void> _preparerIcones() async {
+  /// Les 36 vues du scooter (tous les 10°), 100 points de côté : le scooter
+  /// y fait ~80 points de long, quel que soit le zoom.
+  Future<void> _chargerScooter() async {
+    final vues = await Future.wait([
+      for (var i = 0; i < 36; i++)
+        BitmapDescriptor.asset(
+          const ImageConfiguration(),
+          'assets/carte/scooter/scooter_${(i * 10).toString().padLeft(3, '0')}.png',
+          width: 100,
+          height: 100,
+        ),
+    ]);
+    if (mounted) setState(() => _scooter = vues);
+  }
+
+  Future<void> _preparerPastilles() async {
     final t = _theme;
-    if (_iconesDuTheme == t) return;
-    _iconesDuTheme = t;
+    if (_pastillesDuTheme == t) return;
+    _pastillesDuTheme = t;
     final ratio = MediaQuery.maybeDevicePixelRatioOf(context) ?? 3;
 
-    // Dessinés en points, rendus à la densité de l'écran : nets partout.
+    // Dessinées en points, rendues à la densité de l'écran : nettes partout.
     Future<BitmapDescriptor> image(Dessin d) async {
       final r = ui.PictureRecorder();
       Canvas(r)
@@ -199,37 +221,29 @@ class _CarteSuiviState extends State<CarteSuivi>
 
     final depart = dessinerPastille(
       t,
-      icone: widget.colis ? Phosphor.package : Phosphor.storefront,
+      icone: widget.colis ? Phosphor.package : Phosphor.forkKnife,
       texte: widget.nomDepart.isEmpty
           ? (widget.colis ? 'Colis' : 'Boutique')
           : widget.nomDepart,
     );
     final client = dessinerPastille(
       t,
-      icone: widget.clientEstVous ? Phosphor.houseSimple : Phosphor.mapPin,
+      icone: widget.clientEstVous ? Phosphor.houseLine : Phosphor.mapPin,
       texte: widget.clientEstVous ? 'Vous' : 'Arrivée',
       vous: true,
     );
-    final droite = dessinerLivreur(t, versLOuest: false);
-    final gauche = dessinerLivreur(t, versLOuest: true);
-    final cone = dessinerCone();
-    final icones = {
+    final images = {
       'depart': await image(depart),
       'client': await image(client),
-      'droite': await image(droite),
-      'gauche': await image(gauche),
-      'cone': await image(cone),
     };
-    if (!mounted || _iconesDuTheme != t) return;
+    if (!mounted || _pastillesDuTheme != t) return;
     setState(() {
-      _icones
+      _pastilles
         ..clear()
-        ..addAll(icones);
+        ..addAll(images);
       _ancres
         ..['depart'] = ancre(depart)
-        ..['client'] = ancre(client)
-        ..['livreur'] = ancre(droite)
-        ..['cone'] = ancre(cone);
+        ..['client'] = ancre(client);
     });
   }
 
@@ -259,81 +273,78 @@ class _CarteSuiviState extends State<CarteSuivi>
       _trajet = lire(reponse.raw['trajet']);
       _approche = lire(reponse.raw['approche']);
     });
-    _recevoir(premiere: true);
+    _recevoir();
   }
 
   // ------------------------------------------------------------- livreur
 
-  /// Une position reçue : projetée sur le tracé suivi, le livreur glisse
-  /// de là où il est affiché jusqu'à elle, en autant de temps qu'il en a
-  /// fallu pour la recevoir.
-  void _recevoir({bool premiere = false}) {
+  /// Une position reçue : projetée sur le tracé que suit le livreur.
+  void _recevoir() {
     final p = widget.moto.derniere;
     if (p == null) return;
     final trace = _recupere ? _trajet : _approche;
+    final avant = _surRoute;
     if (trace == null || trace.points.length < 2) {
-      _suivie = null;
+      if (avant != null) _commencerFondu();
+      _surRoute = null;
       return;
     }
-    final projection = trace.projeter(p);
-    if (projection.ecart > 50) {
-      // Sorti de la route (il a pris une autre rue) : nouveau tracé.
-      _suivie = null;
+    final suivi = avant != null && identical(avant.trace, trace)
+        ? avant
+        : LivreurSurRoute(trace);
+    if (!suivi.recevoir(p, vitesseKmh: widget.moto.vitesseKmh)) {
+      // Il a pris une autre rue : nouveau tracé, et d'ici là, la glisse
+      // droite vers ses positions — en fondu, pas en saut.
+      if (avant != null) _commencerFondu();
+      _surRoute = null;
       unawaited(_demanderTraces());
       return;
     }
-    final actuel = _dAffiche();
-    final memeTrace = identical(_suivie, trace);
-    _suivie = trace;
-    // Le GPS tremble : un léger recul n'est pas un demi-tour.
-    final cible =
-        memeTrace &&
-            actuel != null &&
-            projection.d < actuel &&
-            actuel - projection.d < 30
-        ? actuel
-        : projection.d;
-    _dDepart = memeTrace && actuel != null && !premiere ? actuel : cible;
-    _dCible = cible;
-    _debutGlisse = DateTime.now();
-    _dureeGlisse = widget.moto.duree;
+    if (!identical(suivi, avant)) _commencerFondu();
+    _surRoute = suivi;
   }
 
-  double? _dAffiche() {
-    final depart = _dDepart;
-    final cible = _dCible;
-    if (depart == null || cible == null || _suivie == null) return null;
-    final ms = _dureeGlisse.inMilliseconds;
-    final f = ms <= 0
-        ? 1.0
-        : (DateTime.now().difference(_debutGlisse).inMilliseconds / ms).clamp(
-            0.0,
-            1.0,
-          );
-    return depart + (cible - depart) * f;
+  void _commencerFondu() {
+    _fonduDepuis = _dernierAffiche;
+    _debutFondu = DateTime.now();
   }
 
   /// Où dessiner le livreur maintenant.
   Point? _livreur() {
-    final trace = _suivie;
-    final d = _dAffiche();
-    if (trace != null && d != null) {
-      final avant = trace.pointA(d - 3);
-      final apres = trace.pointA(d + 3);
-      if (metres(avant, apres) > 2) _cap = cap(avant, apres);
-      _orienter();
-      return trace.pointA(d);
+    final surRoute = _surRoute;
+    final source = surRoute?.position ?? widget.moto.position();
+    if (source == null) return null;
+    var ici = source;
+    final depuis = _fonduDepuis;
+    final debut = _debutFondu;
+    if (depuis != null && debut != null) {
+      final f =
+          DateTime.now().difference(debut).inMilliseconds /
+          _fondu.inMilliseconds;
+      if (f >= 1) {
+        _fonduDepuis = null;
+      } else {
+        final e = Curves.easeOut.transform(f.clamp(0.0, 1.0));
+        ici = (
+          lat: depuis.lat + (source.lat - depuis.lat) * e,
+          lng: depuis.lng + (source.lng - depuis.lng) * e,
+        );
+      }
     }
-    _cap = widget.moto.capDegres;
-    _orienter();
-    return widget.moto.position();
+    _dernierAffiche = ici;
+    return ici;
   }
 
-  /// L'icône regarde vers la droite ; vers l'ouest, on la retourne. Rien ne
-  /// change sur un trajet presque vertical, pour éviter le clignotement.
-  void _orienter() {
-    final est = math.sin(_cap * math.pi / 180);
-    if (est.abs() > 0.3) _versLOuest = est < 0;
+  /// Le cap affiché : celui du tracé (déjà lissé), sinon celui de la glisse
+  /// droite, lissé ici par le chemin le plus court.
+  double _cap(double dt) {
+    final vise = _surRoute?.capDegres ?? widget.moto.capDegres;
+    final actuel = _capLisse;
+    if (actuel == null || _surRoute?.capDegres != null) {
+      return _capLisse = vise;
+    }
+    final ecart = ((vise - actuel + 540) % 360) - 180;
+    return _capLisse = (actuel + ecart * (1 - math.exp(-dt * 7)) + 360) % 360;
   }
 
   // ---------------------------------------------------------------- étape
@@ -341,11 +352,15 @@ class _CarteSuiviState extends State<CarteSuivi>
   EtapeCarte _etape(Point? livreur) {
     if (widget.statut == 'delivered') return EtapeCarte.livree;
     if (_recupere) {
+      final surRoute = _surRoute;
       final trajet = _trajet;
-      final d = _dAffiche();
       final client = widget.client;
-      final reste = trajet != null && d != null && identical(_suivie, trajet)
-          ? trajet.longueur - d
+      final reste =
+          surRoute != null &&
+              trajet != null &&
+              identical(surRoute.trace, trajet) &&
+              surRoute.d != null
+          ? trajet.longueur - surRoute.d!
           : livreur != null && client != null
           ? metres(livreur, client) * 1.3
           : double.infinity;
@@ -417,18 +432,20 @@ class _CarteSuiviState extends State<CarteSuivi>
     }
   }
 
-  /// Chaque image (~30 par seconde) : la caméra se rapproche de sa cible
-  /// par lissage exponentiel (k = 1 − e^(−dt·2,4)), le livreur glisse, les
-  /// lieux pulsent.
+  /// Chaque image : le livreur avance, la caméra se rapproche de sa cible
+  /// par lissage exponentiel (k = 1 − e^(−dt·2,4)), les lieux pulsent.
   void _image(Duration maintenant) {
     if (!mounted) return;
-    if (maintenant - _dernierDessin < const Duration(milliseconds: 33)) return;
+    // ~30 images par seconde : fluide à l'œil, sans épuiser un téléphone
+    // d'entrée de gamme ni saturer le pont vers la carte native.
+    if (maintenant - _derniereImage < const Duration(milliseconds: 30)) return;
     final dt = ((maintenant - _derniereImage).inMicroseconds / 1e6).clamp(
       0.0,
       0.1,
     );
     _derniereImage = maintenant;
-    _dernierDessin = maintenant;
+    _surRoute?.avancer(dt);
+    _cap(dt);
     final livreur = _livreur();
     final cible = _cible(_etape(livreur), livreur);
     final carte = _carte;
@@ -484,8 +501,7 @@ class _CarteSuiviState extends State<CarteSuivi>
       );
     }
     final client = widget.client;
-    if (client != null &&
-        (etape == EtapeCarte.proche || etape == EtapeCarte.livree)) {
+    if (client != null && etape == EtapeCarte.proche) {
       final f = (t % 2200) / 2200;
       cercles.add(
         Circle(
@@ -506,68 +522,73 @@ class _CarteSuiviState extends State<CarteSuivi>
     List<LatLng> latLng(List<Point> points) => [
       for (final p in points) LatLng(p.lat, p.lng),
     ];
+    Polyline ligne(
+      String id,
+      List<Point> points,
+      Color couleur,
+      int largeur,
+      int z,
+    ) => Polyline(
+      polylineId: PolylineId(id),
+      points: latLng(points),
+      color: couleur,
+      width: largeur,
+      zIndex: z,
+      jointType: JointType.round,
+      startCap: Cap.roundCap,
+      endCap: Cap.roundCap,
+    );
+
+    final surRoute = _surRoute;
     final traces = <Polyline>{};
     final trajet = _trajet;
     if (trajet != null && etape != EtapeCarte.livree) {
       final enCourse =
           etape == EtapeCarte.enRoute || etape == EtapeCarte.proche;
-      final d = _dAffiche();
-      final restant = enCourse && identical(_suivie, trajet) && d != null
-          ? trajet.depuis(d)
-          : trajet.points;
-      final opacite = enCourse ? 1.0 : 0.35;
-      traces.add(
-        Polyline(
-          polylineId: const PolylineId('base'),
-          points: latLng(trajet.points),
-          color: t.traceBase,
-          width: 12,
-          zIndex: 1,
-          jointType: JointType.round,
-          startCap: Cap.roundCap,
-          endCap: Cap.roundCap,
-        ),
-      );
+      final d = surRoute != null && identical(surRoute.trace, trajet)
+          ? surRoute.d
+          : null;
+      final restant = enCourse && d != null ? trajet.depuis(d) : trajet.points;
+      final opacite = enCourse ? 1.0 : 0.4;
+      // La bordure sous tout le trajet : sous le restant, elle seule
+      // montre la partie parcourue.
+      traces.add(ligne('bordure', trajet.points, t.traceBordure, 22, 1));
       final halo = t.traceHalo;
       if (halo != null) {
         traces.add(
-          Polyline(
-            polylineId: const PolylineId('halo'),
-            points: latLng(restant),
-            color: halo.withValues(alpha: halo.a * opacite),
-            width: 14,
-            zIndex: 2,
-            jointType: JointType.round,
-            startCap: Cap.roundCap,
-            endCap: Cap.roundCap,
+          ligne(
+            'halo',
+            restant,
+            halo.withValues(alpha: halo.a * opacite),
+            20,
+            2,
           ),
         );
       }
       traces.add(
-        Polyline(
-          polylineId: const PolylineId('restant'),
-          points: latLng(restant),
-          color: t.traceRestant.withValues(alpha: opacite),
-          width: 6,
-          zIndex: 3,
-          jointType: JointType.round,
-          startCap: Cap.roundCap,
-          endCap: Cap.roundCap,
+        ligne(
+          'restant',
+          restant,
+          t.traceRestant.withValues(alpha: opacite),
+          13,
+          3,
         ),
       );
     }
     final approche = _approche;
     if (approche != null &&
         (etape == EtapeCarte.preparation || etape == EtapeCarte.auDepart)) {
-      final d = identical(_suivie, approche) ? _dAffiche() : null;
+      final d = surRoute != null && identical(surRoute.trace, approche)
+          ? surRoute.d
+          : null;
       traces.add(
         Polyline(
           polylineId: const PolylineId('approche'),
           points: latLng(d == null ? approche.points : approche.depuis(d)),
           color: t.approche,
-          width: 4,
+          width: 6,
           zIndex: 4,
-          patterns: [PatternItem.dot, PatternItem.gap(10)],
+          patterns: [PatternItem.dot, PatternItem.gap(12)],
         ),
       );
     }
@@ -575,51 +596,51 @@ class _CarteSuiviState extends State<CarteSuivi>
   }
 
   Set<Marker> _marqueurs(EtapeCarte etape, Point? livreur) {
-    if (_icones.isEmpty) return const {};
-    Marker marqueur(
-      String id,
-      Point p, {
-      String? icone,
-      int z = 1,
-      double rotation = 0,
-      bool aPlat = false,
-    }) => Marker(
+    final marqueurs = <Marker>{};
+    Marker pastille(String id, Point p, int z) => Marker(
       markerId: MarkerId(id),
       position: LatLng(p.lat, p.lng),
-      icon: _icones[icone ?? id]!,
+      icon: _pastilles[id]!,
       anchor: _ancres[id] ?? const Offset(0.5, 1),
       zIndexInt: z,
-      rotation: rotation,
-      flat: aPlat,
       consumeTapEvents: true,
     );
-
     final depart = widget.depart;
     final client = widget.client;
+    if (_pastilles.isNotEmpty) {
+      if (depart != null) marqueurs.add(pastille('depart', depart, 1));
+      if (client != null) marqueurs.add(pastille('client', client, 2));
+    }
     final visible =
         livreur != null &&
         etape != EtapeCarte.confirmee &&
         etape != EtapeCarte.livree;
-    return {
-      if (depart != null) marqueur('depart', depart),
-      if (client != null) marqueur('client', client, z: 2),
-      if (visible && _theme.nuit)
-        marqueur('cone', livreur, z: 3, rotation: _cap, aPlat: true),
-      if (visible)
-        marqueur(
-          'livreur',
-          livreur,
-          icone: _versLOuest ? 'gauche' : 'droite',
-          z: 4,
+    if (visible && _scooter.length == 36) {
+      // L'image la plus proche du cap, tournée du reste (±5°) : la lumière
+      // du rendu reste à sa place, et la rotation reste continue.
+      final cap = _capLisse ?? 0;
+      final vue = (cap / 10).round() % 36;
+      marqueurs.add(
+        Marker(
+          markerId: const MarkerId('livreur'),
+          position: LatLng(livreur.lat, livreur.lng),
+          icon: _scooter[vue],
+          anchor: const Offset(0.5, 0.5),
+          rotation: cap - vue * 10,
+          flat: true,
+          zIndexInt: 3,
+          consumeTapEvents: true,
         ),
-    };
+      );
+    }
+    return marqueurs;
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_iconesDuTheme != _theme) unawaited(_preparerIcones());
+    if (_pastillesDuTheme != _theme) unawaited(_preparerPastilles());
     final t = _theme;
-    final livreur = _livreur();
+    final livreur = _dernierAffiche ?? _livreur();
     final etape = _etape(livreur);
     final fondAvant = _fondAvant;
     final marges = MediaQuery.paddingOf(context);
@@ -675,8 +696,7 @@ class _CarteSuiviState extends State<CarteSuivi>
                   ),
                 ),
               ),
-              // Le haut se fond dans le décor, sous la barre d'état ; la
-              // nuit, les bords s'assombrissent doucement.
+              // Le haut se fond dans le décor, sous la barre d'état.
               IgnorePointer(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
@@ -685,29 +705,15 @@ class _CarteSuiviState extends State<CarteSuivi>
                       end: Alignment.bottomCenter,
                       colors: [
                         t.fond,
-                        t.fond.withValues(alpha: 0.9),
+                        t.fond.withValues(alpha: 0.85),
                         t.fond.withValues(alpha: 0),
                       ],
-                      stops: const [0, 0.1, 0.26],
+                      stops: const [0, 0.07, 0.2],
                     ),
                   ),
                   child: const SizedBox.expand(),
                 ),
               ),
-              if (t.nuit)
-                const IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: RadialGradient(
-                        center: Alignment(0, -0.2),
-                        radius: 1.25,
-                        colors: [Color(0x000C0D14), Color(0xB30C0D14)],
-                        stops: [0.55, 1],
-                      ),
-                    ),
-                    child: SizedBox.expand(),
-                  ),
-                ),
               if (fondAvant != null)
                 IgnorePointer(
                   child: TweenAnimationBuilder<double>(
@@ -725,12 +731,7 @@ class _CarteSuiviState extends State<CarteSuivi>
                 Positioned(
                   top: marges.top + 8,
                   left: 16,
-                  child: _BoutonRond(
-                    theme: t,
-                    icone: Phosphor.caretLeft,
-                    etiquette: 'Retour',
-                    onTap: widget.onRetour!,
-                  ),
+                  child: _BoutonRetour(theme: t, onTap: widget.onRetour!),
                 ),
               Positioned(
                 left: 16,
@@ -754,23 +755,17 @@ class _CarteSuiviState extends State<CarteSuivi>
   }
 }
 
-class _BoutonRond extends StatelessWidget {
-  const _BoutonRond({
-    required this.theme,
-    required this.icone,
-    required this.etiquette,
-    required this.onTap,
-  });
+/// Retour, à la manière d'iOS : un chevron fin, dans un rond discret.
+class _BoutonRetour extends StatelessWidget {
+  const _BoutonRetour({required this.theme, required this.onTap});
 
   final ThemeCarte theme;
-  final IconData icone;
-  final String etiquette;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) => Semantics(
     button: true,
-    label: etiquette,
+    label: 'Retour',
     child: Material(
       color: theme.boutonFond,
       shape: CircleBorder(side: BorderSide(color: theme.boutonBord)),
@@ -778,9 +773,18 @@ class _BoutonRond extends StatelessWidget {
         customBorder: const CircleBorder(),
         onTap: onTap,
         child: SizedBox(
-          width: 46,
-          height: 46,
-          child: Icon(icone, size: 20, color: theme.boutonTexte),
+          width: 44,
+          height: 44,
+          child: Padding(
+            // Le chevron est centré sur sa pointe : on le décale d'un
+            // point à gauche pour qu'il paraisse centré dans le rond.
+            padding: const EdgeInsets.only(right: 2),
+            child: Icon(
+              CupertinoIcons.chevron_back,
+              size: 22,
+              color: theme.boutonTexte,
+            ),
+          ),
         ),
       ),
     ),

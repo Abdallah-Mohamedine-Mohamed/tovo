@@ -30,6 +30,10 @@ class DriverController extends ChangeNotifier {
   final SyncQueue queue;
 
   Timer? _ping;
+
+  /// Le flux GPS continu pendant une course (voir _demarrerFlux).
+  StreamSubscription<Position>? _flux;
+  Position? _derniereLue;
   Timer? _rafraichissement;
   RealtimeChannel? _canal;
   StreamSubscription<Map<String, String>>? _notifications;
@@ -102,6 +106,7 @@ class DriverController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _ping?.cancel();
+    _flux?.cancel().ignore();
     _rafraichissement?.cancel();
     _notifications?.cancel();
     if (_canal != null) _db.removeChannel(_canal!);
@@ -161,48 +166,116 @@ class DriverController extends ChangeNotifier {
     }
   }
 
-  /// Cadence du ping de position.
+  /// Les positions envoyées, qui font avancer le livreur sur la carte du
+  /// client.
   ///
-  /// 5 s en course : c'est ce qui alimente la carte du client, où la moto
-  /// glisse d'un point au suivant. Un envoi est sauté si le livreur n'a pas
-  /// bougé de 10 m (feu rouge, attente devant la boutique), sans jamais
-  /// laisser passer plus de 20 s sans nouvelle.
-  /// 60 s au repos : le dispatch a seulement besoin de savoir dans quel
-  /// quartier se trouve le livreur.
-  /// Rien hors ligne : la batterie et le forfait data d'un livreur sont des
-  /// ressources qu'il paie lui-même.
-  Duration get _cadencePing =>
-      course != null ? const Duration(seconds: 5) : const Duration(seconds: 60);
-
+  /// En course : un FLUX GPS continu (un point dès 5 m parcourus), envoyé au
+  /// plus toutes les 2 s en mouvement, et au moins toutes les 15 s à
+  /// l'arrêt. Le minuteur de 5 s d'avant laissait des trous de 10 à 50 s
+  /// (mesuré le 27/09 : médiane 10 s, 7 trous de plus de 20 s) — la moto du
+  /// client avançait par bonds.
+  ///
+  /// Sur Android, le flux tourne dans un service de premier plan : une
+  /// notification « Course en cours » le garde vivant écran éteint ou app en
+  /// arrière-plan — un livreur a son téléphone en poche, pas sous les yeux.
+  ///
+  /// Hors course, en ligne : une position par minute suffit au dispatch.
+  /// Hors ligne : rien — la batterie et le forfait data d'un livreur sont
+  /// des ressources qu'il paie lui-même.
   ({double lat, double lng, DateTime quand})? _dernierEnvoi;
 
   void _programmerPing() {
     _ping?.cancel();
-    if (!_online && course == null) return;
-
-    _ping = Timer.periodic(_cadencePing, (_) => _envoyerPosition());
+    if (!_online && course == null) {
+      _arreterFlux();
+      return;
+    }
+    if (course != null) {
+      _demarrerFlux();
+      // À l'arrêt, le flux se tait (rien ne bouge de 5 m) : ce battement
+      // redit toutes les 15 s que le livreur est toujours là.
+      _ping = Timer.periodic(
+        const Duration(seconds: 15),
+        (_) => _envoyerPosition(),
+      );
+    } else {
+      _arreterFlux();
+      _ping = Timer.periodic(
+        const Duration(seconds: 60),
+        (_) => _envoyerPosition(),
+      );
+    }
     unawaited(_envoyerPosition());
   }
 
-  Future<void> _envoyerPosition() async {
+  void _demarrerFlux() {
+    if (_flux != null) return;
+    final LocationSettings reglages = switch (defaultTargetPlatform) {
+      TargetPlatform.android => AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+        intervalDuration: const Duration(seconds: 2),
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: 'Course en cours',
+          notificationText:
+              'Tovo partage votre position avec le client jusqu’à la livraison.',
+          notificationChannelName: 'Course en cours',
+          enableWakeLock: true,
+          setOngoing: true,
+        ),
+      ),
+      TargetPlatform.iOS => AppleSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+        activityType: ActivityType.automotiveNavigation,
+        pauseLocationUpdatesAutomatically: false,
+      ),
+      _ => const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+      ),
+    };
+    _flux = Geolocator.getPositionStream(locationSettings: reglages).listen((
+      position,
+    ) {
+      _derniereLue = position;
+      unawaited(_envoyerPosition(lue: position));
+    }, onError: (Object _) => _arreterFlux());
+  }
+
+  void _arreterFlux() {
+    _flux?.cancel().ignore();
+    _flux = null;
+    _derniereLue = null;
+  }
+
+  Future<void> _envoyerPosition({Position? lue}) async {
     if (!_online && course == null) return;
 
-    final position = await TovoLocation.current();
+    final recente = _derniereLue;
+    final position =
+        lue ??
+        (recente != null &&
+                DateTime.now().difference(recente.timestamp) <
+                    const Duration(seconds: 5)
+            ? recente
+            : await TovoLocation.current());
     if (position == null) return;
 
-    // Immobile depuis le dernier envoi (moins de 10 m, moins de 20 s) : on
-    // économise le forfait du livreur, la carte du client n'y perd rien.
+    // En course : au plus un envoi toutes les 2 s ; à l'arrêt (moins de
+    // 5 m), un toutes les 15 s — le forfait du livreur n'y perd rien, la
+    // carte du client non plus.
     final avant = _dernierEnvoi;
     if (course != null && avant != null) {
+      final ecoule = DateTime.now().difference(avant.quand);
       final metres = Geolocator.distanceBetween(
         avant.lat,
         avant.lng,
         position.latitude,
         position.longitude,
       );
-      if (metres < 10 &&
-          DateTime.now().difference(avant.quand) <
-              const Duration(seconds: 20)) {
+      if (ecoule < const Duration(seconds: 2) ||
+          (metres < 5 && ecoule < const Duration(seconds: 15))) {
         return;
       }
     }
@@ -219,8 +292,10 @@ class DriverController extends ChangeNotifier {
       'lat': position.latitude,
       'lng': position.longitude,
       'order_id': courseId,
-      'heading': position.heading,
-      'speed_kmh': position.speed * 3.6,
+      // Cap et vitesse du GPS : la carte du client s'en sert pour lisser le
+      // cap et prolonger la course quand un point tarde.
+      'heading': position.heading >= 0 ? position.heading : null,
+      'speed_kmh': position.speed >= 0 ? position.speed * 3.6 : null,
     });
   }
 

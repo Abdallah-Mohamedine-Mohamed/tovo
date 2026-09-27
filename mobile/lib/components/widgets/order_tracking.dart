@@ -282,10 +282,20 @@ class _OrderTrackingState extends State<OrderTracking>
             if (!mounted) return;
             final point = lirePoint(payload.newRecord['location']);
             final capDonne = (payload.newRecord['heading'] as num?)?.toDouble();
+            final vitesse = (payload.newRecord['speed_kmh'] as num?)
+                ?.toDouble();
             setState(() {
-              _dernierePosition = DateTime.now();
+              // L'heure du SERVEUR, comme celle que relit _prendrePosition :
+              // comparer l'heure du téléphone à celle du serveur faisait
+              // rejouer deux fois le même point quand leurs horloges
+              // différaient.
+              _dernierePosition =
+                  DateTime.tryParse(
+                    '${payload.newRecord['recorded_at'] ?? ''}',
+                  ) ??
+                  DateTime.now();
               if (point != null) {
-                moto.recevoir(point, capDonne: capDonne);
+                moto.recevoir(point, capDonne: capDonne, vitesseKmh: vitesse);
                 _revision++;
               }
             });

@@ -45,25 +45,18 @@ void main() {
         }
 
         poser(
-          dessinerPastille(
-            t,
-            icone: Phosphor.storefront,
-            texte: 'Maison Grill',
-          ),
+          dessinerPastille(t, icone: Phosphor.forkKnife, texte: 'Maison Grill'),
           0,
         );
         poser(
           dessinerPastille(
             t,
-            icone: Phosphor.houseSimple,
+            icone: Phosphor.houseLine,
             texte: 'Vous',
             vous: true,
           ),
           150,
         );
-        if (t.nuit) poser(dessinerCone(), 250);
-        poser(dessinerLivreur(t, versLOuest: false), 230);
-        poser(dessinerLivreur(t, versLOuest: true), 320);
         y += hauteur / 2;
       }
       final image = await enregistreur.endRecording().toImage(

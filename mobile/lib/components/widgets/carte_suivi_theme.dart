@@ -1,13 +1,13 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import '../../core/icones_phosphor.dart';
 
 import '../../core/theme.dart';
 
-/// Les deux thèmes de la carte de suivi, repris de la maquette « Suivi
-/// Commande » (nuit et jour, 27/09), direction « Épure » : seules les rues,
-/// en traits fins ; ni bâtiments, ni parcs, ni eau, ni libellés.
+/// Les deux thèmes de la carte de suivi, repris du handoff « Suivi livreur »
+/// (Claude Design, 27/09), direction « Épure » : rues en traits fins avec
+/// leurs noms ; parcs et eau ; de jour, grands axes jaune doré. Aucun point
+/// d'intérêt ni pictogramme de transport.
 class ThemeCarte {
   const ThemeCarte._({
     required this.nuit,
@@ -15,7 +15,7 @@ class ThemeCarte {
     required this.style,
     required this.traceRestant,
     required this.traceHalo,
-    required this.traceBase,
+    required this.traceBordure,
     required this.approche,
     required this.pastilleFond,
     required this.pastilleBord,
@@ -28,9 +28,6 @@ class ThemeCarte {
     required this.vousTexte,
     required this.vousIconeFond,
     required this.vousIcone,
-    required this.livreurFond,
-    required this.livreurBord,
-    required this.livreurIcone,
     required this.ombre,
     required this.pulsation,
     required this.boutonFond,
@@ -44,15 +41,17 @@ class ThemeCarte {
   /// Style JSON de Google Maps.
   final String style;
 
+  /// Le tracé restant, 13 points.
   final Color traceRestant;
 
-  /// Le halo du tracé : la nuit seulement.
+  /// Son halo : la nuit seulement.
   final Color? traceHalo;
 
-  /// Le tracé complet, sous le tracé restant (la partie parcourue).
-  final Color traceBase;
+  /// La bordure du tracé, 22 points, sous tout le trajet : sous le tracé
+  /// restant, elle seule marque la partie déjà parcourue.
+  final Color traceBordure;
 
-  /// Le pointillé du livreur vers la boutique.
+  /// Le pointillé du livreur vers la boutique, 6 points.
   final Color approche;
 
   final Color pastilleFond;
@@ -69,10 +68,6 @@ class ThemeCarte {
   final Color vousIconeFond;
   final Color vousIcone;
 
-  final Color livreurFond;
-  final Color livreurBord;
-  final Color livreurIcone;
-
   final Color ombre;
   final Color pulsation;
 
@@ -86,8 +81,8 @@ class ThemeCarte {
     style: _styleNuit,
     traceRestant: Color(0xFF9184D9),
     traceHalo: Color(0x559184D9),
-    traceBase: Color(0xFF2B2741),
-    approche: Color(0xCC9397AB),
+    traceBordure: Color(0xFF2B2741),
+    approche: Color(0xFF9397AB),
     pastilleFond: Color(0xFF232532),
     pastilleBord: Color(0xFF595D6C),
     pastilleIconeFond: Color(0xFF2B2741),
@@ -99,9 +94,6 @@ class ThemeCarte {
     vousTexte: Color(0xFF1A1D2D),
     vousIconeFond: Color(0xFF1A1D2D),
     vousIcone: Color(0xFFE9E9ED),
-    livreurFond: Color(0xFF1A1D2D),
-    livreurBord: Color(0xFF9184D9),
-    livreurIcone: Color(0xFFD2CEFD),
     ombre: Color(0x80000000),
     pulsation: Color(0xFF9184D9),
     boutonFond: Color(0xE6232532),
@@ -111,12 +103,12 @@ class ThemeCarte {
 
   static const clair = ThemeCarte._(
     nuit: false,
-    fond: Color(0xFFF1F0EB),
+    fond: Color(0xFFF4F2EB),
     style: _styleJour,
-    traceRestant: Color(0xFF23262F),
+    traceRestant: Color(0xFF2F6BFF),
     traceHalo: null,
-    traceBase: Color(0xFFFDFCF9),
-    approche: Color(0xCC5D5B54),
+    traceBordure: Color(0xFFC3CAD8),
+    approche: Color(0xFF5D5B54),
     pastilleFond: Color(0xFFFDFCF9),
     pastilleBord: Color(0xFF8D8A80),
     pastilleIconeFond: Color(0xFFD9D7CF),
@@ -125,12 +117,9 @@ class ThemeCarte {
     pastilleTige: Color(0xFF8D8A80),
     pastillePoint: Color(0xFF23262F),
     vousFond: Color(0xFF1F2129),
-    vousTexte: Color(0xFFF1F0EB),
-    vousIconeFond: Color(0xFFF1F0EB),
+    vousTexte: Color(0xFFF4F2EB),
+    vousIconeFond: Color(0xFFF4F2EB),
     vousIcone: Color(0xFF1F2129),
-    livreurFond: Color(0xFF23262F),
-    livreurBord: Color(0xFFFDFCF9),
-    livreurIcone: Color(0xFFFDFCF9),
     ombre: Color(0x29281C1C),
     pulsation: Color(0xFF23262F),
     boutonFond: Color(0xF2FDFCF9),
@@ -166,9 +155,8 @@ void _icone(
   IconData icone,
   Offset centre,
   double taille,
-  Color couleur, {
-  bool miroir = false,
-}) {
+  Color couleur,
+) {
   final p = TextPainter(
     text: TextSpan(
       text: String.fromCharCode(icone.codePoint),
@@ -182,14 +170,11 @@ void _icone(
     ),
     textDirection: TextDirection.ltr,
   )..layout();
-  c.save();
-  c.translate(centre.dx, centre.dy);
-  if (miroir) c.scale(-1, 1);
-  p.paint(c, Offset(-p.width / 2, -p.height / 2));
-  c.restore();
+  p.paint(c, centre - Offset(p.width / 2, p.height / 2));
 }
 
-/// La pastille d'un lieu : icône ronde + nom, tige fine, point au sol.
+/// La pastille d'un lieu : un rond de 32 points avec son icône, le nom,
+/// une tige fine de 12 points et un point au sol. Marges 5/14/5/5.
 /// `vous` : la pastille du client, en contraste inversé.
 Dessin dessinerPastille(
   ThemeCarte t, {
@@ -198,21 +183,22 @@ Dessin dessinerPastille(
   bool vous = false,
 }) {
   const marge = 16.0;
+  const rond = 32.0;
+  const hauteurPastille = 5 + rond + 5;
+  const tige = 12.0;
   final libelle = _texte(
     texte,
     vous ? t.vousTexte : t.pastilleTexte,
     vous ? FontWeight.w600 : FontWeight.w500,
   );
-  final largeurPastille = 6 + 28 + 8 + libelle.width + 12;
+  final largeurPastille = 5 + rond + 8 + libelle.width + 14;
   final largeur = largeurPastille + marge * 2;
-  const hauteurPastille = 40.0;
-  const tige = 12.0;
   final hauteur = marge + hauteurPastille + tige + 8 + 6;
   final r = ui.PictureRecorder();
   final c = Canvas(r);
   final pastille = RRect.fromRectAndRadius(
     Rect.fromLTWH(marge, marge, largeurPastille, hauteurPastille),
-    const Radius.circular(20),
+    const Radius.circular(hauteurPastille / 2),
   );
   // Ombre douce sous la pastille.
   c.drawRRect(
@@ -231,155 +217,75 @@ Dessin dessinerPastille(
         ..color = t.pastilleBord,
     );
   }
-  final centreIcone = Offset(marge + 6 + 14, marge + 20);
+  const centreIcone = Offset(marge + 5 + rond / 2, marge + hauteurPastille / 2);
   c.drawCircle(
     centreIcone,
-    14,
+    rond / 2,
     Paint()..color = vous ? t.vousIconeFond : t.pastilleIconeFond,
   );
-  _icone(
+  _icone(c, icone, centreIcone, 18, vous ? t.vousIcone : t.pastilleIcone);
+  libelle.paint(
     c,
-    icone,
-    centreIcone,
-    vous ? 15 : 16,
-    vous ? t.vousIcone : t.pastilleIcone,
+    Offset(
+      marge + 5 + rond + 8,
+      marge + hauteurPastille / 2 - libelle.height / 2,
+    ),
   );
-  libelle.paint(c, Offset(marge + 6 + 28 + 8, marge + 20 - libelle.height / 2));
   final x = largeur / 2;
-  final couleurTige = vous ? t.vousFond : t.pastilleTige;
   c.drawRect(
     Rect.fromLTWH(x - 1, marge + hauteurPastille, 2, tige),
-    Paint()..color = couleurTige,
+    Paint()..color = vous ? t.vousFond : t.pastilleTige,
   );
   final sol = Offset(x, marge + hauteurPastille + tige + 4);
   c.drawCircle(sol, 4, Paint()..color = vous ? t.vousFond : t.pastillePoint);
   return (image: r.endRecording(), taille: Size(largeur, hauteur), ancre: sol);
 }
 
-/// Le livreur : un rond de 48 points, l'icône scooter (Phosphor « moped »),
-/// une pointe dessous. La nuit, un halo lavande ; le jour, une ombre ovale
-/// au sol. L'icône regarde vers la droite : vers l'ouest, on la retourne
-/// (jamais de rotation, elle se retrouverait à l'envers).
-Dessin dessinerLivreur(ThemeCarte t, {required bool versLOuest}) {
-  const taille = Size(112, 112);
-  const centre = Offset(56, 48);
-  const pointe = Offset(56, 80);
-  final r = ui.PictureRecorder();
-  final c = Canvas(r);
-  if (t.nuit) {
-    c.drawCircle(
-      centre,
-      56,
-      Paint()
-        ..shader = ui.Gradient.radial(
-          centre,
-          56,
-          const [Color(0x669184D9), Color(0x009184D9)],
-          const [0, 0.65],
-        ),
-    );
-    c.drawCircle(centre, 30, Paint()..color = const Color(0x2E9184D9));
-    c.drawCircle(
-      centre,
-      26,
-      Paint()
-        ..color = const Color(0x999184D9)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
-    );
-  } else {
-    c.drawOval(
-      Rect.fromCenter(
-        center: pointe + const Offset(0, 2),
-        width: 30,
-        height: 8,
-      ),
-      Paint()
-        ..color = const Color(0x40281C1C)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
-    );
-    c.drawCircle(
-      centre + const Offset(0, 6),
-      24,
-      Paint()
-        ..color = const Color(0x47281C1C)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
-    );
-  }
-  // La pointe, sous le rond.
-  final triangle = Path()
-    ..moveTo(pointe.dx - 6, centre.dy + 23)
-    ..lineTo(pointe.dx + 6, centre.dy + 23)
-    ..lineTo(pointe.dx, pointe.dy)
-    ..close();
-  c.drawPath(triangle, Paint()..color = t.nuit ? t.livreurBord : t.livreurFond);
-  c.drawCircle(centre, 24, Paint()..color = t.livreurBord);
-  c.drawCircle(centre, 22, Paint()..color = t.livreurFond);
-  _icone(
-    c,
-    Phosphor.moped,
-    centre,
-    t.nuit ? 24 : 22,
-    t.livreurIcone,
-    miroir: versLOuest,
-  );
-  return (image: r.endRecording(), taille: taille, ancre: pointe);
-}
-
-/// Le cône de direction (la nuit) : un faisceau devant le livreur, qui
-/// pivote avec son cap. Posé à plat sur la carte, sous le livreur.
-Dessin dessinerCone() {
-  const taille = Size(64, 80);
-  final r = ui.PictureRecorder();
-  final c = Canvas(r);
-  final faisceau = Path()
-    ..moveTo(32, 80)
-    ..lineTo(64 * 0.08, 0)
-    ..lineTo(64 * 0.92, 0)
-    ..close();
-  c.drawPath(
-    faisceau,
-    Paint()
-      ..shader = ui.Gradient.linear(const Offset(0, 80), Offset.zero, const [
-        Color(0xB3B5ABFC),
-        Color(0x009184D9),
-      ]),
-  );
-  return (image: r.endRecording(), taille: taille, ancre: const Offset(32, 80));
-}
-
-/// Épure nuit : fond #1A1D2D, rues secondaires #3f424d (1,5 pt), axes
-/// #595d6c (2,5 pt) ; tout le reste se fond dans le décor.
+/// Épure nuit : fond #1A1D2D ; rues secondaires #3f424d (1,5 pt), grands
+/// axes #595d6c (2,5 pt) ; parcs #1a2622, eau #121a2e ; noms de rues
+/// #9397ab, liseré de la couleur du fond. Ni POI, ni transports, ni noms de
+/// quartiers.
 const _styleNuit = '''
 [
   {"elementType":"geometry","stylers":[{"color":"#1a1d2d"}]},
   {"elementType":"labels","stylers":[{"visibility":"off"}]},
-  {"featureType":"administrative","stylers":[{"visibility":"off"}]},
-  {"featureType":"landscape","elementType":"geometry","stylers":[{"color":"#1a1d2d"}]},
-  {"featureType":"landscape.man_made","stylers":[{"visibility":"off"}]},
-  {"featureType":"poi","stylers":[{"visibility":"off"}]},
+  {"featureType":"administrative","elementType":"geometry","stylers":[{"visibility":"off"}]},
+  {"featureType":"landscape.man_made","elementType":"geometry","stylers":[{"color":"#1e2130"}]},
+  {"featureType":"poi","elementType":"geometry","stylers":[{"color":"#1a1d2d"}]},
+  {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#1a2622"}]},
   {"featureType":"transit","stylers":[{"visibility":"off"}]},
-  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#1a1d2d"}]},
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#121a2e"}]},
   {"featureType":"road","elementType":"geometry.stroke","stylers":[{"visibility":"off"}]},
   {"featureType":"road.local","elementType":"geometry.fill","stylers":[{"color":"#3f424d"},{"weight":1.5}]},
   {"featureType":"road.arterial","elementType":"geometry.fill","stylers":[{"color":"#595d6c"},{"weight":2.5}]},
-  {"featureType":"road.highway","elementType":"geometry.fill","stylers":[{"color":"#595d6c"},{"weight":2.5}]}
+  {"featureType":"road.highway","elementType":"geometry.fill","stylers":[{"color":"#595d6c"},{"weight":2.5}]},
+  {"featureType":"road","elementType":"labels.text","stylers":[{"visibility":"on"}]},
+  {"featureType":"road","elementType":"labels.text.fill","stylers":[{"color":"#9397ab"}]},
+  {"featureType":"road","elementType":"labels.text.stroke","stylers":[{"color":"#1a1d2d"},{"weight":3}]},
+  {"featureType":"road","elementType":"labels.icon","stylers":[{"visibility":"off"}]}
 ]
 ''';
 
-/// Épure jour : fond #f1f0eb, rues secondaires #cfccc2, axes #8d8a80.
+/// Épure jour : fond #f4f2eb ; rues secondaires #d6cdb6 (4 pt), grands axes
+/// jaune doré #f5bd4f (7 pt) ; parcs #bfe3b0, eau #9fd0f2 ; noms de rues
+/// #6f6a5c, liseré de la couleur du fond.
 const _styleJour = '''
 [
-  {"elementType":"geometry","stylers":[{"color":"#f1f0eb"}]},
+  {"elementType":"geometry","stylers":[{"color":"#f4f2eb"}]},
   {"elementType":"labels","stylers":[{"visibility":"off"}]},
-  {"featureType":"administrative","stylers":[{"visibility":"off"}]},
-  {"featureType":"landscape","elementType":"geometry","stylers":[{"color":"#f1f0eb"}]},
-  {"featureType":"landscape.man_made","stylers":[{"visibility":"off"}]},
-  {"featureType":"poi","stylers":[{"visibility":"off"}]},
+  {"featureType":"administrative","elementType":"geometry","stylers":[{"visibility":"off"}]},
+  {"featureType":"landscape.man_made","elementType":"geometry","stylers":[{"color":"#e9e5da"}]},
+  {"featureType":"poi","elementType":"geometry","stylers":[{"color":"#f4f2eb"}]},
+  {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#bfe3b0"}]},
   {"featureType":"transit","stylers":[{"visibility":"off"}]},
-  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#f1f0eb"}]},
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#9fd0f2"}]},
   {"featureType":"road","elementType":"geometry.stroke","stylers":[{"visibility":"off"}]},
-  {"featureType":"road.local","elementType":"geometry.fill","stylers":[{"color":"#cfccc2"},{"weight":1.5}]},
-  {"featureType":"road.arterial","elementType":"geometry.fill","stylers":[{"color":"#8d8a80"},{"weight":2.5}]},
-  {"featureType":"road.highway","elementType":"geometry.fill","stylers":[{"color":"#8d8a80"},{"weight":2.5}]}
+  {"featureType":"road.local","elementType":"geometry.fill","stylers":[{"color":"#d6cdb6"},{"weight":4}]},
+  {"featureType":"road.arterial","elementType":"geometry.fill","stylers":[{"color":"#f5bd4f"},{"weight":7}]},
+  {"featureType":"road.highway","elementType":"geometry.fill","stylers":[{"color":"#f5bd4f"},{"weight":7}]},
+  {"featureType":"road","elementType":"labels.text","stylers":[{"visibility":"on"}]},
+  {"featureType":"road","elementType":"labels.text.fill","stylers":[{"color":"#6f6a5c"}]},
+  {"featureType":"road","elementType":"labels.text.stroke","stylers":[{"color":"#f4f2eb"},{"weight":3}]},
+  {"featureType":"road","elementType":"labels.icon","stylers":[{"visibility":"off"}]}
 ]
 ''';

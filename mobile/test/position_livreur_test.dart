@@ -97,6 +97,77 @@ void main() {
     expect(trace.depuis(p.d).last, (lat: 13.510, lng: 2.110));
   });
 
+  group('le livreur avance à chaque image, jamais par bonds', () {
+    // Une rue droite vers le nord, 1,1 km.
+    final trace = TraceMesure(const [
+      (lat: 13.500, lng: 2.100),
+      (lat: 13.510, lng: 2.100),
+    ]);
+    Point a(double metresAuNord) =>
+        (lat: 13.500 + metresAuNord / 110540, lng: 2.100);
+
+    test('avance de façon continue entre deux positions', () {
+      final l = LivreurSurRoute(trace);
+      final t0 = DateTime(2026, 9, 27, 12);
+      l.recevoir(a(0), maintenant: t0);
+      l.recevoir(a(30), maintenant: t0.add(const Duration(seconds: 3)));
+      final distances = <double>[];
+      for (var i = 1; i <= 30; i++) {
+        l.avancer(
+          0.1,
+          maintenant: t0.add(Duration(milliseconds: 3000 + i * 100)),
+        );
+        distances.add(l.d!);
+      }
+      // Chaque image avance un peu : aucun saut, aucun arrêt.
+      for (var i = 1; i < distances.length; i++) {
+        final pas = distances[i] - distances[i - 1];
+        expect(pas, greaterThan(0));
+        expect(pas, lessThan(3));
+      }
+    });
+
+    test('la position suivante tarde : il continue sur sa lancée', () {
+      final l = LivreurSurRoute(trace);
+      final t0 = DateTime(2026, 9, 27, 12);
+      l.recevoir(a(0), maintenant: t0);
+      l.recevoir(
+        a(30),
+        vitesseKmh: 36,
+        maintenant: t0.add(const Duration(seconds: 3)),
+      );
+      var t = t0.add(const Duration(seconds: 3));
+      for (var i = 0; i < 80; i++) {
+        t = t.add(const Duration(milliseconds: 100));
+        l.avancer(0.1, maintenant: t);
+      }
+      // 8 s sans nouvelle : il a dépassé le dernier point reçu, à ~10 m/s.
+      expect(l.d, greaterThan(60));
+    });
+
+    test('un petit recul du GPS est ignoré', () {
+      final l = LivreurSurRoute(trace);
+      final t0 = DateTime(2026, 9, 27, 12);
+      l.recevoir(a(0), maintenant: t0);
+      l.recevoir(a(50), maintenant: t0.add(const Duration(seconds: 3)));
+      for (var i = 1; i <= 40; i++) {
+        l.avancer(
+          0.1,
+          maintenant: t0.add(Duration(milliseconds: 3000 + i * 100)),
+        );
+      }
+      final avant = l.d!;
+      l.recevoir(a(avant - 8), maintenant: t0.add(const Duration(seconds: 7)));
+      l.avancer(0.1, maintenant: t0.add(const Duration(milliseconds: 7100)));
+      expect(l.d, greaterThanOrEqualTo(avant));
+    });
+
+    test('à plus de 50 m de la route : il faut un nouveau tracé', () {
+      final l = LivreurSurRoute(trace);
+      expect(l.recevoir((lat: 13.505, lng: 2.101)), isFalse);
+    });
+  });
+
   test('immobile : garde son dernier cap', () {
     final moto = MotoAnimee();
     final t0 = DateTime(2026, 9, 27, 12);
