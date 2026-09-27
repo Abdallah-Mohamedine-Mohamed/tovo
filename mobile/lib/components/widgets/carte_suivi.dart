@@ -37,20 +37,33 @@ enum EtapeCarte {
   livree,
 }
 
-/// L'écran de suivi : la carte, et rien d'autre qu'un bouton retour.
+/// Comment la caméra suit la course.
+enum VueCarte {
+  /// Par étape, nord en haut (le handoff).
+  ensemble,
+
+  /// Juste derrière le livreur, la carte tournée dans son sens de marche.
+  derriere,
+
+  /// Le client a pris la main (zoom, rotation, inclinaison au doigt).
+  libre,
+}
+
+/// L'écran de suivi : la carte, un bouton retour, et deux boutons de vue.
 ///
 /// - Thème clair ou sombre selon le vrai lever et coucher du soleil chez le
 ///   client ; bascule en fondu, réévaluée chaque minute.
-/// - Caméra par étape (centre, zoom, inclinaison), lissée à chaque image,
-///   jamais de saut ; nord toujours en haut. Un geste du client la libère,
-///   « Recentrer » la lui rend.
-/// - Le livreur AVANCE À CHAQUE IMAGE le long de la route (LivreurSurRoute) :
-///   plus de bonds entre deux positions reçues, et il continue sur sa
-///   lancée quand la suivante tarde.
-/// - Le livreur est un scooter 3D vu du dessus, rendu sous 36 angles ;
-///   l'image la plus proche du cap, tournée du reste (±5°).
-/// - Tracés (serveur, Google Routes) : l'approche vers la boutique en
-///   pointillé ; le trajet vers le client, épais, le restant mis en avant.
+/// - La carte se manipule librement : zoom, rotation et inclinaison au
+///   doigt. « Recentrer » rend la main à la caméra automatique.
+/// - Caméra automatique : par étape (vue d'ensemble, nord en haut), ou
+///   « derrière le livreur », tournée dans son sens de marche.
+/// - Le livreur avance à chaque image le long de la route
+///   (LivreurSurRoute), sans bonds.
+/// - Le livreur est un Vespa 3D (« Vespa », Jasmine Roberts, CC-BY), rendu
+///   sous 4 inclinaisons × 36 directions : on affiche la vue qui correspond
+///   à l'angle réel de la caméra — de profil dans un virage, de dos quand
+///   il s'éloigne. Debout face à l'écran, il ne s'écrase jamais.
+/// - La nuit, ses phares éclairent la route devant lui.
 ///
 /// Le logo Google reste visible : les conditions de Google Maps l'exigent.
 class CarteSuivi extends StatefulWidget {
@@ -99,6 +112,9 @@ class _CarteSuiviState extends State<CarteSuivi>
     with SingleTickerProviderStateMixin {
   static const _fondu = Duration(milliseconds: 600);
 
+  /// Les inclinaisons de caméra sous lesquelles le Vespa a été rendu.
+  static const _inclinaisons = [0, 30, 45, 60];
+
   final _api = TovoApi();
   GoogleMapController? _carte;
   late final Ticker _images;
@@ -109,7 +125,10 @@ class _CarteSuiviState extends State<CarteSuivi>
   final Map<String, BitmapDescriptor> _pastilles = {};
   final Map<String, Offset> _ancres = {};
   ThemeCarte? _pastillesDuTheme;
-  List<BitmapDescriptor> _scooter = const [];
+
+  /// [inclinaison][direction] : 4 × 36 vues du Vespa.
+  List<List<BitmapDescriptor>> _vespa = const [];
+  BitmapDescriptor? _phares;
 
   TraceMesure? _trajet;
   TraceMesure? _approche;
@@ -125,12 +144,19 @@ class _CarteSuiviState extends State<CarteSuivi>
   DateTime? _debutFondu;
   double? _capLisse;
 
+  VueCarte _vue = VueCarte.ensemble;
+
+  /// La caméra telle qu'elle est vraiment (suivie, ou déplacée au doigt).
   CameraPosition? _camera;
   Duration _derniereImage = Duration.zero;
   Size _taille = const Size(390, 800);
-
-  bool _libre = false;
   bool _doigt = false;
+
+  // Les tracés ne sont renvoyés à la carte que quand ils changent vraiment
+  // (le livreur a avancé de 3 m) : les renvoyer 30 fois par seconde
+  // alourdissait les gestes — le zoom répondait mal.
+  Set<Polyline> _tracesAffiches = const {};
+  String _cleTraces = '';
 
   @override
   void initState() {
@@ -146,7 +172,7 @@ class _CarteSuiviState extends State<CarteSuivi>
         });
       }
     });
-    unawaited(_chargerScooter());
+    unawaited(_chargerVespa());
     unawaited(_demanderTraces(force: true));
   }
 
@@ -178,19 +204,63 @@ class _CarteSuiviState extends State<CarteSuivi>
     return estLeJour(ici.lat, ici.lng) ? ThemeCarte.clair : ThemeCarte.sombre;
   }
 
-  /// Les 36 vues du scooter (tous les 10°), 100 points de côté : le scooter
-  /// y fait ~80 points de long, quel que soit le zoom.
-  Future<void> _chargerScooter() async {
-    final vues = await Future.wait([
-      for (var i = 0; i < 36; i++)
+  /// Les 144 vues du Vespa, 100 points de côté (il y fait ~80 points de
+  /// long, quel que soit le zoom), et le faisceau de ses phares.
+  Future<void> _chargerVespa() async {
+    Future<BitmapDescriptor> vue(int inclinaison, int direction) =>
         BitmapDescriptor.asset(
           const ImageConfiguration(),
-          'assets/carte/scooter/scooter_${(i * 10).toString().padLeft(3, '0')}.png',
+          'assets/carte/scooter/scooter_t${inclinaison}_'
+          '${(direction * 10).toString().padLeft(3, '0')}.png',
           width: 100,
           height: 100,
-        ),
+        );
+    final vues = await Future.wait([
+      for (final t in _inclinaisons)
+        Future.wait([for (var i = 0; i < 36; i++) vue(t, i)]),
     ]);
-    if (mounted) setState(() => _scooter = vues);
+    final phares = await _dessinerPhares();
+    if (!mounted) return;
+    setState(() {
+      _vespa = vues;
+      _phares = phares;
+    });
+  }
+
+  /// Le faisceau des phares, couché sur la route devant le livreur : blanc
+  /// chaud qui s'estompe au loin. Posé à plat, il suit la perspective.
+  Future<BitmapDescriptor> _dessinerPhares() async {
+    final ratio = MediaQuery.maybeDevicePixelRatioOf(context) ?? 3;
+    const largeur = 110.0;
+    const longueur = 170.0;
+    final r = ui.PictureRecorder();
+    final c = Canvas(r)..scale(ratio);
+    final faisceau = Path()
+      ..moveTo(largeur / 2 - 7, longueur)
+      ..lineTo(4, 18)
+      ..quadraticBezierTo(largeur / 2, -6, largeur - 4, 18)
+      ..lineTo(largeur / 2 + 7, longueur)
+      ..close();
+    c.drawPath(
+      faisceau,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          const Offset(0, longueur),
+          Offset.zero,
+          const [Color(0x99FFF1C4), Color(0x33FFE9A8), Color(0x00FFE9A8)],
+          const [0, 0.55, 1],
+        )
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+    );
+    final image = await r.endRecording().toImage(
+      (largeur * ratio).round(),
+      (longueur * ratio).round(),
+    );
+    final octets = await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.bytes(
+      octets!.buffer.asUint8List(),
+      imagePixelRatio: ratio,
+    );
   }
 
   Future<void> _preparerPastilles() async {
@@ -244,6 +314,7 @@ class _CarteSuiviState extends State<CarteSuivi>
       _ancres
         ..['depart'] = ancre(depart)
         ..['client'] = ancre(client);
+      _cleTraces = '';
     });
   }
 
@@ -272,6 +343,7 @@ class _CarteSuiviState extends State<CarteSuivi>
     setState(() {
       _trajet = lire(reponse.raw['trajet']);
       _approche = lire(reponse.raw['approche']);
+      _cleTraces = '';
     });
     _recevoir();
   }
@@ -343,8 +415,12 @@ class _CarteSuiviState extends State<CarteSuivi>
     if (actuel == null || _surRoute?.capDegres != null) {
       return _capLisse = vise;
     }
-    final ecart = ((vise - actuel + 540) % 360) - 180;
-    return _capLisse = (actuel + ecart * (1 - math.exp(-dt * 7)) + 360) % 360;
+    return _capLisse = _versAngle(actuel, vise, 1 - math.exp(-dt * 7));
+  }
+
+  static double _versAngle(double de, double vers, double k) {
+    final ecart = ((vers - de + 540) % 360) - 180;
+    return (de + ecart * k + 360) % 360;
   }
 
   // ---------------------------------------------------------------- étape
@@ -373,6 +449,11 @@ class _CarteSuiviState extends State<CarteSuivi>
     }
     return EtapeCarte.preparation;
   }
+
+  bool _livreurVisible(EtapeCarte etape, Point? livreur) =>
+      livreur != null &&
+      etape != EtapeCarte.confirmee &&
+      etape != EtapeCarte.livree;
 
   // --------------------------------------------------------------- caméra
 
@@ -404,6 +485,27 @@ class _CarteSuiviState extends State<CarteSuivi>
     final client = widget.client;
     CameraPosition vue(Point p, double zoom, double tilt) =>
         CameraPosition(target: LatLng(p.lat, p.lng), zoom: zoom, tilt: tilt);
+
+    // Derrière le livreur : la carte tournée dans son sens de marche,
+    // inclinée, le livreur un peu en bas de l'écran pour voir la route
+    // devant lui.
+    if (_vue == VueCarte.derriere && _livreurVisible(etape, livreur)) {
+      final cap = _capLisse ?? 0;
+      final r = cap * math.pi / 180;
+      const devant = 45.0; // mètres
+      return CameraPosition(
+        target: LatLng(
+          livreur!.lat + devant * math.cos(r) / 110540,
+          livreur.lng +
+              devant *
+                  math.sin(r) /
+                  (111320 * math.cos(livreur.lat * math.pi / 180)),
+        ),
+        zoom: 17.6,
+        tilt: 60,
+        bearing: cap,
+      );
+    }
     switch (etape) {
       case EtapeCarte.confirmee:
         if (depart != null && client != null) {
@@ -432,12 +534,11 @@ class _CarteSuiviState extends State<CarteSuivi>
     }
   }
 
-  /// Chaque image : le livreur avance, la caméra se rapproche de sa cible
-  /// par lissage exponentiel (k = 1 − e^(−dt·2,4)), les lieux pulsent.
+  /// Chaque image (~30 par seconde) : le livreur avance ; en caméra
+  /// automatique, la caméra se rapproche de sa cible par lissage
+  /// exponentiel (k = 1 − e^(−dt·2,4)), cap compris.
   void _image(Duration maintenant) {
     if (!mounted) return;
-    // ~30 images par seconde : fluide à l'œil, sans épuiser un téléphone
-    // d'entrée de gamme ni saturer le pont vers la carte native.
     if (maintenant - _derniereImage < const Duration(milliseconds: 30)) return;
     final dt = ((maintenant - _derniereImage).inMicroseconds / 1e6).clamp(
       0.0,
@@ -447,27 +548,23 @@ class _CarteSuiviState extends State<CarteSuivi>
     _surRoute?.avancer(dt);
     _cap(dt);
     final livreur = _livreur();
-    final cible = _cible(_etape(livreur), livreur);
     final carte = _carte;
-    if (!_libre && cible != null && carte != null) {
-      final actuelle = _camera ?? cible;
-      final k = 1 - math.exp(-dt * 2.4);
-      double vers(double a, double b) => a + (b - a) * k;
-      final suivante = CameraPosition(
-        target: LatLng(
-          vers(actuelle.target.latitude, cible.target.latitude),
-          vers(actuelle.target.longitude, cible.target.longitude),
-        ),
-        zoom: vers(actuelle.zoom, cible.zoom),
-        tilt: vers(actuelle.tilt, cible.tilt),
-      );
-      final bouge =
-          (suivante.zoom - actuelle.zoom).abs() > 1e-4 ||
-          (suivante.tilt - actuelle.tilt).abs() > 1e-3 ||
-          (suivante.target.latitude - actuelle.target.latitude).abs() > 1e-8 ||
-          (suivante.target.longitude - actuelle.target.longitude).abs() > 1e-8;
-      _camera = suivante;
-      if (bouge) {
+    if (_vue != VueCarte.libre && carte != null) {
+      final cible = _cible(_etape(livreur), livreur);
+      if (cible != null) {
+        final actuelle = _camera ?? cible;
+        final k = 1 - math.exp(-dt * 2.4);
+        double vers(double a, double b) => a + (b - a) * k;
+        final suivante = CameraPosition(
+          target: LatLng(
+            vers(actuelle.target.latitude, cible.target.latitude),
+            vers(actuelle.target.longitude, cible.target.longitude),
+          ),
+          zoom: vers(actuelle.zoom, cible.zoom),
+          tilt: vers(actuelle.tilt, cible.tilt),
+          bearing: _versAngle(actuelle.bearing, cible.bearing, k),
+        );
+        _camera = suivante;
         unawaited(carte.moveCamera(CameraUpdate.newCameraPosition(suivante)));
       }
     }
@@ -518,6 +615,15 @@ class _CarteSuiviState extends State<CarteSuivi>
   }
 
   Set<Polyline> _traces(EtapeCarte etape) {
+    final surRoute = _surRoute;
+    // Recalculés seulement quand quelque chose a changé de façon visible.
+    final d = surRoute?.d;
+    final cle =
+        '${etape.index}|${_theme.nuit}|${identical(surRoute?.trace, _trajet)}|'
+        '${d == null ? '-' : (d / 3).floor()}|${_trajet.hashCode}|${_approche.hashCode}';
+    if (cle == _cleTraces) return _tracesAffiches;
+    _cleTraces = cle;
+
     final t = _theme;
     List<LatLng> latLng(List<Point> points) => [
       for (final p in points) LatLng(p.lat, p.lng),
@@ -539,16 +645,17 @@ class _CarteSuiviState extends State<CarteSuivi>
       endCap: Cap.roundCap,
     );
 
-    final surRoute = _surRoute;
     final traces = <Polyline>{};
     final trajet = _trajet;
     if (trajet != null && etape != EtapeCarte.livree) {
       final enCourse =
           etape == EtapeCarte.enRoute || etape == EtapeCarte.proche;
-      final d = surRoute != null && identical(surRoute.trace, trajet)
+      final dTrajet = surRoute != null && identical(surRoute.trace, trajet)
           ? surRoute.d
           : null;
-      final restant = enCourse && d != null ? trajet.depuis(d) : trajet.points;
+      final restant = enCourse && dTrajet != null
+          ? trajet.depuis(dTrajet)
+          : trajet.points;
       final opacite = enCourse ? 1.0 : 0.4;
       // La bordure sous tout le trajet : sous le restant, elle seule
       // montre la partie parcourue.
@@ -578,13 +685,15 @@ class _CarteSuiviState extends State<CarteSuivi>
     final approche = _approche;
     if (approche != null &&
         (etape == EtapeCarte.preparation || etape == EtapeCarte.auDepart)) {
-      final d = surRoute != null && identical(surRoute.trace, approche)
+      final dApproche = surRoute != null && identical(surRoute.trace, approche)
           ? surRoute.d
           : null;
       traces.add(
         Polyline(
           polylineId: const PolylineId('approche'),
-          points: latLng(d == null ? approche.points : approche.depuis(d)),
+          points: latLng(
+            dApproche == null ? approche.points : approche.depuis(dApproche),
+          ),
           color: t.approche,
           width: 6,
           zIndex: 4,
@@ -592,7 +701,7 @@ class _CarteSuiviState extends State<CarteSuivi>
         ),
       );
     }
-    return traces;
+    return _tracesAffiches = traces;
   }
 
   Set<Marker> _marqueurs(EtapeCarte etape, Point? livreur) {
@@ -611,30 +720,54 @@ class _CarteSuiviState extends State<CarteSuivi>
       if (depart != null) marqueurs.add(pastille('depart', depart, 1));
       if (client != null) marqueurs.add(pastille('client', client, 2));
     }
-    final visible =
-        livreur != null &&
-        etape != EtapeCarte.confirmee &&
-        etape != EtapeCarte.livree;
-    if (visible && _scooter.length == 36) {
-      // L'image la plus proche du cap, tournée du reste (±5°) : la lumière
-      // du rendu reste à sa place, et la rotation reste continue.
-      final cap = _capLisse ?? 0;
-      final vue = (cap / 10).round() % 36;
+    if (!_livreurVisible(etape, livreur) || _vespa.length != 4) {
+      return marqueurs;
+    }
+    final cap = _capLisse ?? 0;
+    final camera = _camera;
+    // La vue du Vespa qui correspond à la caméra : son cap VU DE LA CAMÉRA
+    // (cap − orientation de la carte), sous l'inclinaison la plus proche.
+    final relatif = (cap - (camera?.bearing ?? 0) + 720) % 360;
+    final direction = (relatif / 10).round() % 36;
+    final tilt = camera?.tilt ?? 0;
+    var rang = 0;
+    for (var i = 1; i < _inclinaisons.length; i++) {
+      if ((_inclinaisons[i] - tilt).abs() <
+          (_inclinaisons[rang] - tilt).abs()) {
+        rang = i;
+      }
+    }
+    final phares = _phares;
+    if (_theme.nuit && phares != null) {
       marqueurs.add(
         Marker(
-          markerId: const MarkerId('livreur'),
-          position: LatLng(livreur.lat, livreur.lng),
-          icon: _scooter[vue],
-          anchor: const Offset(0.5, 0.5),
-          rotation: cap - vue * 10,
+          markerId: const MarkerId('phares'),
+          position: LatLng(livreur!.lat, livreur.lng),
+          icon: phares,
+          // La base du faisceau sous l'avant du scooter.
+          anchor: const Offset(0.5, 0.93),
+          rotation: cap,
           flat: true,
           zIndexInt: 3,
           consumeTapEvents: true,
         ),
       );
     }
+    marqueurs.add(
+      Marker(
+        markerId: const MarkerId('livreur'),
+        position: LatLng(livreur!.lat, livreur.lng),
+        icon: _vespa[rang][direction],
+        // Le centre de l'image est le point de contact au sol.
+        anchor: const Offset(0.5, 0.5),
+        zIndexInt: 4,
+        consumeTapEvents: true,
+      ),
+    );
     return marqueurs;
   }
+
+  void _changerDeVue(VueCarte vue) => setState(() => _vue = vue);
 
   @override
   Widget build(BuildContext context) {
@@ -644,6 +777,7 @@ class _CarteSuiviState extends State<CarteSuivi>
     final etape = _etape(livreur);
     final fondAvant = _fondAvant;
     final marges = MediaQuery.paddingOf(context);
+    final visible = _livreurVisible(etape, livreur);
     return LayoutBuilder(
       builder: (context, contraintes) {
         _taille = contraintes.biggest;
@@ -669,11 +803,15 @@ class _CarteSuiviState extends State<CarteSuivi>
                       _carte = carte;
                       _camera = initiale;
                     },
+                    // Un geste du client : la caméra est à lui, on ne la
+                    // déplace plus sous son doigt.
                     onCameraMoveStarted: () {
-                      if (_doigt && !_libre) setState(() => _libre = true);
+                      if (_doigt && _vue != VueCarte.libre) {
+                        _changerDeVue(VueCarte.libre);
+                      }
                     },
                     onCameraMove: (position) {
-                      if (_libre) _camera = position;
+                      if (_vue == VueCarte.libre) _camera = position;
                     },
                     gestureRecognizers: {
                       Factory<OneSequenceGestureRecognizer>(
@@ -683,8 +821,10 @@ class _CarteSuiviState extends State<CarteSuivi>
                     markers: _marqueurs(etape, livreur),
                     polylines: _traces(etape),
                     circles: _pulsations(etape),
-                    rotateGesturesEnabled: false,
-                    tiltGesturesEnabled: false,
+                    zoomGesturesEnabled: true,
+                    scrollGesturesEnabled: true,
+                    rotateGesturesEnabled: true,
+                    tiltGesturesEnabled: true,
                     zoomControlsEnabled: false,
                     myLocationButtonEnabled: false,
                     mapToolbarEnabled: false,
@@ -692,7 +832,7 @@ class _CarteSuiviState extends State<CarteSuivi>
                     buildingsEnabled: false,
                     trafficEnabled: false,
                     indoorViewEnabled: false,
-                    minMaxZoomPreference: const MinMaxZoomPreference(11, 18.5),
+                    minMaxZoomPreference: const MinMaxZoomPreference(11, 19),
                   ),
                 ),
               ),
@@ -731,18 +871,56 @@ class _CarteSuiviState extends State<CarteSuivi>
                 Positioned(
                   top: marges.top + 8,
                   left: 16,
-                  child: _BoutonRetour(theme: t, onTap: widget.onRetour!),
+                  child: _BoutonRond(
+                    theme: t,
+                    etiquette: 'Retour',
+                    onTap: widget.onRetour!,
+                    // Le chevron est centré sur sa pointe : décalé d'un
+                    // point pour paraître centré dans le rond.
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 2),
+                      child: Icon(
+                        CupertinoIcons.chevron_back,
+                        size: 22,
+                        color: t.boutonTexte,
+                      ),
+                    ),
+                  ),
+                ),
+              // Derrière le livreur ⇄ vue d'ensemble.
+              if (visible)
+                Positioned(
+                  right: 16,
+                  bottom: marges.bottom + 28,
+                  child: _BoutonRond(
+                    theme: t,
+                    etiquette: _vue == VueCarte.derriere
+                        ? 'Vue d’ensemble'
+                        : 'Suivre derrière le livreur',
+                    onTap: () => _changerDeVue(
+                      _vue == VueCarte.derriere
+                          ? VueCarte.ensemble
+                          : VueCarte.derriere,
+                    ),
+                    child: Icon(
+                      _vue == VueCarte.derriere
+                          ? CupertinoIcons.map
+                          : CupertinoIcons.location_north_fill,
+                      size: 20,
+                      color: t.boutonTexte,
+                    ),
+                  ),
                 ),
               Positioned(
                 left: 16,
                 bottom: marges.bottom + 28,
                 child: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 220),
-                  child: _libre
+                  child: _vue == VueCarte.libre
                       ? _BoutonRecentrer(
                           key: const ValueKey('recentrer'),
                           theme: t,
-                          onTap: () => setState(() => _libre = false),
+                          onTap: () => _changerDeVue(VueCarte.ensemble),
                         )
                       : const SizedBox.shrink(key: ValueKey('suivi')),
                 ),
@@ -755,36 +933,32 @@ class _CarteSuiviState extends State<CarteSuivi>
   }
 }
 
-/// Retour, à la manière d'iOS : un chevron fin, dans un rond discret.
-class _BoutonRetour extends StatelessWidget {
-  const _BoutonRetour({required this.theme, required this.onTap});
+class _BoutonRond extends StatelessWidget {
+  const _BoutonRond({
+    required this.theme,
+    required this.etiquette,
+    required this.onTap,
+    required this.child,
+  });
 
   final ThemeCarte theme;
+  final String etiquette;
   final VoidCallback onTap;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) => Semantics(
     button: true,
-    label: 'Retour',
-    child: Material(
-      color: theme.boutonFond,
-      shape: CircleBorder(side: BorderSide(color: theme.boutonBord)),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: SizedBox(
-          width: 44,
-          height: 44,
-          child: Padding(
-            // Le chevron est centré sur sa pointe : on le décale d'un
-            // point à gauche pour qu'il paraisse centré dans le rond.
-            padding: const EdgeInsets.only(right: 2),
-            child: Icon(
-              CupertinoIcons.chevron_back,
-              size: 22,
-              color: theme.boutonTexte,
-            ),
-          ),
+    label: etiquette,
+    child: Tooltip(
+      message: etiquette,
+      child: Material(
+        color: theme.boutonFond,
+        shape: CircleBorder(side: BorderSide(color: theme.boutonBord)),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(width: 46, height: 46, child: Center(child: child)),
         ),
       ),
     ),
