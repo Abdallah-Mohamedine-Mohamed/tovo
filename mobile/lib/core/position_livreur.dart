@@ -192,6 +192,23 @@ class TraceMesure {
     return (lat: a.lat + (b.lat - a.lat) * f, lng: a.lng + (b.lng - a.lng) * f);
   }
 
+  /// L'indice du premier point du tracé situé au-delà de `d`.
+  int indiceApres(double d) {
+    var i = 0;
+    while (i < _cumul.length && _cumul[i] <= d) {
+      i++;
+    }
+    return i;
+  }
+
+  /// Du point à la distance `d` jusqu'au point d'indice `jusqua` inclus.
+  List<Point> entre(double d, int jusqua) {
+    if (points.isEmpty) return const [];
+    final fin = jusqua.clamp(0, points.length - 1);
+    final debut = indiceApres(d);
+    return [pointA(d), if (debut <= fin) ...points.sublist(debut, fin + 1)];
+  }
+
   /// Le tracé de `d` jusqu'au bout (ce qui reste à parcourir).
   List<Point> depuis(double d) {
     if (points.isEmpty) return const [];

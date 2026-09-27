@@ -62,8 +62,8 @@ enum VueCarte {
 ///   « derrière le livreur », tournée dans son sens de marche.
 /// - Le livreur avance à chaque image le long de la route
 ///   (LivreurSurRoute), sans bonds.
-/// - Le livreur est une moto 3D (« Motorcycle », Poly by Google, CC-BY), rendue
-///   sous 4 inclinaisons × 36 directions : on affiche la vue qui correspond
+/// - Le livreur est un scooter 3D (« Low poly scooter », Thomas Saint Pierre),
+///   rendu sous 4 inclinaisons × 36 directions : on affiche la vue qui correspond
 ///   à l'angle réel de la caméra — de profil dans un virage, de dos quand
 ///   il s'éloigne. Debout face à l'écran, il ne s'écrase jamais.
 /// - En route, l'arrivée estimée : « Arrivée dans 12 min » (durée Google
@@ -525,12 +525,12 @@ class _CarteSuiviState extends State<CarteSuivi>
     }
   }
 
-  /// Chaque image (~30 par seconde) : le livreur avance ; en caméra
+  /// Chaque image (60 par seconde au plus) : le livreur avance ; en caméra
   /// automatique, la caméra se rapproche de sa cible par lissage
   /// exponentiel (k = 1 − e^(−dt·2,4)), cap compris.
   void _image(Duration maintenant) {
     if (!mounted) return;
-    if (maintenant - _derniereImage < const Duration(milliseconds: 30)) return;
+    if (maintenant - _derniereImage < const Duration(milliseconds: 15)) return;
     final dt = ((maintenant - _derniereImage).inMicroseconds / 1e6).clamp(
       0.0,
       0.1,
@@ -605,16 +605,16 @@ class _CarteSuiviState extends State<CarteSuivi>
     return cercles;
   }
 
+  /// Les tracés, en deux morceaux pour le restant :
+  ///   - « proche » : de la moto jusqu'à ~150 m devant elle, recalculé à
+  ///     CHAQUE IMAGE — quelques points seulement, donc léger ; le trait part
+  ///     toujours pile de sous la moto (un envoi tous les 3 m laissait
+  ///     déborder le trait derrière elle, retour du 27/09) ;
+  ///   - « loin » : tout le reste, renvoyé seulement quand la moto a passé
+  ///     le point de jonction — rarement.
+  /// Renvoyer tout le tracé à chaque image alourdissait les gestes.
   Set<Polyline> _traces(EtapeCarte etape) {
     final surRoute = _surRoute;
-    // Recalculés seulement quand quelque chose a changé de façon visible.
-    final d = surRoute?.d;
-    final cle =
-        '${etape.index}|${_theme.nuit}|${identical(surRoute?.trace, _trajet)}|'
-        '${d == null ? '-' : (d / 3).floor()}|${_trajet.hashCode}|${_approche.hashCode}';
-    if (cle == _cleTraces) return _tracesAffiches;
-    _cleTraces = cle;
-
     final t = _theme;
     List<LatLng> latLng(List<Point> points) => [
       for (final p in points) LatLng(p.lat, p.lng),
@@ -636,42 +636,72 @@ class _CarteSuiviState extends State<CarteSuivi>
       endCap: Cap.roundCap,
     );
 
-    final traces = <Polyline>{};
     final trajet = _trajet;
-    if (trajet != null && etape != EtapeCarte.livree) {
-      final enCourse =
-          etape == EtapeCarte.enRoute || etape == EtapeCarte.proche;
-      final dTrajet = surRoute != null && identical(surRoute.trace, trajet)
-          ? surRoute.d
-          : null;
-      final restant = enCourse && dTrajet != null
-          ? trajet.depuis(dTrajet)
-          : trajet.points;
-      final opacite = enCourse ? 1.0 : 0.4;
-      // La bordure sous tout le trajet : sous le restant, elle seule
-      // montre la partie parcourue.
-      traces.add(ligne('bordure', trajet.points, t.traceBordure, 22, 1));
-      final halo = t.traceHalo;
-      if (halo != null) {
-        traces.add(
-          ligne(
-            'halo',
-            restant,
-            halo.withValues(alpha: halo.a * opacite),
-            20,
-            2,
-          ),
-        );
+    final enCourse = etape == EtapeCarte.enRoute || etape == EtapeCarte.proche;
+    final dTrajet =
+        trajet != null && surRoute != null && identical(surRoute.trace, trajet)
+        ? surRoute.d
+        : null;
+    final suivi = enCourse && dTrajet != null;
+    // Le premier point du tracé à plus de 150 m devant la moto : toujours
+    // DEVANT elle, même sur une longue ligne droite sans point intermédiaire.
+    final jonction = suivi ? trajet!.indiceApres(dTrajet + 150) : -1;
+
+    // La partie fixe : bordure, et le restant « loin ».
+    final cle =
+        '${etape.index}|${t.nuit}|$suivi|$jonction|'
+        '${trajet.hashCode}|${_approche.hashCode}';
+    if (cle != _cleTraces) {
+      _cleTraces = cle;
+      final fixes = <Polyline>{};
+      if (trajet != null && etape != EtapeCarte.livree) {
+        final opacite = enCourse ? 1.0 : 0.4;
+        final loin = suivi
+            ? (jonction < trajet.points.length
+                  ? trajet.points.sublist(jonction)
+                  : const <Point>[])
+            : trajet.points;
+        // La bordure sous tout le trajet : sous le restant, elle seule
+        // montre la partie parcourue.
+        fixes.add(ligne('bordure', trajet.points, t.traceBordure, 22, 1));
+        final halo = t.traceHalo;
+        if (loin.length >= 2) {
+          if (halo != null) {
+            fixes.add(
+              ligne(
+                'halo-loin',
+                loin,
+                halo.withValues(alpha: halo.a * opacite),
+                20,
+                2,
+              ),
+            );
+          }
+          fixes.add(
+            ligne(
+              'restant-loin',
+              loin,
+              t.traceRestant.withValues(alpha: opacite),
+              13,
+              3,
+            ),
+          );
+        }
       }
-      traces.add(
-        ligne(
-          'restant',
-          restant,
-          t.traceRestant.withValues(alpha: opacite),
-          13,
-          3,
-        ),
-      );
+      _tracesAffiches = fixes;
+    }
+
+    final traces = {..._tracesAffiches};
+    // La partie vivante : de la moto à la jonction, à chaque image.
+    if (suivi) {
+      final proche = trajet!.entre(dTrajet, jonction);
+      if (proche.length >= 2) {
+        final halo = t.traceHalo;
+        if (halo != null) {
+          traces.add(ligne('halo-proche', proche, halo, 20, 2));
+        }
+        traces.add(ligne('restant-proche', proche, t.traceRestant, 13, 3));
+      }
     }
     final approche = _approche;
     if (approche != null &&
@@ -692,7 +722,7 @@ class _CarteSuiviState extends State<CarteSuivi>
         ),
       );
     }
-    return _tracesAffiches = traces;
+    return traces;
   }
 
   Set<Marker> _marqueurs(EtapeCarte etape, Point? livreur) {

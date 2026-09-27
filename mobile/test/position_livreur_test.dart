@@ -168,6 +168,27 @@ void main() {
     });
   });
 
+  test('le trait restant part de la moto et rejoint le reste devant elle', () {
+    // Une longue ligne droite (1,1 km, sans point intermédiaire), puis un virage.
+    final trace = TraceMesure(const [
+      (lat: 13.500, lng: 2.100),
+      (lat: 13.510, lng: 2.100),
+      (lat: 13.510, lng: 2.103),
+      (lat: 13.512, lng: 2.103),
+    ]);
+    for (final d in [0.0, 200.0, 950.0, 1100.0, 1300.0, trace.longueur]) {
+      final jonction = trace.indiceApres(d + 150);
+      final proche = trace.entre(d, jonction);
+      // Il part pile de la moto…
+      expect(proche.first, trace.pointA(d));
+      if (jonction < trace.points.length) {
+        // … et rejoint le reste au premier point au-delà de 150 m, DEVANT elle.
+        expect(proche.last, trace.points[jonction]);
+        expect(trace.projeter(trace.points[jonction]).d, greaterThan(d));
+      }
+    }
+  });
+
   test('immobile : garde son dernier cap', () {
     final moto = MotoAnimee();
     final t0 = DateTime(2026, 9, 27, 12);
