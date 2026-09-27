@@ -73,14 +73,18 @@ class OrderTracking extends StatefulWidget {
     required this.component,
     required this.onInteraction,
     this.grandFormat = false,
+    this.onFermer,
   });
 
   final TovoComponent component;
   final InteractionCallback onInteraction;
 
-  /// Dans la feuille de suivi : la grande carte en tête. Dans le fil de la
-  /// conversation (par défaut), pas de carte — un bouton ouvre la feuille.
+  /// Sur l'écran de suivi : la carte seule, plein écran. Dans le fil de la
+  /// conversation (par défaut), pas de carte — un bouton ouvre l'écran.
   final bool grandFormat;
+
+  /// Le bouton retour de l'écran de suivi.
+  final VoidCallback? onFermer;
 
   @override
   State<OrderTracking> createState() => _OrderTrackingState();
@@ -308,22 +312,6 @@ class _OrderTrackingState extends State<OrderTracking>
     moto.recevoir(point, capDonne: capDonne);
     _revision++;
     if (quand != null) _dernierePosition = quand;
-  }
-
-  /// Où va la moto en ce moment : chercher (la boutique, ou le colis),
-  /// puis livrer. Sans coordonnées connues, la carte montre la moto seule.
-  /// Tant que rien n'est récupéré — livreur assigné pendant que la boutique
-  /// prépare compris — il va au départ. Même règle que le serveur
-  /// (GET /orders/:id/itineraire).
-  Point? get _arrivee {
-    final versLeDepart = !const {'picked_up', 'delivering'}.contains(_statut);
-    final colis = widget.component.str('type', '') == 'courier';
-    final lieu = !versLeDepart
-        ? widget.component.map('dropoff')
-        : colis
-        ? widget.component.map('pickup')
-        : widget.component.map('merchant');
-    return lirePoint(lieu);
   }
 
   void _desabonner() {
@@ -579,57 +567,70 @@ class _OrderTrackingState extends State<OrderTracking>
     );
     if (!widget.grandFormat) return contenu;
 
-    // La feuille : la carte, et rien d'autre (retour du 27/09). L'étape,
-    // le livreur, le paiement sont déjà dans le fil, sur l'écran verrouillé
-    // et dans la Dynamic Island : les répéter ici était de la redondance.
-    final carte =
-        _livreur != null &&
-        !annulee &&
-        _statut != 'delivered' &&
-        moto.position() != null;
-    if (carte) {
+    // L'écran de suivi : la carte, et rien d'autre (maquette « Suivi
+    // Commande », 27/09). L'étape, le livreur, le paiement sont déjà dans
+    // le fil, sur l'écran verrouillé et dans la Dynamic Island.
+    final depart = lirePoint(
+      colis ? widget.component.map('pickup') : widget.component.map('merchant'),
+    );
+    final client = lirePoint(widget.component.map('dropoff'));
+    if (!annulee && (depart != null || client != null)) {
       return CarteSuivi(
         moto: moto,
         revision: _revision,
         orderId: _orderId,
         statut: _statut,
-        arrivee: _arrivee,
+        livreurPresent: _livreur != null,
+        depart: depart,
+        client: client,
+        nomDepart: colis
+            ? 'Colis'
+            : enPhrase(widget.component.str('merchant_name')),
+        colis: colis,
+        // Un colis envoyé : l'arrivée est chez le destinataire, pas « vous ».
+        clientEstVous: !colis || _recuperer,
+        onRetour: widget.onFermer,
       );
     }
-    // Pas encore de livreur sur la route : l'illustration, et une phrase.
+    // Annulée, ou aucun lieu connu : rien à montrer sur une carte.
     return ColoredBox(
-      color: const Color(0xFF1B2940),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Image(
-              image: AssetImage('assets/icons/3d/scooter-livraison.png'),
-              height: 150,
-            ),
-            const SizedBox(height: 18),
-            Text(
-              annulee
-                  ? 'Commande annulée'
-                  : _statut == 'delivered'
-                  ? 'Commande livrée'
-                  : 'Le livreur n’est pas encore en route',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
+      color: const Color(0xFF1A1D2D),
+      child: Stack(
+        children: [
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                annulee
+                    ? 'Commande annulée'
+                    : 'La carte apparaîtra dès que le trajet sera connu.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFFE9E9ED),
+                ),
               ),
             ),
-            if (!annulee && _statut != 'delivered') ...[
-              const SizedBox(height: 6),
-              const Text(
-                'La carte s’animera dès son départ.',
-                style: TextStyle(fontSize: 14, color: Color(0xFF9FB0C8)),
+          ),
+          if (widget.onFermer != null)
+            Positioned(
+              top: MediaQuery.paddingOf(context).top + 8,
+              left: 16,
+              child: IconButton.filled(
+                tooltip: 'Retour',
+                style: IconButton.styleFrom(
+                  backgroundColor: const Color(0xE6232532),
+                  fixedSize: const Size(46, 46),
+                ),
+                onPressed: widget.onFermer,
+                icon: const Icon(
+                  Icons.chevron_left_rounded,
+                  color: Color(0xFFE9E9ED),
+                ),
               ),
-            ],
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }

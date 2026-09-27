@@ -116,6 +116,93 @@ List<Point> resteDuTrace(List<Point> trace, Point livreur) {
   return [livreur, ...trace.sublist(proche)];
 }
 
+/// Un tracé mesuré : chaque point connaît sa distance depuis le départ.
+///
+/// C'est ce qui fait avancer le livreur LE LONG DES RUES : chaque position
+/// GPS reçue est projetée sur le tracé (distance parcourue `d`), puis le
+/// livreur glisse de l'ancienne distance à la nouvelle — il prend les
+/// virages au lieu de couper à travers les pâtés de maisons.
+class TraceMesure {
+  TraceMesure(this.points) : _cumul = _cumuler(points);
+
+  final List<Point> points;
+  final List<double> _cumul;
+
+  static List<double> _cumuler(List<Point> points) {
+    final cumul = <double>[];
+    var total = 0.0;
+    for (var i = 0; i < points.length; i++) {
+      if (i > 0) total += metres(points[i - 1], points[i]);
+      cumul.add(total);
+    }
+    return cumul;
+  }
+
+  double get longueur => _cumul.isEmpty ? 0 : _cumul.last;
+
+  /// Le point du tracé le plus proche de `p` : sa distance depuis le départ
+  /// (`d`), et l'écart en mètres entre `p` et le tracé.
+  ({double d, double ecart}) projeter(Point p) {
+    if (points.length < 2) {
+      return (
+        d: 0,
+        ecart: points.isEmpty ? double.infinity : metres(p, points.first),
+      );
+    }
+    var meilleurD = 0.0;
+    var meilleurEcart = double.infinity;
+    // Projection plane locale : à l'échelle d'une rue, la Terre est plate.
+    final kx = 111320 * math.cos(p.lat * math.pi / 180);
+    const ky = 110540.0;
+    for (var i = 0; i < points.length - 1; i++) {
+      final a = points[i];
+      final b = points[i + 1];
+      final ax = (a.lng - p.lng) * kx;
+      final ay = (a.lat - p.lat) * ky;
+      final bx = (b.lng - p.lng) * kx;
+      final by = (b.lat - p.lat) * ky;
+      final dx = bx - ax;
+      final dy = by - ay;
+      final l2 = dx * dx + dy * dy;
+      final f = l2 == 0 ? 0.0 : (-(ax * dx + ay * dy) / l2).clamp(0.0, 1.0);
+      final x = ax + f * dx;
+      final y = ay + f * dy;
+      final ecart = math.sqrt(x * x + y * y);
+      if (ecart < meilleurEcart) {
+        meilleurEcart = ecart;
+        meilleurD = _cumul[i] + f * (_cumul[i + 1] - _cumul[i]);
+      }
+    }
+    return (d: meilleurD, ecart: meilleurEcart);
+  }
+
+  /// Le point à la distance `d` du départ.
+  Point pointA(double d) {
+    if (points.isEmpty) return (lat: 0, lng: 0);
+    if (d <= 0 || points.length == 1) return points.first;
+    if (d >= longueur) return points.last;
+    var i = 0;
+    while (i < _cumul.length - 2 && _cumul[i + 1] < d) {
+      i++;
+    }
+    final segment = _cumul[i + 1] - _cumul[i];
+    final f = segment == 0 ? 0.0 : (d - _cumul[i]) / segment;
+    final a = points[i];
+    final b = points[i + 1];
+    return (lat: a.lat + (b.lat - a.lat) * f, lng: a.lng + (b.lng - a.lng) * f);
+  }
+
+  /// Le tracé de `d` jusqu'au bout (ce qui reste à parcourir).
+  List<Point> depuis(double d) {
+    if (points.isEmpty) return const [];
+    var i = 0;
+    while (i < _cumul.length && _cumul[i] <= d) {
+      i++;
+    }
+    return [pointA(d), ...points.sublist(i)];
+  }
+}
+
 /// La moto sur la carte : elle GLISSE d'une position reçue à la suivante,
 /// en autant de temps qu'il en a fallu pour la recevoir (≈ 5 s), au lieu de
 /// sauter. Le cap suit la route ; immobile, elle garde son dernier cap.
@@ -181,6 +268,13 @@ class MotoAnimee {
   }
 
   double get capDegres => _cap;
+
+  /// La dernière position reçue (là où la glisse s'arrêtera).
+  Point? get derniere => _arrivee;
+
+  /// La durée de la glisse en cours : l'écart entre les deux dernières
+  /// positions reçues.
+  Duration get duree => _duree;
 
   /// Encore en train de glisser ?
   bool enMouvement([DateTime? t]) {

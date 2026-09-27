@@ -65,7 +65,6 @@ dependencies:
   flutter_svg: ^2.0.10
   google_maps_flutter: ^2.18.2
   google_maps_flutter_ios_sdk10: ^2.19.0
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -137,6 +136,13 @@ flutter:
           weight: 800
     # Geist (Vercel, licence OFL) : la police de l'app client, noms des
     # articles et des boutiques compris (choix du client, 25/09).
+    # Phosphor Icons, poids « fill » (licence MIT, assets/fonts/Phosphor-LICENSE.txt) :
+    # les icônes de la carte de suivi (scooter, boutique, maison…). La police
+    # seule, sans le paquet phosphor_flutter, abandonné et incompatible avec
+    # Flutter 3.47.
+    - family: PhosphorFill
+      fonts:
+        - asset: assets/fonts/Phosphor-Fill.ttf
     - family: Geist
       fonts:
         - asset: assets/fonts/Geist-Regular.ttf

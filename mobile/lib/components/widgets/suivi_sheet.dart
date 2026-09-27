@@ -1,65 +1,59 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../registry.dart';
 import 'order_tracking.dart';
 
-/// La feuille de suivi : la carte, et rien d'autre.
+/// L'écran de suivi : la carte, plein écran, et rien d'autre (maquette
+/// « Suivi Commande », 27/09).
 ///
-/// Même allure que la fiche produit (product_sheet.dart) — posée au-dessus
-/// de l'app, bords arrondis — mais presque tout l'écran, pour la carte.
-/// La carte garde pour elle les gestes du doigt (zoom, glisser) : on ferme
-/// par la croix.
+/// Il monte du bas comme une feuille, mais couvre tout l'écran : une carte
+/// posée par-dessus l'accueil laissait voir l'accueil au travers tant que
+/// les tuiles n'étaient pas chargées. Un bouton retour, en haut à gauche.
 Future<void> ouvrirSuivi(
   BuildContext context, {
   required TovoComponent component,
   required InteractionCallback onInteraction,
-}) => showModalBottomSheet<void>(
-  context: context,
-  isScrollControlled: true,
-  useSafeArea: true,
-  enableDrag: false,
-  backgroundColor: Colors.transparent,
-  barrierColor: Colors.black54,
-  builder: (feuille) => Padding(
-    padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(28),
-      child: SizedBox(
-        height: MediaQuery.sizeOf(feuille).height * 0.9,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: OrderTracking(
-                component: component,
-                grandFormat: true,
-                onInteraction: onInteraction,
-              ),
-            ),
-            Positioned(
-              top: 14,
-              right: 14,
-              child: Material(
-                color: const Color(0xF2121A26),
-                shape: const CircleBorder(),
-                child: IconButton(
-                  tooltip: 'Fermer',
-                  onPressed: () => Navigator.pop(feuille),
-                  icon: const Icon(Icons.close_rounded, color: Colors.white),
-                ),
-              ),
-            ),
-          ],
+}) => Navigator.of(context).push(
+  PageRouteBuilder<void>(
+    transitionDuration: const Duration(milliseconds: 380),
+    reverseTransitionDuration: const Duration(milliseconds: 280),
+    pageBuilder: (ecran, _, _) => AnnotatedRegion<SystemUiOverlayStyle>(
+      // Barre d'état claire sur la carte de nuit, sombre sur celle de jour :
+      // la carte la recouvre, c'est à elle d'en décider — en attendant, la
+      // plus lisible sur les deux fonds.
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF1A1D2D),
+        body: OrderTracking(
+          component: component,
+          grandFormat: true,
+          onInteraction: onInteraction,
+          onFermer: () => Navigator.of(ecran).pop(),
         ),
       ),
     ),
+    transitionsBuilder: (_, animation, _, enfant) {
+      final courbe = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+      return SlideTransition(
+        position: Tween(
+          begin: const Offset(0, 1),
+          end: Offset.zero,
+        ).animate(courbe),
+        child: enfant,
+      );
+    },
   ),
 );
 
 /// Depuis l'accueil : on n'a que l'identifiant de la commande. On lit son
 /// état complet (la même fonction que le serveur, order_tracking), puis on
-/// ouvre la feuille. Sans réseau, rien ne s'ouvre — mieux qu'une feuille
-/// vide.
+/// ouvre l'écran. Sans réseau, rien ne s'ouvre — mieux qu'un écran vide.
 Future<void> ouvrirSuiviCommande(
   BuildContext context, {
   required String orderId,

@@ -2,18 +2,25 @@ import { env } from '../config/env.js';
 import { distanceKm, type Point } from './arrivee.js';
 
 /**
- * L'itinéraire du livreur, tracé sur la carte de suivi du client.
+ * Les itinéraires de la carte de suivi du client.
  *
- * Google Routes API (Compute Routes), en voiture et sans trafic : c'est la
+ * Deux tracés (maquette « Suivi Commande », 27/09) :
+ *   - le TRAJET, du départ (boutique, ou colis à récupérer) jusqu'au
+ *     client : visible dès la commande confirmée ; une fois la commande
+ *     récupérée, c'est lui que le livreur suit ;
+ *   - l'APPROCHE, du livreur jusqu'au départ, tant qu'il n'a rien récupéré.
+ *
+ * Google Routes API (Compute Routes), en voiture et sans trafic : la
  * formule « Essentials », 10 000 calculs gratuits par mois. Le trafic ou
  * les deux-roues la feraient passer en « Pro », plus chère, pour un gain
  * nul à Niamey — une moto y emprunte les mêmes rues qu'une voiture.
  *
  * Un calcul coûte : on n'en refait un que s'il le faut vraiment.
- *   - même destination, et le livreur est encore SUR le tracé (à moins de
- *     60 m d'un de ses points) : on renvoie le tracé déjà calculé ;
- *   - sinon, jamais plus d'un calcul toutes les 20 s par commande ;
- *   - un tracé de plus de 15 minutes est refait (le livreur a pu couper).
+ *   - un tracé suivi par le livreur reste valable tant qu'il est dessus (à
+ *     moins de 50 m d'un de ses points) ;
+ *   - un tracé fixe (boutique → client) ne change pas tant que ses deux
+ *     bouts ne bougent pas ;
+ *   - jamais plus d'un calcul toutes les 20 s par tracé.
  */
 
 export type Itineraire = {
@@ -26,13 +33,15 @@ export type Itineraire = {
 type Entree = {
   itineraire: Itineraire;
   points: Point[];
+  depart: Point;
   destination: Point;
   calculeLe: number;
 };
 
-const ECART_MAX_M = 60;
+const ECART_MAX_M = 50;
 const INTERVALLE_MIN_MS = 20_000;
-const DUREE_DE_VIE_MS = 15 * 60_000;
+const VIE_SUIVI_MS = 15 * 60_000;
+const VIE_FIXE_MS = 6 * 60 * 60_000;
 
 const cache = new Map<string, Entree>();
 const dernierCalcul = new Map<string, number>();
@@ -86,6 +95,7 @@ async function calculer(depart: Point, destination: Point): Promise<Itineraire |
       destination: { location: { latLng: { latitude: destination.lat, longitude: destination.lng } } },
       travelMode: 'DRIVE',
       routingPreference: 'TRAFFIC_UNAWARE',
+      polylineQuality: 'HIGH_QUALITY',
       languageCode: 'fr',
     }),
     signal: AbortSignal.timeout(6000),
@@ -105,43 +115,49 @@ async function calculer(depart: Point, destination: Point): Promise<Itineraire |
 }
 
 /**
- * Le tracé du livreur jusqu'à sa destination, ou null (pas de clé, Google
- * injoignable, ou trop tôt pour recalculer et rien en réserve).
+ * Un tracé, ou null (pas de clé, Google injoignable, ou trop tôt pour
+ * recalculer et rien en réserve).
+ *
+ * `cle` identifie le tracé (« <commande>:trajet », « <commande>:approche »).
+ * `suivi` : la position du livreur, quand c'est lui qui suit ce tracé — il
+ * reste valable tant qu'il est dessus. Sans `suivi`, le tracé est fixe et
+ * ne change qu'avec ses deux bouts.
  */
 export async function itinerairePour(
-  commande: string,
-  livreur: Point,
+  cle: string,
+  depart: Point,
   destination: Point,
-  maintenant = Date.now(),
+  options: { suivi?: Point; maintenant?: number } = {},
 ): Promise<Itineraire | null> {
-  const connu = cache.get(commande);
-  if (
-    connu &&
-    memeEndroit(connu.destination, destination) &&
-    maintenant - connu.calculeLe < DUREE_DE_VIE_MS &&
-    surLeTrace(livreur, connu.points)
-  ) {
-    return connu.itineraire;
+  const maintenant = options.maintenant ?? Date.now();
+  const connu = cache.get(cle);
+  if (connu && memeEndroit(connu.destination, destination)) {
+    const valable = options.suivi
+      ? maintenant - connu.calculeLe < VIE_SUIVI_MS && surLeTrace(options.suivi, connu.points)
+      : maintenant - connu.calculeLe < VIE_FIXE_MS && memeEndroit(connu.depart, depart);
+    if (valable) return connu.itineraire;
   }
-  const dernier = dernierCalcul.get(commande) ?? 0;
+  const dernier = dernierCalcul.get(cle) ?? 0;
   if (maintenant - dernier < INTERVALLE_MIN_MS) return connu?.itineraire ?? null;
-  dernierCalcul.set(commande, maintenant);
+  dernierCalcul.set(cle, maintenant);
 
-  const itineraire = await calculer(livreur, destination).catch(() => null);
+  const itineraire = await calculer(depart, destination).catch(() => null);
   if (!itineraire) return connu?.itineraire ?? null;
-  cache.set(commande, {
+  cache.delete(cle);
+  cache.set(cle, {
     itineraire,
     points: decoderPolyline(itineraire.polyline),
+    depart,
     destination,
     calculeLe: maintenant,
   });
-  // Un cache par commande, jamais purgé, finirait par peser : au-delà de
-  // 500 commandes suivies, on oublie les plus anciennes.
-  if (cache.size > 500) {
-    const plusAncienne = cache.keys().next().value;
-    if (plusAncienne) {
-      cache.delete(plusAncienne);
-      dernierCalcul.delete(plusAncienne);
+  // Un cache jamais purgé finirait par peser : au-delà de 1 000 tracés, on
+  // oublie les plus anciens.
+  if (cache.size > 1000) {
+    const plusAncien = cache.keys().next().value;
+    if (plusAncien) {
+      cache.delete(plusAncien);
+      dernierCalcul.delete(plusAncien);
     }
   }
   return itineraire;

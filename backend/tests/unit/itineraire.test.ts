@@ -16,7 +16,7 @@ function reponseGoogle(polyline = EXEMPLE) {
   );
 }
 
-describe('itinéraire du livreur', () => {
+describe('itinéraires de la carte de suivi', () => {
   afterEach(() => {
     viderCacheItineraires();
     vi.restoreAllMocks();
@@ -36,14 +36,25 @@ describe('itinéraire du livreur', () => {
     expect(surLeTrace({ lat: 13.5, lng: 2.11 }, trace)).toBe(false);
   });
 
-  it('ne repaie pas un calcul tant que le livreur reste sur le tracé', async () => {
+  it('un tracé suivi ne se repaie pas tant que le livreur reste dessus', async () => {
     const appel = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => reponseGoogle());
     const destination = { lat: 43.252, lng: -126.453 };
     const t0 = 1_000_000;
-    const a = await itinerairePour('c1', { lat: 38.5, lng: -120.2 }, destination, t0);
-    const b = await itinerairePour('c1', { lat: 38.5001, lng: -120.2 }, destination, t0 + 60_000);
+    const livreur = { lat: 38.5, lng: -120.2 };
+    const a = await itinerairePour('c1:approche', livreur, destination, { suivi: livreur, maintenant: t0 });
+    const bouge = { lat: 38.5001, lng: -120.2 };
+    const b = await itinerairePour('c1:approche', bouge, destination, { suivi: bouge, maintenant: t0 + 60_000 });
     expect(a?.dureeS).toBe(240);
     expect(b).toEqual(a);
+    expect(appel).toHaveBeenCalledTimes(1);
+  });
+
+  it('un tracé fixe (boutique → client) ne se calcule qu’une fois', async () => {
+    const appel = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => reponseGoogle());
+    const boutique = { lat: 13.5, lng: 2.1 };
+    const client = { lat: 13.52, lng: 2.12 };
+    await itinerairePour('c4:trajet', boutique, client, { maintenant: 1_000_000 });
+    await itinerairePour('c4:trajet', boutique, client, { maintenant: 1_000_000 + 30 * 60_000 });
     expect(appel).toHaveBeenCalledTimes(1);
   });
 
@@ -51,16 +62,18 @@ describe('itinéraire du livreur', () => {
     const appel = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => reponseGoogle());
     const destination = { lat: 43.252, lng: -126.453 };
     const t0 = 1_000_000;
-    await itinerairePour('c2', { lat: 38.5, lng: -120.2 }, destination, t0);
-    await itinerairePour('c2', { lat: 30, lng: -100 }, destination, t0 + 5_000);
+    const depart = { lat: 38.5, lng: -120.2 };
+    await itinerairePour('c2:trajet', depart, destination, { suivi: depart, maintenant: t0 });
+    const ailleurs = { lat: 30, lng: -100 };
+    await itinerairePour('c2:trajet', ailleurs, destination, { suivi: ailleurs, maintenant: t0 + 5_000 });
     expect(appel).toHaveBeenCalledTimes(1);
-    await itinerairePour('c2', { lat: 30, lng: -100 }, destination, t0 + 25_000);
+    await itinerairePour('c2:trajet', ailleurs, destination, { suivi: ailleurs, maintenant: t0 + 25_000 });
     expect(appel).toHaveBeenCalledTimes(2);
   });
 
   it('Google injoignable : null, sans planter', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('réseau'));
-    const r = await itinerairePour('c3', { lat: 13.5, lng: 2.1 }, { lat: 13.52, lng: 2.12 });
+    const r = await itinerairePour('c3:trajet', { lat: 13.5, lng: 2.1 }, { lat: 13.52, lng: 2.12 });
     expect(r).toBeNull();
   });
 });

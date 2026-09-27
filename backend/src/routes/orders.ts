@@ -364,42 +364,47 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
-   * L'itinéraire du livreur, pour le trait de la carte de suivi.
+   * Les tracés de la carte de suivi.
    *
    * Même contrôle d'accès que le suivi : order_tracking, sous la RLS de
-   * l'appelant, ne renvoie rien d'une commande qui ne le regarde pas. La
-   * destination suit l'étape : la boutique (ou le colis) tant que le
-   * livreur n'a rien récupéré, puis le client. 204 quand il n'y a rien à
-   * tracer — pas de livreur, pas de position, pas de clé Google.
+   * l'appelant, ne renvoie rien d'une commande qui ne le regarde pas.
+   *   - trajet : du départ (boutique, ou colis) au client. Une fois la
+   *     commande récupérée, le livreur le suit ; s'il en sort, il est
+   *     recalculé depuis lui.
+   *   - approche : du livreur au départ, tant qu'il n'a rien récupéré.
+   * Chacun est null quand il manque un bout (pas de livreur, position du
+   * colis inconnue) ou que Google ne répond pas.
    */
   app.get('/orders/:orderId/itineraire', { preHandler: app.requireAuth }, async (request, reply) => {
     const params = z.object({ orderId: z.string().uuid() }).safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'identifiant invalide' });
+    const id = params.data.orderId;
 
-    const { data } = await request.supabase!.rpc('order_tracking', {
-      p_order_id: params.data.orderId,
-    });
+    const { data } = await request.supabase!.rpc('order_tracking', { p_order_id: id });
     const suivi = data as Record<string, any> | null;
     if (!suivi) return reply.code(404).send({ error: 'commande introuvable' });
 
     const point = (v: any): { lat: number; lng: number } | null =>
       v && typeof v.lat === 'number' && typeof v.lng === 'number' ? { lat: v.lat, lng: v.lng } : null;
-    const livreur = point(suivi.driver?.position);
-    const recupere = ['picked_up', 'delivering'].includes(String(suivi.status));
-    const destination = recupere
-      ? point(suivi.dropoff)
-      : suivi.type === 'courier'
-        ? point(suivi.pickup)
-        : point(suivi.merchant);
-    if (!livreur || !destination) return reply.code(204).send();
+    const statut = String(suivi.status);
+    const livreur = statut === 'delivered' || statut === 'cancelled' ? null : point(suivi.driver?.position);
+    const recupere = ['picked_up', 'delivering'].includes(statut);
+    const depart = suivi.type === 'courier' ? point(suivi.pickup) : point(suivi.merchant);
+    const client = point(suivi.dropoff);
 
-    const itineraire = await itinerairePour(params.data.orderId, livreur, destination);
-    if (!itineraire) return reply.code(204).send();
-    return reply.send({
-      polyline: itineraire.polyline,
-      distance_m: itineraire.distanceM,
-      duree_s: itineraire.dureeS,
-    });
+    const [trajet, approche] = await Promise.all([
+      recupere && livreur && client
+        ? itinerairePour(`${id}:trajet`, livreur, client, { suivi: livreur })
+        : depart && client
+          ? itinerairePour(`${id}:trajet`, depart, client)
+          : null,
+      !recupere && livreur && depart
+        ? itinerairePour(`${id}:approche`, livreur, depart, { suivi: livreur })
+        : null,
+    ]);
+    const vers = (i: typeof trajet) =>
+      i ? { polyline: i.polyline, distance_m: i.distanceM, duree_s: i.dureeS } : null;
+    return reply.send({ trajet: vers(trajet), approche: vers(approche) });
   });
 
   /**

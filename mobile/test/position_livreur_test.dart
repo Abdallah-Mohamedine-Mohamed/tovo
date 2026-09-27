@@ -78,6 +78,25 @@ void main() {
     expect(reste.skip(1), [ligne[1], ligne[2]]);
   });
 
+  test('le tracé mesuré projette le GPS sur la rue et suit les virages', () {
+    // Un « L » : 1,1 km vers le nord, puis vers l'est.
+    final trace = TraceMesure(const [
+      (lat: 13.500, lng: 2.100),
+      (lat: 13.510, lng: 2.100),
+      (lat: 13.510, lng: 2.110),
+    ]);
+    expect(trace.longueur, greaterThan(2000));
+    // Un GPS un peu à côté de la première rue : projeté dessus.
+    final p = trace.projeter((lat: 13.505, lng: 2.1001));
+    expect(p.ecart, lessThan(15));
+    expect(p.d, closeTo(553, 5));
+    // À mi-chemin de la distance totale : dans le virage, pas en diagonale.
+    final milieu = trace.pointA(trace.longueur / 2);
+    expect(milieu.lat == 13.510 || milieu.lng == 2.100, isTrue);
+    expect(trace.depuis(p.d).first.lat, closeTo(13.505, 1e-6));
+    expect(trace.depuis(p.d).last, (lat: 13.510, lng: 2.110));
+  });
+
   test('immobile : garde son dernier cap', () {
     final moto = MotoAnimee();
     final t0 = DateTime(2026, 9, 27, 12);
