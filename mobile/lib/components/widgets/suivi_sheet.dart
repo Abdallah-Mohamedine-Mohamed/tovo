@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../registry.dart';
@@ -19,19 +18,15 @@ Future<void> ouvrirSuivi(
   PageRouteBuilder<void>(
     transitionDuration: const Duration(milliseconds: 380),
     reverseTransitionDuration: const Duration(milliseconds: 280),
-    pageBuilder: (ecran, _, _) => AnnotatedRegion<SystemUiOverlayStyle>(
-      // Barre d'état claire sur la carte de nuit, sombre sur celle de jour :
-      // la carte la recouvre, c'est à elle d'en décider — en attendant, la
-      // plus lisible sur les deux fonds.
-      value: SystemUiOverlayStyle.light,
-      child: Scaffold(
-        backgroundColor: const Color(0xFF1A1D2D),
-        body: OrderTracking(
-          component: component,
-          grandFormat: true,
-          onInteraction: onInteraction,
-          onFermer: () => Navigator.of(ecran).pop(),
-        ),
+    // La carte décide elle-même de la couleur de la barre d'état (noire sur
+    // le thème clair, blanche sur le sombre).
+    pageBuilder: (ecran, _, _) => Scaffold(
+      backgroundColor: const Color(0xFF176A73),
+      body: OrderTracking(
+        component: component,
+        grandFormat: true,
+        onInteraction: onInteraction,
+        onFermer: () => Navigator.of(ecran).pop(),
       ),
     ),
     transitionsBuilder: (_, animation, _, enfant) {

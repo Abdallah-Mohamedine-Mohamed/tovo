@@ -75,39 +75,44 @@ class ThemeCarte {
   final Color boutonBord;
   final Color boutonTexte;
 
+  /// Nuit teal (choix du 28/09) : fond #176a73, trajet restant cyan vif
+  /// #41F3F1 avec son halo ; le parcouru en teal très sombre, les rues en
+  /// teal plus clair que le fond.
   static const sombre = ThemeCarte._(
     nuit: true,
-    fond: Color(0xFF1A1D2D),
+    fond: Color(0xFF176A73),
     style: _styleNuit,
-    traceRestant: Color(0xFF9184D9),
-    traceHalo: Color(0x559184D9),
-    traceBordure: Color(0xFF2B2741),
-    approche: Color(0xFF9397AB),
-    pastilleFond: Color(0xFF232532),
-    pastilleBord: Color(0xFF595D6C),
-    pastilleIconeFond: Color(0xFF2B2741),
-    pastilleIcone: Color(0xFFD2CEFD),
-    pastilleTexte: Color(0xFFE9E9ED),
-    pastilleTige: Color(0xFF595D6C),
-    pastillePoint: Color(0xFFE9E9ED),
-    vousFond: Color(0xFFE9E9ED),
-    vousTexte: Color(0xFF1A1D2D),
-    vousIconeFond: Color(0xFF1A1D2D),
-    vousIcone: Color(0xFFE9E9ED),
-    ombre: Color(0x80000000),
-    pulsation: Color(0xFF9184D9),
-    boutonFond: Color(0xE6232532),
-    boutonBord: Color(0xFF595D6C),
-    boutonTexte: Color(0xFFE9E9ED),
+    traceRestant: Color(0xFF41F3F1),
+    traceHalo: Color(0x4D41F3F1),
+    traceBordure: Color(0xFF0D4A51),
+    approche: Color(0xFFB5E6E8),
+    pastilleFond: Color(0xFF0F4A51),
+    pastilleBord: Color(0xFF3A9AA3),
+    pastilleIconeFond: Color(0xFF0A3A40),
+    pastilleIcone: Color(0xFF9FF7F5),
+    pastilleTexte: Color(0xFFEAF8F8),
+    pastilleTige: Color(0xFF3A9AA3),
+    pastillePoint: Color(0xFFEAF8F8),
+    vousFond: Color(0xFFEAF8F8),
+    vousTexte: Color(0xFF0F4A51),
+    vousIconeFond: Color(0xFF0F4A51),
+    vousIcone: Color(0xFFEAF8F8),
+    ombre: Color(0x66031E22),
+    pulsation: Color(0xFF41F3F1),
+    boutonFond: Color(0xF00F4A51),
+    boutonBord: Color(0xFF3A9AA3),
+    boutonTexte: Color(0xFFEAF8F8),
   );
 
   static const clair = ThemeCarte._(
     nuit: false,
     fond: Color(0xFFF4F2EB),
     style: _styleJour,
-    traceRestant: Color(0xFF2F6BFF),
+    // Cyan (choix du 28/09) : plus doux que le bleu « Google Maps ». La
+    // bordure cyan pâle, sous tout le trajet, montre la partie parcourue.
+    traceRestant: Color(0xFF04BBC2),
     traceHalo: null,
-    traceBordure: Color(0xFFC3CAD8),
+    traceBordure: Color(0xFFD5F6F7),
     approche: Color(0xFF5D5B54),
     pastilleFond: Color(0xFFFDFCF9),
     pastilleBord: Color(0xFF8D8A80),
@@ -241,34 +246,49 @@ Dessin dessinerPastille(
   return (image: r.endRecording(), taille: Size(largeur, hauteur), ancre: sol);
 }
 
-/// Épure nuit : fond #1A1D2D ; rues secondaires #3f424d (1,5 pt), grands
-/// axes #595d6c (2,5 pt) ; parcs #1a2622, eau #121a2e ; noms de rues
-/// #9397ab, liseré de la couleur du fond. Ni POI, ni transports, ni noms de
-/// quartiers.
+/// Épure nuit teal : fond #176a73 ; îlots à peine plus sombres ; rues
+/// secondaires #2e848d (1,5 pt), grands axes #4aa2ab (2,5 pt) ; espaces
+/// verts #1d7b6c, eau #0f5059 ; noms de rues #cdeef0, liseré du fond.
+///
+/// Repères (28/09) : les noms de quelques lieux qui guident à Niamey —
+/// mosquées, écoles, santé, administrations, lieux connus, parcs — en petit,
+/// sans pictogramme ; ni commerces, ni transports, ni quartiers.
 const _styleNuit = '''
 [
-  {"elementType":"geometry","stylers":[{"color":"#1a1d2d"}]},
+  {"elementType":"geometry","stylers":[{"color":"#176a73"}]},
   {"elementType":"labels","stylers":[{"visibility":"off"}]},
   {"featureType":"administrative","elementType":"geometry","stylers":[{"visibility":"off"}]},
-  {"featureType":"landscape.man_made","elementType":"geometry","stylers":[{"color":"#1e2130"}]},
-  {"featureType":"poi","elementType":"geometry","stylers":[{"color":"#1a1d2d"}]},
-  {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#1a2622"}]},
+  {"featureType":"landscape.man_made","elementType":"geometry","stylers":[{"color":"#15646c"}]},
+  {"featureType":"poi","elementType":"geometry","stylers":[{"color":"#176a73"}]},
+  {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#1d7b6c"}]},
+  {"featureType":"poi.sports_complex","elementType":"geometry","stylers":[{"color":"#1d7b6c"}]},
   {"featureType":"transit","stylers":[{"visibility":"off"}]},
-  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#121a2e"}]},
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#0f5059"}]},
   {"featureType":"road","elementType":"geometry.stroke","stylers":[{"visibility":"off"}]},
-  {"featureType":"road.local","elementType":"geometry.fill","stylers":[{"color":"#3f424d"},{"weight":1.5}]},
-  {"featureType":"road.arterial","elementType":"geometry.fill","stylers":[{"color":"#595d6c"},{"weight":2.5}]},
-  {"featureType":"road.highway","elementType":"geometry.fill","stylers":[{"color":"#595d6c"},{"weight":2.5}]},
+  {"featureType":"road.local","elementType":"geometry.fill","stylers":[{"color":"#2e848d"},{"weight":1.5}]},
+  {"featureType":"road.arterial","elementType":"geometry.fill","stylers":[{"color":"#4aa2ab"},{"weight":2.5}]},
+  {"featureType":"road.highway","elementType":"geometry.fill","stylers":[{"color":"#4aa2ab"},{"weight":2.5}]},
   {"featureType":"road","elementType":"labels.text","stylers":[{"visibility":"on"}]},
-  {"featureType":"road","elementType":"labels.text.fill","stylers":[{"color":"#9397ab"}]},
-  {"featureType":"road","elementType":"labels.text.stroke","stylers":[{"color":"#1a1d2d"},{"weight":3}]},
-  {"featureType":"road","elementType":"labels.icon","stylers":[{"visibility":"off"}]}
+  {"featureType":"road","elementType":"labels.text.fill","stylers":[{"color":"#cdeef0"}]},
+  {"featureType":"road","elementType":"labels.text.stroke","stylers":[{"color":"#176a73"},{"weight":3}]},
+  {"featureType":"road","elementType":"labels.icon","stylers":[{"visibility":"off"}]},
+  {"featureType":"poi.place_of_worship","elementType":"labels.text","stylers":[{"visibility":"on"}]},
+  {"featureType":"poi.school","elementType":"labels.text","stylers":[{"visibility":"on"}]},
+  {"featureType":"poi.medical","elementType":"labels.text","stylers":[{"visibility":"on"}]},
+  {"featureType":"poi.government","elementType":"labels.text","stylers":[{"visibility":"on"}]},
+  {"featureType":"poi.attraction","elementType":"labels.text","stylers":[{"visibility":"on"}]},
+  {"featureType":"poi.park","elementType":"labels.text","stylers":[{"visibility":"on"}]},
+  {"featureType":"poi","elementType":"labels.text.fill","stylers":[{"color":"#a9dde1"}]},
+  {"featureType":"poi","elementType":"labels.text.stroke","stylers":[{"color":"#176a73"},{"weight":3}]},
+  {"featureType":"poi","elementType":"labels.icon","stylers":[{"visibility":"off"}]},
+  {"featureType":"poi.business","stylers":[{"visibility":"off"}]}
 ]
 ''';
 
 /// Épure jour : fond #f4f2eb ; rues secondaires #d6cdb6 (4 pt), grands axes
-/// jaune doré #f5bd4f (7 pt) ; parcs #bfe3b0, eau #9fd0f2 ; noms de rues
-/// #6f6a5c, liseré de la couleur du fond.
+/// jaune doré #f5bd4f (7 pt) ; espaces verts en vert léger #d3ecc5, eau
+/// #9fd0f2 ; noms de rues #6f6a5c, liseré de la couleur du fond. Mêmes
+/// repères que la nuit.
 const _styleJour = '''
 [
   {"elementType":"geometry","stylers":[{"color":"#f4f2eb"}]},
@@ -276,7 +296,8 @@ const _styleJour = '''
   {"featureType":"administrative","elementType":"geometry","stylers":[{"visibility":"off"}]},
   {"featureType":"landscape.man_made","elementType":"geometry","stylers":[{"color":"#e9e5da"}]},
   {"featureType":"poi","elementType":"geometry","stylers":[{"color":"#f4f2eb"}]},
-  {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#bfe3b0"}]},
+  {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#d3ecc5"}]},
+  {"featureType":"poi.sports_complex","elementType":"geometry","stylers":[{"color":"#dcefd0"}]},
   {"featureType":"transit","stylers":[{"visibility":"off"}]},
   {"featureType":"water","elementType":"geometry","stylers":[{"color":"#9fd0f2"}]},
   {"featureType":"road","elementType":"geometry.stroke","stylers":[{"visibility":"off"}]},
@@ -286,6 +307,16 @@ const _styleJour = '''
   {"featureType":"road","elementType":"labels.text","stylers":[{"visibility":"on"}]},
   {"featureType":"road","elementType":"labels.text.fill","stylers":[{"color":"#6f6a5c"}]},
   {"featureType":"road","elementType":"labels.text.stroke","stylers":[{"color":"#f4f2eb"},{"weight":3}]},
-  {"featureType":"road","elementType":"labels.icon","stylers":[{"visibility":"off"}]}
+  {"featureType":"road","elementType":"labels.icon","stylers":[{"visibility":"off"}]},
+  {"featureType":"poi.place_of_worship","elementType":"labels.text","stylers":[{"visibility":"on"}]},
+  {"featureType":"poi.school","elementType":"labels.text","stylers":[{"visibility":"on"}]},
+  {"featureType":"poi.medical","elementType":"labels.text","stylers":[{"visibility":"on"}]},
+  {"featureType":"poi.government","elementType":"labels.text","stylers":[{"visibility":"on"}]},
+  {"featureType":"poi.attraction","elementType":"labels.text","stylers":[{"visibility":"on"}]},
+  {"featureType":"poi.park","elementType":"labels.text","stylers":[{"visibility":"on"}]},
+  {"featureType":"poi","elementType":"labels.text.fill","stylers":[{"color":"#8c8778"}]},
+  {"featureType":"poi","elementType":"labels.text.stroke","stylers":[{"color":"#f4f2eb"},{"weight":3}]},
+  {"featureType":"poi","elementType":"labels.icon","stylers":[{"visibility":"off"}]},
+  {"featureType":"poi.business","stylers":[{"visibility":"off"}]}
 ]
 ''';

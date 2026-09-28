@@ -604,7 +604,7 @@ class _OrderTrackingState extends State<OrderTracking>
     }
     // Annulée, ou aucun lieu connu : rien à montrer sur une carte.
     return ColoredBox(
-      color: const Color(0xFF1A1D2D),
+      color: const Color(0xFF176A73),
       child: Stack(
         children: [
           Center(

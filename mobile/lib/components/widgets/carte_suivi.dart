@@ -7,7 +7,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/api.dart';
 import '../../core/icones_phosphor.dart';
@@ -37,6 +39,9 @@ enum EtapeCarte {
   livree,
 }
 
+/// Le thème de la carte : selon le soleil (par défaut), ou forcé.
+enum ThemeChoisi { auto, clair, sombre }
+
 /// Comment la caméra suit la course.
 enum VueCarte {
   /// Par étape, nord en haut (le handoff).
@@ -52,10 +57,13 @@ enum VueCarte {
   libre,
 }
 
-/// L'écran de suivi : la carte, un bouton retour, et deux boutons de vue.
+/// L'écran de suivi : la carte, un bouton retour, le choix du thème et deux
+/// boutons de vue.
 ///
 /// - Thème clair ou sombre selon le vrai lever et coucher du soleil chez le
-///   client ; bascule en fondu, réévaluée chaque minute.
+///   client ; bascule en fondu, réévaluée chaque minute. Un petit bouton
+///   force clair ou sombre (auto → clair → sombre), gardé d'une fois à
+///   l'autre. La barre d'état suit : noire sur clair, blanche sur sombre.
 /// - La carte se manipule librement : zoom, rotation et inclinaison au
 ///   doigt. « Recentrer » rend la main à la caméra automatique.
 /// - Caméra automatique : par étape (vue d'ensemble, nord en haut), ou
@@ -125,6 +133,10 @@ class _CarteSuiviState extends State<CarteSuivi>
   Timer? _horloge;
 
   ThemeCarte _theme = ThemeCarte.sombre;
+
+  /// Choisi d'un geste par le client, gardé d'une ouverture à l'autre.
+  ThemeChoisi _choix = ThemeChoisi.auto;
+  static const _cleChoix = 'carte_suivi_theme';
   Color? _fondAvant;
   final Map<String, BitmapDescriptor> _pastilles = {};
   final Map<String, Offset> _ancres = {};
@@ -150,6 +162,19 @@ class _CarteSuiviState extends State<CarteSuivi>
   DateTime? _debutFondu;
   double? _capLisse;
 
+  /// Vitesse du scooter à l'écran (m/s), lissée.
+  double _vitesseAffichee = 0;
+
+  /// Un léger balancement quand il roule (retour du 28/09) : ±1,6° au plus,
+  /// à ~1,1 Hz, proportionnel à la vitesse jusqu'à 30 km/h ; nul à l'arrêt.
+  /// Calculé à chaque image, comme le déplacement : aucune saccade.
+  double _roulis() {
+    final ampleur = 1.6 * (_vitesseAffichee / 8.3).clamp(0.0, 1.0);
+    if (ampleur < 0.05) return 0;
+    final t = DateTime.now().millisecondsSinceEpoch / 1000;
+    return ampleur * math.sin(2 * math.pi * 1.1 * t);
+  }
+
   VueCarte _vue = VueCarte.ensemble;
 
   /// La caméra telle qu'elle est vraiment (suivie, ou déplacée au doigt).
@@ -158,9 +183,9 @@ class _CarteSuiviState extends State<CarteSuivi>
   Size _taille = const Size(390, 800);
   bool _doigt = false;
 
-  // Les tracés ne sont renvoyés à la carte que quand ils changent vraiment
-  // (le livreur a avancé de 3 m) : les renvoyer 30 fois par seconde
-  // alourdissait les gestes — le zoom répondait mal.
+  // La partie fixe des tracés (bordure, restant « loin »), gardée tant
+  // qu'elle ne change pas : seul le restant « proche » est renvoyé à chaque
+  // image (voir _traces).
   Set<Polyline> _tracesAffiches = const {};
   String _cleTraces = '';
 
@@ -180,6 +205,38 @@ class _CarteSuiviState extends State<CarteSuivi>
     });
     unawaited(_chargerVespa());
     unawaited(_demanderTraces(force: true));
+    unawaited(_lireChoix());
+  }
+
+  Future<void> _lireChoix() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lu = ThemeChoisi.values.asNameMap()[prefs.getString(_cleChoix)];
+      if (lu != null && mounted) _appliquerChoix(lu, fondu: false);
+    } on Object {
+      // Préférences illisibles : le thème automatique fait très bien.
+    }
+  }
+
+  /// Auto → clair → sombre → auto : un seul petit bouton, trois états.
+  void _changerDeTheme() {
+    final suivant =
+        ThemeChoisi.values[(_choix.index + 1) % ThemeChoisi.values.length];
+    _appliquerChoix(suivant);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((p) => p.setString(_cleChoix, suivant.name))
+          .catchError((Object _) => false),
+    );
+  }
+
+  void _appliquerChoix(ThemeChoisi choix, {bool fondu = true}) {
+    _choix = choix;
+    final t = _themeDuMoment();
+    setState(() {
+      if (fondu && t.nuit != _theme.nuit) _fondAvant = _theme.fond;
+      _theme = t;
+    });
   }
 
   @override
@@ -202,6 +259,8 @@ class _CarteSuiviState extends State<CarteSuivi>
   // ---------------------------------------------------------------- thème
 
   ThemeCarte _themeDuMoment() {
+    if (_choix == ThemeChoisi.clair) return ThemeCarte.clair;
+    if (_choix == ThemeChoisi.sombre) return ThemeCarte.sombre;
     final ici =
         widget.client ??
         widget.depart ??
@@ -536,9 +595,16 @@ class _CarteSuiviState extends State<CarteSuivi>
       0.1,
     );
     _derniereImage = maintenant;
+    final avant = _dernierAffiche;
     _surRoute?.avancer(dt);
     _cap(dt);
     final livreur = _livreur();
+    // Sa vitesse à l'écran, lissée : elle règle le balancement.
+    if (avant != null && livreur != null && dt > 0) {
+      final instant = metres(avant, livreur) / dt;
+      _vitesseAffichee +=
+          (instant - _vitesseAffichee) * (1 - math.exp(-dt * 3));
+    }
     final carte = _carte;
     if (_vue != VueCarte.libre && carte != null) {
       final cible = _cible(_etape(livreur), livreur);
@@ -765,6 +831,7 @@ class _CarteSuiviState extends State<CarteSuivi>
         icon: _vespa[rang][direction],
         // Le centre de l'image est le point de contact au sol.
         anchor: const Offset(0.5, 0.5),
+        rotation: _roulis(),
         zIndexInt: 4,
         consumeTapEvents: true,
       ),
@@ -815,178 +882,185 @@ class _CarteSuiviState extends State<CarteSuivi>
             _camera ??
             _cible(etape, livreur) ??
             const CameraPosition(target: LatLng(13.5137, 2.1098), zoom: 13);
-        return ColoredBox(
-          // Sous la carte, toujours opaque : sans lui, l'accueil
-          // transparaissait tant que les tuiles n'étaient pas chargées.
-          color: t.fond,
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: Listener(
-                  onPointerDown: (_) => _doigt = true,
-                  onPointerUp: (_) => _doigt = false,
-                  onPointerCancel: (_) => _doigt = false,
-                  child: GoogleMap(
-                    initialCameraPosition: initiale,
-                    style: t.style,
-                    onMapCreated: (carte) {
-                      _carte = carte;
-                      _camera = initiale;
-                    },
-                    // Un geste du client : la caméra est à lui, on ne la
-                    // déplace plus sous son doigt.
-                    onCameraMoveStarted: () {
-                      if (_doigt && _vue != VueCarte.libre) {
-                        _changerDeVue(VueCarte.libre);
-                      }
-                    },
-                    onCameraMove: (position) {
-                      if (_vue == VueCarte.libre) _camera = position;
-                    },
-                    gestureRecognizers: {
-                      Factory<OneSequenceGestureRecognizer>(
-                        EagerGestureRecognizer.new,
-                      ),
-                    },
-                    markers: _marqueurs(etape, livreur),
-                    polylines: _traces(etape),
-                    circles: _pulsations(etape),
-                    zoomGesturesEnabled: true,
-                    scrollGesturesEnabled: true,
-                    rotateGesturesEnabled: true,
-                    tiltGesturesEnabled: true,
-                    zoomControlsEnabled: false,
-                    myLocationButtonEnabled: false,
-                    mapToolbarEnabled: false,
-                    compassEnabled: false,
-                    buildingsEnabled: false,
-                    trafficEnabled: false,
-                    indoorViewEnabled: false,
-                    minMaxZoomPreference: const MinMaxZoomPreference(11, 19),
-                  ),
-                ),
-              ),
-              // Le haut se fond dans le décor, sous la barre d'état.
-              IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        t.fond,
-                        t.fond.withValues(alpha: 0.85),
-                        t.fond.withValues(alpha: 0),
-                      ],
-                      stops: const [0, 0.07, 0.2],
-                    ),
-                  ),
-                  child: const SizedBox.expand(),
-                ),
-              ),
-              if (fondAvant != null)
-                IgnorePointer(
-                  child: TweenAnimationBuilder<double>(
-                    key: ValueKey(t.nuit),
-                    tween: Tween(begin: 1, end: 0),
-                    duration: const Duration(milliseconds: 400),
-                    onEnd: () => setState(() => _fondAvant = null),
-                    builder: (context, v, _) => ColoredBox(
-                      color: fondAvant.withValues(alpha: v),
-                      child: const SizedBox.expand(),
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: t.nuit
+              ? SystemUiOverlayStyle.light
+              : SystemUiOverlayStyle.dark,
+          child: ColoredBox(
+            // Sous la carte, toujours opaque : sans lui, l'accueil
+            // transparaissait tant que les tuiles n'étaient pas chargées.
+            color: t.fond,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Listener(
+                    onPointerDown: (_) => _doigt = true,
+                    onPointerUp: (_) => _doigt = false,
+                    onPointerCancel: (_) => _doigt = false,
+                    child: GoogleMap(
+                      initialCameraPosition: initiale,
+                      style: t.style,
+                      onMapCreated: (carte) {
+                        _carte = carte;
+                        _camera = initiale;
+                      },
+                      // Un geste du client : la caméra est à lui, on ne la
+                      // déplace plus sous son doigt.
+                      onCameraMoveStarted: () {
+                        if (_doigt && _vue != VueCarte.libre) {
+                          _changerDeVue(VueCarte.libre);
+                        }
+                      },
+                      onCameraMove: (position) {
+                        if (_vue == VueCarte.libre) _camera = position;
+                      },
+                      gestureRecognizers: {
+                        Factory<OneSequenceGestureRecognizer>(
+                          EagerGestureRecognizer.new,
+                        ),
+                      },
+                      markers: _marqueurs(etape, livreur),
+                      polylines: _traces(etape),
+                      circles: _pulsations(etape),
+                      zoomGesturesEnabled: true,
+                      scrollGesturesEnabled: true,
+                      rotateGesturesEnabled: true,
+                      tiltGesturesEnabled: true,
+                      zoomControlsEnabled: false,
+                      myLocationButtonEnabled: false,
+                      mapToolbarEnabled: false,
+                      compassEnabled: false,
+                      buildingsEnabled: false,
+                      trafficEnabled: false,
+                      indoorViewEnabled: false,
+                      minMaxZoomPreference: const MinMaxZoomPreference(11, 19),
                     ),
                   ),
                 ),
-              if (widget.onRetour != null)
-                Positioned(
-                  top: marges.top + 8,
-                  left: 16,
-                  child: _BoutonRond(
-                    theme: t,
-                    etiquette: 'Retour',
-                    onTap: widget.onRetour!,
-                    // Le chevron est centré sur sa pointe : décalé d'un
-                    // point pour paraître centré dans le rond.
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 2),
-                      child: Icon(
-                        CupertinoIcons.chevron_back,
-                        size: 22,
-                        color: t.boutonTexte,
+                if (fondAvant != null)
+                  IgnorePointer(
+                    child: TweenAnimationBuilder<double>(
+                      key: ValueKey(t.nuit),
+                      tween: Tween(begin: 1, end: 0),
+                      duration: const Duration(milliseconds: 400),
+                      onEnd: () => setState(() => _fondAvant = null),
+                      builder: (context, v, _) => ColoredBox(
+                        color: fondAvant.withValues(alpha: v),
+                        child: const SizedBox.expand(),
                       ),
                     ),
                   ),
-                ),
-              // Arrivée estimée, en haut à droite, à hauteur du retour.
-              if (minutes != null)
-                Positioned(
-                  top: marges.top + 8,
-                  right: 16,
-                  child: _Arrivee(theme: t, minutes: minutes),
-                ),
-              // Deux vues au choix ; touchée à nouveau, la vue active rend
-              // la main à la caméra automatique.
-              Positioned(
-                right: 16,
-                bottom: marges.bottom + 28,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _BoutonRond(
+                if (widget.onRetour != null)
+                  Positioned(
+                    top: marges.top + 8,
+                    left: 16,
+                    child: _BoutonRond(
                       theme: t,
-                      actif: _vue == VueCarte.aerienne,
-                      etiquette: 'Vue aérienne',
-                      onTap: () => _changerDeVue(
-                        _vue == VueCarte.aerienne
-                            ? VueCarte.ensemble
-                            : VueCarte.aerienne,
-                      ),
-                      child: Icon(
-                        CupertinoIcons.map,
-                        size: 20,
-                        color: _vue == VueCarte.aerienne
-                            ? t.boutonFond.withValues(alpha: 1)
-                            : t.boutonTexte,
+                      etiquette: 'Retour',
+                      onTap: widget.onRetour!,
+                      // Le chevron est centré sur sa pointe : décalé d'un
+                      // point pour paraître centré dans le rond.
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 2),
+                        child: Icon(
+                          CupertinoIcons.chevron_back,
+                          size: 22,
+                          color: t.boutonTexte,
+                        ),
                       ),
                     ),
-                    if (visible) ...[
+                  ),
+                // Arrivée estimée, en haut à droite, à hauteur du retour.
+                if (minutes != null)
+                  Positioned(
+                    top: marges.top + 8,
+                    right: 16,
+                    child: _Arrivee(theme: t, minutes: minutes),
+                  ),
+                // Deux vues au choix ; touchée à nouveau, la vue active rend
+                // la main à la caméra automatique.
+                Positioned(
+                  right: 16,
+                  bottom: marges.bottom + 28,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _BoutonRond(
+                        theme: t,
+                        etiquette: switch (_choix) {
+                          ThemeChoisi.auto => 'Thème automatique (soleil)',
+                          ThemeChoisi.clair => 'Thème clair',
+                          ThemeChoisi.sombre => 'Thème sombre',
+                        },
+                        onTap: _changerDeTheme,
+                        child: Icon(
+                          switch (_choix) {
+                            ThemeChoisi.auto =>
+                              CupertinoIcons.circle_lefthalf_fill,
+                            ThemeChoisi.clair => CupertinoIcons.sun_max_fill,
+                            ThemeChoisi.sombre => CupertinoIcons.moon_fill,
+                          },
+                          size: 19,
+                          color: t.boutonTexte,
+                        ),
+                      ),
                       const SizedBox(height: 10),
                       _BoutonRond(
                         theme: t,
-                        actif: _vue == VueCarte.derriere,
-                        etiquette: 'Suivre derrière le livreur',
+                        actif: _vue == VueCarte.aerienne,
+                        etiquette: 'Vue aérienne',
                         onTap: () => _changerDeVue(
-                          _vue == VueCarte.derriere
+                          _vue == VueCarte.aerienne
                               ? VueCarte.ensemble
-                              : VueCarte.derriere,
+                              : VueCarte.aerienne,
                         ),
                         child: Icon(
-                          CupertinoIcons.location_north_fill,
+                          CupertinoIcons.map,
                           size: 20,
-                          color: _vue == VueCarte.derriere
+                          color: _vue == VueCarte.aerienne
                               ? t.boutonFond.withValues(alpha: 1)
                               : t.boutonTexte,
                         ),
                       ),
-                    ],
-                  ],
-                ),
-              ),
-              Positioned(
-                left: 16,
-                bottom: marges.bottom + 28,
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  child: _vue == VueCarte.libre
-                      ? _BoutonRecentrer(
-                          key: const ValueKey('recentrer'),
+                      if (visible) ...[
+                        const SizedBox(height: 10),
+                        _BoutonRond(
                           theme: t,
-                          onTap: () => _changerDeVue(VueCarte.ensemble),
-                        )
-                      : const SizedBox.shrink(key: ValueKey('suivi')),
+                          actif: _vue == VueCarte.derriere,
+                          etiquette: 'Suivre derrière le livreur',
+                          onTap: () => _changerDeVue(
+                            _vue == VueCarte.derriere
+                                ? VueCarte.ensemble
+                                : VueCarte.derriere,
+                          ),
+                          child: Icon(
+                            CupertinoIcons.location_north_fill,
+                            size: 20,
+                            color: _vue == VueCarte.derriere
+                                ? t.boutonFond.withValues(alpha: 1)
+                                : t.boutonTexte,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+                Positioned(
+                  left: 16,
+                  bottom: marges.bottom + 28,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    child: _vue == VueCarte.libre
+                        ? _BoutonRecentrer(
+                            key: const ValueKey('recentrer'),
+                            theme: t,
+                            onTap: () => _changerDeVue(VueCarte.ensemble),
+                          )
+                        : const SizedBox.shrink(key: ValueKey('suivi')),
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
