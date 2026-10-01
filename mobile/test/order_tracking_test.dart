@@ -37,18 +37,41 @@ void main() {
     // Le titre, et l'étape en cours dans la frise.
     expect(find.text('En préparation'), findsNWidgets(2));
     expect(find.text('La boutique prépare votre commande.'), findsOneWidget);
-    // Quatre étapes verticales, pas six.
-    expect(find.text('Confirmée'), findsOneWidget);
+    // Trois étapes : « confirmée » et « en préparation » ne font qu'une.
+    expect(find.text('Confirmée'), findsNothing);
     expect(find.text('En route'), findsOneWidget);
     expect(find.text('Prête'), findsNothing);
   });
 
-  testWidgets('le retrait du repas précède son trajet', (tester) async {
+  testWidgets('récupérée, c’est en route : une seule étape', (tester) async {
     await afficherSuivi(tester, type: 'delivery', statut: 'picked_up');
 
-    expect(find.text('Le livreur a récupéré votre commande.'), findsOneWidget);
+    expect(
+      find.text('Votre commande est en chemin vers vous.'),
+      findsOneWidget,
+    );
     expect(find.text('Livrée'), findsOneWidget);
   });
+
+  testWidgets(
+    'un livreur sur une commande pas encore confirmée : il va la chercher',
+    (tester) async {
+      await afficherSuivi(
+        tester,
+        type: 'delivery',
+        statut: 'pending',
+        extra: {
+          'driver': {'name': 'Moussa Issoufou', 'phone': '+22790000000'},
+        },
+      );
+
+      expect(find.text('Moussa va la chercher'), findsOneWidget);
+      expect(
+        find.text('Il se rend à la boutique et récupère votre commande.'),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets('un livreur : trois étapes, et il va vous appeler', (
     tester,

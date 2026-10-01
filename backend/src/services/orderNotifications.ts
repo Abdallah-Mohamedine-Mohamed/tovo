@@ -52,7 +52,10 @@ export function messageClient(c: ContexteCommande): { titre: string; corps: stri
           titre: 'Livreur trouvé',
           corps: recuperer ? `${qui} part chercher votre colis.` : `${qui} arrive chez vous pour prendre le colis.`,
         };
+      // « Récupéré » passe directement à « en route » (0071) ; l'ancienne
+      // étape reste pour les apps livreur pas encore à jour.
       case 'picked_up':
+      case 'delivering':
         return {
           titre: 'Colis récupéré',
           corps: recuperer ? `${qui} a votre colis et vous l’apporte.${paiement}` : `${qui} a votre colis et part le livrer.`,
@@ -63,7 +66,6 @@ export function messageClient(c: ContexteCommande): { titre: string; corps: stri
           : { titre: 'Colis livré', corps: 'Votre colis est bien arrivé à destination.' };
       case 'cancelled':
         return { titre: 'Course annulée', corps: 'Votre demande de livreur a été annulée.' };
-      // « En route » suit « récupéré » de quelques secondes : un seul message.
       default:
         return null;
     }
@@ -108,11 +110,11 @@ export function alerteEtape(statut: string, type: string, mode: string | null): 
       }
     : {
         pending: 'Commande envoyée',
-        confirmed: 'Commande confirmée',
+        confirmed: 'En cuisine',
         preparing: 'En cuisine',
         ready: 'Commande prête',
         assigned: 'Livreur trouvé',
-        picked_up: 'Commande récupérée',
+        picked_up: 'En route vers vous',
         delivering: 'En route vers vous',
         delivered: 'Commande livrée',
         cancelled: 'Commande annulée',

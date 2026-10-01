@@ -236,10 +236,10 @@ export async function passageDuBanc(options: OptionsPassage = {}) {
   // ── 3. L'examen du cerveau ────────────────────────────────────────────
   // reponse : 'intention' (un sens), 'tuiles' (ambiguë : l'assistant doit
   // douter et proposer des choix), 'erronee' (il ne doit pas agir).
-  type CasExamen = { texte: string; avant: string | null; attendu: string; origine: string; reponse?: string };
+  type CasExamen = { texte: string; avant: string | null; attendu: string; origine: string; reponse?: string; aussi?: string[] };
   const examiner = options.examiner ?? true;
   let examen: CasExamen[] = examiner
-    ? JEU.map((c) => ({ texte: c.texte, avant: c.avant ?? null, attendu: c.attendu, origine: c.source }))
+    ? JEU.map((c) => ({ texte: c.texte, avant: c.avant ?? null, attendu: c.attendu, origine: c.source, ...(c.aussi ? { aussi: c.aussi } : {}) }))
     : [];
   if (!sec && examiner) {
     let lecture = await toutLire((de, a) => db.from('banc_cas').select('texte, avant, attendu, origine, reponse')
@@ -261,12 +261,14 @@ export async function passageDuBanc(options: OptionsPassage = {}) {
   const sansSens = (c: CasExamen) => c.reponse === 'tuiles' || c.reponse === 'erronee';
   const juste = (c: CasExamen, i: number) => sansSens(c)
     ? lus[i]!.doute
-    : lus[i]!.predit === c.attendu || memeSens(lus[i]!.predit as Etiquette, c.attendu as Etiquette);
+    : lus[i]!.predit === c.attendu || memeSens(lus[i]!.predit as Etiquette, c.attendu as Etiquette)
+      || Boolean(lus[i]!.predit && c.aussi?.includes(lus[i]!.predit!));
   const justes = examen.filter(juste).length;
   const aTort = examen
     .map((c, i) => ({ ...c, predit: lus[i]!.predit, doute: lus[i]!.doute }))
     .filter((c) => c.predit && c.predit !== 'tuiles' && COUTEUSES.has(c.predit as Intention)
-      && (sansSens(c) ? !c.doute : !memeSens(c.predit as Etiquette, c.attendu as Etiquette)));
+      && (sansSens(c) ? !c.doute : !memeSens(c.predit as Etiquette, c.attendu as Etiquette))
+      && !c.aussi?.includes(c.predit));
   const ambigues = examen.filter(sansSens);
 
   const rapport = {

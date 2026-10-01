@@ -1197,6 +1197,10 @@ class _ChatScreenState extends State<ChatScreen> {
       case 'call_driver':
         _appeler_(p['phone']);
 
+      // Le numéro d'un commerce hors Tovo (commerces_hors_tovo).
+      case 'call_phone':
+        _appeler_(p['phone']);
+
       default:
         debugPrint('[chat] interaction non gérée : ${interaction.action}');
     }

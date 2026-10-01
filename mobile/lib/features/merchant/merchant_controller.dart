@@ -269,7 +269,8 @@ class MerchantController extends ChangeNotifier {
   }
 
   static String? etapeSuivante(String statut) => switch (statut) {
-    'pending' => 'confirmed',
+    // « Confirmée » et « en préparation » ne font qu'une (29/09).
+    'pending' => 'preparing',
     'confirmed' => 'ready',
     'preparing' => 'ready',
     _ => null,
@@ -278,13 +279,13 @@ class MerchantController extends ChangeNotifier {
   static String libelleEtape(String statut) => switch (statut) {
     'pending' => 'Accepter',
     'confirmed' => 'Commande prête',
-    'preparing' => 'Prête pour le livreur',
+    'preparing' => 'Commande prête',
     _ => '',
   };
 
   static String libelleStatut(String statut) => switch (statut) {
     'pending' => 'Nouvelle commande',
-    'confirmed' => 'Acceptée',
+    'confirmed' => 'En préparation',
     'preparing' => 'En préparation',
     'ready' => 'En attente d’un livreur',
     'assigned' => 'Livreur en route',

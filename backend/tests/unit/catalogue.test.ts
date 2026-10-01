@@ -5,7 +5,9 @@ import { PGlite } from '@electric-sql/pglite';
 import { vector } from '@electric-sql/pglite-pgvector';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import Fastify from 'fastify';
-import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, requeteSansEnseigne, filtrerSuggestionsTextuelles, type CataloguePage } from '../../src/services/catalogue.js';
+import { installerCommerces, type Commerce } from '../../src/services/commerces.js';
+import { normaliserIntention } from '../../src/ai/intents.js';
+import { alternativesHorsTovo, cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, reponseHorsTovo, HORS_TOVO_NON, HORS_TOVO_OUI, requeteSansEnseigne, filtrerSuggestionsTextuelles, type CataloguePage } from '../../src/services/catalogue.js';
 import { catalogRoutes } from '../../src/routes/catalog.js';
 import { EXECUTORS, filtrerProduitsPhoto } from '../../src/ai/tools.js';
 import { orchestrate } from '../../src/ai/orchestrator.js';
@@ -162,8 +164,11 @@ describe('catalogue complet', () => {
       userId: randomUUID(),
       currentMessage: 'De la pommade',
     });
-    expect(answer.components).toEqual([]);
-    expect(answer.summary).toMatchObject({ total: 0 });
+    // Aucun faux produit : seulement, depuis le 01/10, les commerces hors
+    // Tovo où en trouver (annuaire public).
+    expect(answer.components.map((c) => c.type)).not.toContain('product_carousel');
+    expect(answer.components.every((c) => c.type === 'commerces_hors_tovo')).toBe(true);
+    expect(answer.summary).toMatchObject(answer.components.length ? { produit_hors_tovo: 'pommade' } : { total: 0 });
   });
 
   it('rejette les voisins sémantiques qui ne prouvent pas le même objet', () => {
@@ -178,12 +183,22 @@ describe('catalogue complet', () => {
     expect(suggestions.map((product) => product.id)).toEqual(['corps']);
   });
 
-  it.each(['Un bracelet ?', 'De la pommade'])('répond sans modèle ni faux produit à « %s »', async (message) => {
+  it('répond sans modèle ni faux produit à « Un bracelet ? »', async () => {
     llmGenerate.mockClear();
     const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),
-      clientMessageId: randomUUID(), message });
+      clientMessageId: randomUUID(), message: 'Un bracelet ?' });
     expect(answer.components).toEqual([]);
     expect(answer.content).toContain('ne trouve pas');
+    expect(answer.usage.cycles).toBe(0);
+    expect(llmGenerate).not.toHaveBeenCalled();
+  });
+
+  it('« De la pommade », que Tovo n’a pas : sans modèle, les commerces où en trouver (01/10)', async () => {
+    llmGenerate.mockClear();
+    const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),
+      clientMessageId: randomUUID(), message: 'De la pommade' });
+    expect(answer.components.map((c) => c.type)).toEqual(['commerces_hors_tovo']);
+    expect(answer.content).toContain('Tovo ne propose pas encore de **pommade**');
     expect(answer.usage.cycles).toBe(0);
     expect(llmGenerate).not.toHaveBeenCalled();
   });
@@ -421,8 +436,36 @@ describe('catalogue complet', () => {
 
   it('une enseigne absente ne déclenche pas une liste générale', async () => {
     const answer = await merchantIntentAnswer(adapter, await resolveCatalogueIntent(adapter, 'tacos chez ZZZZZ'));
-    expect(answer?.components).toEqual([]);
+    expect(answer?.components.map((c) => c.type)).toEqual(['quick_replies']);
     expect(answer?.summary).toHaveProperty('boutique_introuvable');
+  });
+
+  it('une enseigne hors Tovo : on DEMANDE si un livreur va acheter ce produit-là (30/09)', async () => {
+    const answer = await merchantIntentAnswer(adapter,
+      await resolveCatalogueIntent(adapter, 'Je veux commander de la viande chez Tchos.'));
+    expect(answer?.content).toBe('**Tchos** n’est pas encore sur Tovo. Voulez-vous qu’un livreur aille vous '
+      + 'acheter **de la viande** là-bas ? Il avance l’achat, et vous le lui remboursez à la livraison, avec la course.');
+    const tuiles = answer?.components[0]?.data.items as Array<{ label: string; value: string }>;
+    expect(tuiles.map((t) => t.label)).toEqual(['Oui, envoyez un livreur', 'Non, voir ce que Tovo propose']);
+
+    // Oui : la carte, déjà remplie de ce qu'il faut acheter et où.
+    const oui = await reponseHorsTovo(adapter, tuiles[0]!.value);
+    expect(oui.components[0]?.type).toBe('courier_form');
+    expect(oui.components[0]?.data.mode).toBe('recuperer');
+    expect(oui.components[0]?.data.pickup).toEqual({ hint: 'Acheter de la viande chez Tchos' });
+    // Non : on cherche « viande » dans Tovo, pas « de la viande ».
+    expect(tuiles[1]!.value).toBe(`${HORS_TOVO_NON}viande`);
+  });
+
+  it('un article sans déterminant fait quand même une phrase juste', async () => {
+    const answer = await merchantIntentAnswer(adapter, await resolveCatalogueIntent(adapter, 'tacos poulet chez Tchos'));
+    expect(answer?.content).toContain('aille vous l’acheter là-bas : **tacos poulet** ?');
+  });
+
+  it('« chez moi », « chez ma mère » ne sont pas des enseignes', async () => {
+    for (const phrase of ['des tacos chez moi', 'envoie du riz chez ma mère']) {
+      expect((await resolveCatalogueIntent(adapter, phrase)).missing).toBeUndefined();
+    }
   });
 
   it('un mauvais outil ne transforme pas le produit demandé en carte générale', async () => {
@@ -476,5 +519,54 @@ describe('catalogue complet', () => {
     expect(next.json().items).toHaveLength(24);
     expect((await app.inject('/catalog/products?offset=-1')).statusCode).toBe(400);
     expect((await app.inject('/catalog/products?merchant_ids=invalid')).statusCode).toBe(400);
+  });
+});
+
+describe('Tovo dit où trouver ce qu’il n’a pas (annuaire public, 01/10)', () => {
+  const commerce = (id: string, nom: string, type: Commerce['type'], lat: number, telephone: string | null): Commerce => ({
+    id, nom, nom_normalise: normaliserIntention(nom), type, adresse: 'Rue du Commerce', quartier: 'Plateau',
+    telephone, telephone_appel: telephone ? `+227${telephone.replace(/ /g, '')}` : null,
+    lat, lng: 2.1, fiabilite: 0.8, source: 'overture',
+  });
+  const position = { lat: 13.5, lng: 2.1 };
+
+  beforeAll(() => installerCommerces([
+    commerce('a', 'Haddad Khalil Super Market', 'supermarche', 13.51, '20 73 61 60'),
+    commerce('b', 'Supermarché Azar', 'supermarche', 13.53, '70 77 77 70'),
+    commerce('c', 'Supermarché Loin', 'supermarche', 13.9, null),
+    // Sur Tovo : ne doit jamais être présenté « hors Tovo ».
+    commerce('d', "GARBA D'OR", 'supermarche', 13.50, '90 00 00 00'),
+  ]));
+  afterAll(() => installerCommerces(null));
+
+  it('un produit que Tovo n’a pas : les commerces du bon type, les plus proches', async () => {
+    const r = await alternativesHorsTovo(adapter, 'Je cherche de la pommade Nivea', position);
+    expect(r?.content).toBe('Tovo ne propose pas encore de **pommade Nivea**. '
+      + 'Vous en trouverez probablement dans ces supermarchés, près de vous :');
+    const items = r?.components[0]?.data.items as Array<Record<string, unknown>>;
+    expect(r?.components[0]?.type).toBe('commerces_hors_tovo');
+    // Les plus proches d'abord, à 8 km au plus, jamais une boutique Tovo.
+    expect(items.map((i) => i.nom)).toEqual(['Haddad Khalil Super Market', 'Supermarché Azar']);
+    expect(items[0]).toMatchObject({ telephone: '20 73 61 60', icone: 'supermarche', type: 'Supermarché' });
+    expect((items[0]!.livreur as { value: string }).value)
+      .toBe(`${HORS_TOVO_OUI}Acheter de la pommade Nivea chez Haddad Khalil Super Market (Rue du Commerce, Plateau)|+22720736160`);
+  });
+
+  it('« Envoyer un livreur » : la carte livreur, avec le numéro du commerce comme contact', async () => {
+    const r = await reponseHorsTovo(adapter, `${HORS_TOVO_OUI}Acheter du riz chez Azar|+22770777770`);
+    expect(r.components[0]?.data).toMatchObject({
+      mode: 'recuperer', pickup: { hint: 'Acheter du riz chez Azar' }, pickup_contact: '+22770777770',
+    });
+  });
+
+  it('un produit dont on ne sait pas qui le vend : rien d’inventé', async () => {
+    expect(await alternativesHorsTovo(adapter, 'je cherche un truc bizarre', position)).toBeNull();
+  });
+
+  it('une boutique nommée connue de l’annuaire : où elle est, et son numéro', async () => {
+    const r = await merchantIntentAnswer(adapter,
+      await resolveCatalogueIntent(adapter, 'Je veux faire mes courses chez Haddad Khalil'));
+    expect(r?.content).toContain('**Haddad Khalil Super Market** n’est pas encore sur Tovo, mais le voici.');
+    expect(r?.components[0]?.type).toBe('commerces_hors_tovo');
   });
 });

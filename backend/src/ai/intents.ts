@@ -217,6 +217,14 @@ export function nomBoutiqueApresMarqueur(texte: string): string | null {
     return null;
   }
 
+  // « chez moi », « chez ma mère », « chez nous » : une personne ou un lieu
+  // de livraison, jamais une enseigne. Sans ce filtre, « des tacos chez moi »
+  // cherchait une boutique appelée « moi » (et, depuis le 30/09, proposait
+  // d'envoyer un livreur y acheter).
+  if (/^(?:moi|toi|lui|elle|nous|vous|eux|elles|ma|mon|mes|ta|ton|tes|sa|son|ses|notre|nos|votre|vos|leur|leurs)\b/.test(candidat)) {
+    return null;
+  }
+
   // « un restaurant à Niamey », « un resto près d'ici » : un lieu, pas le nom
   // d'une enseigne. La suggestion d'accueil « Trouve-moi un bon repas à
   // Niamey » répondait « Je ne trouve pas l'enseigne à Niamey ».

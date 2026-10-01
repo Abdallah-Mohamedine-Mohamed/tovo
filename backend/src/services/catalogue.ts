@@ -1,8 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { boutiquesCorrespondantes, boutiquesMentionnees, demandeBoutiqueOuverte, normaliserIntention, nomBoutiqueApresMarqueur, requeteProduitUtilisateur } from '../ai/intents.js';
-import { categoryGrid, merchantCard, productCarousel, type Component, type MerchantRow, type ProductRow } from '../components/builders.js';
+import { categoryGrid, merchantCard, productCarousel, quickReplies, type Component, type MerchantRow, type ProductRow } from '../components/builders.js';
 import { embed, embeddingsEnabled } from './embeddings.js';
 import { commandesRecentes, marquerLePlusCommande, parPopularite } from './popularite.js';
+import { offreVille } from './livreur.js';
+import { serviceClient } from './supabase.js';
+import { carteCommerces, commercesNommes, commercesPourProduit, libelleDes, typesPourProduit, type Commerce } from './commerces.js';
+import { paiementMobileActif } from '../config/env.js';
 
 export interface CataloguePage {
   items: ProductRow[];
@@ -380,11 +384,215 @@ export async function merchantMenu(db: SupabaseClient, merchantId: string): Prom
   };
 }
 
-export async function merchantIntentAnswer(db: SupabaseClient, intent: CatalogueIntent): Promise<CatalogueAnswer | null> {
-  if (intent.missing) return {
-    content: `Je ne trouve pas l’enseigne **${intent.missing}**. Pouvez-vous préciser son nom ?`,
-    summary: { boutique_introuvable: intent.missing }, components: [],
+const MARQUEUR_ENSEIGNE = /\b(?:chez|boutique|enseigne|restaurant|resto)\b/gi;
+
+/**
+ * Le nom de l'enseigne tel que le client l'a écrit (« Tchos », pas « tchos ») :
+ * ce qui suit le dernier « chez », sans la ponctuation finale.
+ */
+export function enseigneTelleQueDite(message: string, normalise: string): string {
+  const marqueurs = [...message.matchAll(MARQUEUR_ENSEIGNE)];
+  const dernier = marqueurs.at(-1);
+  const suite = dernier ? message.slice(dernier.index + dernier[0].length) : '';
+  const mots = suite.trim().split(/\s+/).slice(0, normalise.split(' ').length).join(' ');
+  return mots.replace(/[.,;:!?…]+$/, '').trim() || normalise;
+}
+
+// Le début d'une demande, qui n'est pas l'article : « Je veux commander »,
+// « J'aimerais avoir », « Donne-moi ».
+const DEBUT_DE_DEMANDE = new Set(('je j veux voudrais souhaite aimerais peux pourrais voulais '
+  + 'commander prendre acheter avoir manger boire trouver chercher cherche cherchons trouve ou est '
+  + 'donne donnez apporte apportez il faut ai besoin veut voudrait y a t vous avez as tu '
+  + 'moi me m svp stp bonjour bonsoir salut alors bon ok oui aussi encore').split(' '));
+const DETERMINANT = /^(?:du|de|des|d|un|une|le|la|les|l|mon|ma|mes|deux|trois|quatre|cinq|\d+)$/;
+
+/**
+ * Ce que le client veut acheter, tel qu'il l'a dit, avant « chez » :
+ * « Je veux commander de la viande » → « de la viande » (le déterminant est
+ * gardé : il fait la phrase), « tacos poulet » → « tacos poulet ».
+ */
+export function articleAvantEnseigne(message: string): string {
+  const mots = (message.split(MARQUEUR_ENSEIGNE)[0] ?? '').trim().split(/\s+/).filter(Boolean);
+  let debut = 0;
+  while (debut < mots.length && normaliserIntention(mots[debut]!).split(' ').every((m) => !m || DEBUT_DE_DEMANDE.has(m))) debut++;
+  return mots.slice(debut).join(' ').replace(/[.,;:!?…]+$/, '').trim();
+}
+
+/** « de la viande » → « viande » : ce qu'on cherche dans le catalogue. */
+function sansDeterminant(article: string): string {
+  const mots = article.split(/\s+/);
+  let i = 0;
+  while (i < mots.length - 1 && normaliserIntention(mots[i]!).split(' ').every((m) => DETERMINANT.test(m))) i++;
+  return mots.slice(i).join(' ');
+}
+
+/**
+ * Note la boutique demandée (migration 0072) : l'admin voit les plus
+ * réclamées, c'est la liste de prospection. Sans attendre, et sans jamais
+ * faire échouer la réponse au client (table absente, réseau…).
+ */
+function noterBoutiqueDemandee(nom: string, article: string): void {
+  try {
+    void Promise.resolve(serviceClient().from('boutiques_demandees').insert({
+      nom: nom.slice(0, 120),
+      nom_normalise: normaliserIntention(nom).slice(0, 120) || nom.toLowerCase().slice(0, 120),
+      article: article.slice(0, 200) || null,
+    })).catch(() => undefined);
+  } catch {
+    // Jamais bloquant.
+  }
+}
+
+/** Les deux tuiles de la question « un livreur va l'acheter ? ». */
+export const HORS_TOVO_OUI = 'hors-tovo-oui:';
+export const HORS_TOVO_NON = 'hors-tovo-non:';
+const SEP = '|';
+const propre = (s: string) => s.replaceAll(SEP, ' ').slice(0, 120);
+
+/**
+ * Une enseigne que Tovo ne connaît pas (« de la viande chez Tchos ») : le
+ * client veut CE produit-là, pas un autre. Plutôt que « Je ne trouve pas
+ * l'enseigne », on lui DEMANDE si un livreur doit aller l'acheter : il avance
+ * l'achat, le client le lui rembourse à la livraison avec la course (tranché
+ * le 30/09). Rien n'est commandé sans son « oui ».
+ */
+const commenceParDeterminant = (article: string) =>
+  Boolean(article) && DETERMINANT.test(normaliserIntention(article.split(/\s+/)[0]!).split(' ')[0]!);
+
+/**
+ * Un commerce de l'annuaire public qui serait en fait sur Tovo ne doit jamais
+ * être présenté « hors Tovo ».
+ */
+async function estSurTovo(db: SupabaseClient): Promise<(c: Commerce) => boolean> {
+  const variantes = avecVariantes(await enseignesApprouvees(db));
+  return (c) => boutiquesCorrespondantes(c.nom, variantes).length > 0;
+}
+
+/**
+ * La boutique demandée est dans l'annuaire public (« chez Haddad Khalil ») :
+ * Tovo dit où elle est et donne son numéro, livreur d'abord (maquette validée
+ * le 01/10, cas 2).
+ */
+function commerceConnu(commerces: Commerce[], article: string): CatalogueAnswer {
+  const c = commerces[0]!;
+  const achat = article ? `Acheter ${article}` : 'Faire les achats du client';
+  const proposition = commenceParDeterminant(article)
+    ? `Un livreur peut aller vous y acheter **${article}**`
+    : 'Un livreur peut y faire vos achats';
+  return {
+    content: `**${c.nom}** n’est pas encore sur Tovo, mais le voici. ${proposition} : `
+      + 'il avance l’achat, et vous le lui remboursez à la livraison, avec la course.',
+    summary: {
+      boutique_hors_tovo: c.nom,
+      article: article || null,
+      consigne: 'La carte suffit : le client choisit « Envoyer un livreur » ou appelle. Ne pose aucune question.',
+    },
+    components: [carteCommerces(commerces, achat, HORS_TOVO_OUI)],
   };
+}
+
+/**
+ * Un produit que Tovo n'a pas (« de la pommade Nivea ») : les commerces du
+ * bon type les plus proches, d'après l'annuaire public (maquette validée le
+ * 01/10, cas 1). Rien si l'on ne sait pas quel commerce en vend.
+ */
+export async function alternativesHorsTovo(
+  db: SupabaseClient,
+  message: string,
+  position?: { lat: number; lng: number } | null,
+): Promise<CatalogueAnswer | null> {
+  const article = articleAvantEnseigne(message);
+  if (!article || typesPourProduit(article).length === 0) return null;
+  const commerces = commercesPourProduit(article, position, await estSurTovo(db));
+  if (commerces.length === 0) return null;
+  const produit = sansDeterminant(article);
+  const de = /^[aeiouyhàâéèêîôû]/i.test(produit) ? 'd’' : 'de ';
+  const ou = commerces.length === 1 ? 'dans ce commerce' : `dans ces ${libelleDes(commerces)}`;
+  return {
+    content: `Tovo ne propose pas encore ${de}**${produit}**. Vous en trouverez probablement ${ou}, `
+      + `${position ? 'près de vous' : 'à Niamey'} :`,
+    summary: {
+      produit_hors_tovo: produit,
+      commerces_proposes: commerces.map((c) => c.nom),
+      consigne: 'La carte suffit : le client choisit « Envoyer un livreur » ou appelle. Ne pose aucune question.',
+    },
+    components: [carteCommerces(commerces, `Acheter ${article}`, HORS_TOVO_OUI, position)],
+  };
+}
+
+async function enseigneHorsTovo(db: SupabaseClient, intent: CatalogueIntent & { missing: string }): Promise<CatalogueAnswer> {
+  const nom = enseigneTelleQueDite(intent.query, intent.missing);
+  const article = articleAvantEnseigne(intent.query);
+  const connus = commercesNommes(intent.missing, await estSurTovo(db));
+  if (connus.length > 0) {
+    noterBoutiqueDemandee(connus[0]!.nom, article);
+    return commerceConnu(connus, article);
+  }
+  const avecDeterminant = commenceParDeterminant(article);
+  const question = !article
+    ? `Voulez-vous qu’un livreur aille y faire vos achats ?`
+    : avecDeterminant
+      ? `Voulez-vous qu’un livreur aille vous acheter **${article}** là-bas ?`
+      : `Voulez-vous qu’un livreur aille vous l’acheter là-bas : **${article}** ?`;
+  const achat = article ? `Acheter ${article} chez ${nom}` : `Chez ${nom}`;
+  const cherche = sansDeterminant(article);
+  noterBoutiqueDemandee(nom, article);
+  return {
+    content: `**${nom}** n’est pas encore sur Tovo. ${question} `
+      + 'Il avance l’achat, et vous le lui remboursez à la livraison, avec la course.',
+    summary: {
+      boutique_introuvable: intent.missing,
+      boutique_hors_tovo: nom,
+      article: article || null,
+      consigne: 'Les tuiles suffisent : le client répond en touchant l’une d’elles. Ne pose aucune autre question.',
+    },
+    components: [quickReplies([
+      { label: 'Oui, envoyez un livreur', value: `${HORS_TOVO_OUI}${propre(achat)}` },
+      cherche
+        ? { label: 'Non, voir ce que Tovo propose', value: `${HORS_TOVO_NON}${propre(cherche)}` }
+        : { label: 'Non merci', value: HORS_TOVO_NON },
+    ])],
+  };
+}
+
+/**
+ * La réponse à une tuile de enseigneHorsTovo.
+ *  - oui : la carte « Un livreur va chercher pour vous », déjà remplie de ce
+ *    qu'il faut acheter et où ; le client touche « Commander le livreur ».
+ *  - non : ce que Tovo propose de ce produit, ou rien s'il n'en a pas nommé.
+ */
+export async function reponseHorsTovo(db: SupabaseClient, valeur: string): Promise<CatalogueAnswer> {
+  if (valeur.startsWith(HORS_TOVO_OUI)) {
+    const offre = await offreVille(db);
+    // « Acheter … chez X (rue)|+227… » : le numéro du commerce, s'il est
+    // connu, devient le contact sur place du livreur.
+    const [achat, telephone] = valeur.slice(HORS_TOVO_OUI.length).split(SEP);
+    return {
+      content: 'Vérifiez ce que le livreur doit acheter, puis touchez **Commander le livreur**.',
+      summary: { achat_hors_tovo: achat },
+      components: [{
+        type: 'courier_form',
+        data: {
+          mode: 'recuperer',
+          // Ce que lit le livreur : quoi acheter, et où. Le client peut le corriger.
+          pickup: { hint: achat },
+          pickup_contact: telephone || null,
+          dropoff: null,
+          estimate: offre.prix === null ? null : { price: offre.prix, flat: true },
+          callback_minutes: offre.minutes,
+          mobile_money: paiementMobileActif,
+        },
+      }],
+    };
+  }
+  const q = valeur.slice(HORS_TOVO_NON.length).trim();
+  if (!q) return { content: 'Très bien. Dites-moi si vous cherchez autre chose.', summary: {}, components: [] };
+  const filtre = { q, limit: 8 };
+  return searchAnswer(await cataloguePage(db, filtre), filtre);
+}
+
+export async function merchantIntentAnswer(db: SupabaseClient, intent: CatalogueIntent): Promise<CatalogueAnswer | null> {
+  if (intent.missing) return enseigneHorsTovo(db, intent as CatalogueIntent & { missing: string });
   if (intent.noneOpen) return {
     content: "Aucune adresse de cette enseigne n'est ouverte en ce moment.",
     summary: { boutiques_ouvertes: 0 },

@@ -61,7 +61,7 @@ describe('messageClient — un colis', () => {
     }
   });
 
-  it('un seul message entre « récupéré » et « en route »', () => {
-    expect(messageClient({ ...colis, mode: 'deposer', statut: 'delivering' })).toBeNull();
+  it('« récupéré » passe directement à « en route » (0071) : le message suit', () => {
+    expect(messageClient({ ...colis, mode: 'deposer', statut: 'delivering' })?.titre).toBe('Colis récupéré');
   });
 });

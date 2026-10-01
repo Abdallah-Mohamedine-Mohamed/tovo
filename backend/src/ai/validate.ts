@@ -31,6 +31,8 @@ const TYPES_CONNUS = new Set([
   'price_comparison',
   'image_search_prompt',
   'courier_form',
+  // Où trouver ce que Tovo n'a pas (services/commerces.ts, 01/10).
+  'commerces_hors_tovo',
 ]);
 
 const componentSchema = z.object({

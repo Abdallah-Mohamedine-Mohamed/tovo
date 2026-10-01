@@ -11,6 +11,7 @@ import { merchantCatalogRoutes } from './routes/merchantCatalog.js';
 import { orderRoutes } from './routes/orders.js';
 import { nitaWebhookRoutes } from './routes/nitaWebhook.js';
 import { addressRoutes } from './routes/addresses.js';
+import { lieuRoutes } from './routes/lieux.js';
 import { reviewRoutes } from './routes/reviews.js';
 import { externalOfferRoutes } from './routes/externalOffers.js';
 import { adminMerchantRoutes } from './routes/adminMerchants.js';
@@ -125,6 +126,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(merchantCatalogRoutes);
   await app.register(nitaWebhookRoutes);
   await app.register(addressRoutes);
+  await app.register(lieuRoutes);
   await app.register(reviewRoutes);
   await app.register(externalOfferRoutes);
   await app.register(adminMerchantRoutes);

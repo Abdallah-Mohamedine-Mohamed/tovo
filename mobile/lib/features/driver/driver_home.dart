@@ -345,10 +345,11 @@ class _CarteCourse extends StatelessWidget {
     final distance = (ordre['distance_m'] as num?)?.toInt();
     final peutAccepter = ordre['can_accept'] == true;
     final statut = ordre['status'] as String? ?? '';
+    // Plus d'attente de la boutique (0071) : le livreur prend la commande
+    // tout de suite, et la passe sur place si la boutique n'a pas l'app.
     final preparation = switch (statut) {
-      'pending' => 'En attente de la boutique',
-      'confirmed' => 'Acceptée par la boutique',
-      'preparing' => 'En préparation',
+      'pending' => 'Nouvelle commande · à passer sur place',
+      'confirmed' || 'preparing' => 'En préparation à la boutique',
       _ => null,
     };
 
@@ -518,13 +519,15 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
   }
 
   static const Map<String, String> _libelles = {
-    // Acceptée pendant la préparation : on file vers la boutique.
+    // Pas encore en main : on file vers la boutique (et on y passe la
+    // commande si elle n'a pas l'app).
+    'pending': 'Allez à la boutique',
     'confirmed': 'Allez à la boutique',
     'preparing': 'Allez à la boutique',
     'ready': 'Allez à la boutique',
-    'assigned': 'Récupérez la commande',
-    'picked_up': 'Commande récupérée',
-    'delivering': 'En route vers le client',
+    'assigned': 'Allez à la boutique',
+    'picked_up': 'Livrez le client',
+    'delivering': 'Livrez le client',
   };
 
   @override
@@ -544,7 +547,8 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
         .map((a) => a.cast<String, dynamic>())
         .toList(growable: false);
     // Une fois parti livrer, la boutique n'est plus le sujet.
-    final enRouteVersClient = controller.statut == 'delivering';
+    final enRouteVersClient =
+        controller.statut == 'delivering' || controller.statut == 'picked_up';
     final etape = controller.prochaineEtape;
     final dejaPaye =
         course['payment_method'] == 'mobile_money' &&
@@ -568,10 +572,9 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
                     ? switch (controller.statut) {
                         'assigned' when recuperer => 'Allez chercher le colis',
                         'assigned' => 'Récupérez le colis',
-                        'picked_up' => 'Colis récupéré',
-                        'delivering' when recuperer =>
-                          'En route vers le client',
-                        'delivering' => 'En route vers le destinataire',
+                        'picked_up' ||
+                        'delivering' when recuperer => 'Apportez-le au client',
+                        'picked_up' || 'delivering' => 'Livrez le destinataire',
                         _ => controller.statut,
                       }
                     : _libelles[controller.statut] ?? controller.statut,
@@ -738,33 +741,6 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
           _BoutonPreuve(fichier: _preuve, onTap: _photographier),
         ],
         const SizedBox(height: 16),
-        // La boutique cuisine encore : pas de bouton à toucher, juste
-        // l'information. Il passera à « Repas récupéré » tout seul, dès
-        // qu'elle marquera la commande prête (et une notification le dira).
-        if (etape == null && controller.enPreparation)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF4F5F5),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.soup_kitchen_outlined, color: TovoTheme.ink),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'En préparation · vous serez prévenu dès que c’est prêt',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: TovoTheme.ink,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
         if (etape != null)
           FilledButton(
             style: FilledButton.styleFrom(

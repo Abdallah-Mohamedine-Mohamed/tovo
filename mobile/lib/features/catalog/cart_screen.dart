@@ -14,6 +14,7 @@ import '../../core/panier.dart';
 import '../../core/push.dart';
 import '../../core/theme.dart';
 import '../../core/catalog_image.dart';
+import '../adresse/choix_adresse.dart';
 
 class _DeliveryPoint {
   const _DeliveryPoint(this.hint, this.lat, this.lng);
@@ -93,6 +94,13 @@ class _CartScreenState extends State<CartScreen> {
   String? _adresseId;
   _DeliveryPoint? _position;
   final _repere = TextEditingController();
+
+  /// L'endroit choisi sur la carte (« Autre adresse »), s'il l'a été : son
+  /// repère, l'indication, la personne à livrer.
+  AdresseChoisie? _choisie;
+
+  /// Une position fraîche est en cours de recherche.
+  bool _localisation = false;
   String _paiement = 'cash';
 
   /// Le numéro Nita qui paiera (8 chiffres), quand le paiement est Nita.
@@ -136,6 +144,10 @@ class _CartScreenState extends State<CartScreen> {
     // Position GPS prise : elle suffit. Le repère aide le livreur mais ne
     // bloque rien — il appelle le client si besoin.
     if (_position != null) {
+      final choisie = _choisie;
+      if (choisie != null) {
+        return _DeliveryPoint(choisie.pourLivreur, choisie.lat, choisie.lng);
+      }
       final repere = _repere.text.trim();
       return _DeliveryPoint(
         repere.isEmpty ? 'Position du client (le livreur appellera)' : repere,
@@ -426,7 +438,7 @@ class _CartScreenState extends State<CartScreen> {
               const SizedBox(height: 12),
               for (final adresse in _adresses)
                 _LigneChoix(
-                  icone: Icons.place_outlined,
+                  image: _imageAdresse(adresse['label']),
                   titre: '${adresse['text_hint'] ?? ''}'.trim().isNotEmpty
                       ? '${adresse['text_hint']}'
                       : '${adresse['label'] ?? 'Adresse'}',
@@ -437,11 +449,18 @@ class _CartScreenState extends State<CartScreen> {
                   onTap: () => Navigator.pop(feuille, adresse['id'] as String),
                 ),
               _LigneChoix(
-                icone: Icons.my_location_rounded,
+                image: 'assets/icons/3d/lieu-epingle.png',
                 titre: 'Ma position actuelle',
-                sousTitre: 'Le livreur vous appelle si besoin',
-                choisi: _position != null,
+                sousTitre: 'Là où vous êtes en ce moment',
+                choisi: _position != null && _choisie == null,
                 onTap: () => Navigator.pop(feuille, _ici),
+              ),
+              _LigneChoix(
+                image: 'assets/icons/3d/lieu-carte.png',
+                titre: 'Autre adresse',
+                sousTitre: 'Sur la carte · aussi pour quelqu’un d’autre',
+                choisi: _choisie != null,
+                onTap: () => Navigator.pop(feuille, _ailleurs),
               ),
             ],
           ),
@@ -451,10 +470,13 @@ class _CartScreenState extends State<CartScreen> {
     if (!mounted || choix == null) return;
     if (choix == _ici) {
       await _prendreMaPosition();
+    } else if (choix == _ailleurs) {
+      await _autreAdresse();
     } else {
       setState(() {
         _adresseId = choix;
         _position = null;
+        _choisie = null;
         _erreurCommande = null;
       });
       unawaited(_chargerDevis());
@@ -462,26 +484,77 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   static const _ici = '__position__';
+  static const _ailleurs = '__ailleurs__';
 
+  static String _imageAdresse(Object? label) {
+    final texte = '${label ?? ''}'.trim().toLowerCase();
+    if (texte.contains('bureau') || texte.contains('travail')) {
+      return 'assets/icons/3d/lieu-bureau.png';
+    }
+    if (texte.contains('famille') || texte.contains('parents')) {
+      return 'assets/icons/3d/lieu-famille.png';
+    }
+    if (texte.contains('maison') || texte.contains('chez')) {
+      return 'assets/icons/3d/lieu-maison.png';
+    }
+    return 'assets/icons/3d/lieu-epingle.png';
+  }
+
+  /// « Ma position actuelle » : une position FRAÎCHE, pas celle prise à
+  /// l'ouverture de l'app — le client a pu bouger depuis (retour du 28/09).
+  /// Introuvable : on ouvre la carte pour qu'il la montre lui-même, au lieu
+  /// d'un message qui bloque.
   Future<void> _prendreMaPosition() async {
-    setState(() => _erreurCommande = null);
-    // Déjà connue depuis l'ouverture de l'app : aucune attente GPS.
-    final position =
-        TovoLocation.recente ??
-        await TovoLocation.current(requestPermission: true);
+    setState(() {
+      _erreurCommande = null;
+      _localisation = true;
+    });
+    final position = await TovoLocation.current(
+      requestPermission: true,
+    ).timeout(const Duration(seconds: 10), onTimeout: () => null);
     if (!mounted) return;
+    setState(() => _localisation = false);
     if (position == null) {
-      setState(
-        () => _erreurCommande =
-            'Activez la localisation, ou choisissez une adresse enregistrée.',
-      );
+      await _autreAdresse();
       return;
     }
     setState(() {
       _adresseId = null;
+      _choisie = null;
       _position = _DeliveryPoint('', position.latitude, position.longitude);
     });
     unawaited(_chargerDevis());
+  }
+
+  /// « Autre adresse » : la carte, l'épingle, et — pour quelqu'un d'autre —
+  /// son prénom et son téléphone.
+  Future<void> _autreAdresse() async {
+    final depart = _destination;
+    final choisie = await choisirAdresse(
+      context,
+      api: widget.api,
+      depart: depart == null ? null : (lat: depart.lat, lng: depart.lng),
+    );
+    if (!mounted || choisie == null) return;
+    setState(() {
+      _adresseId = null;
+      _choisie = choisie;
+      _position = _DeliveryPoint(choisie.pourLivreur, choisie.lat, choisie.lng);
+    });
+    unawaited(_chargerDevis());
+    // Enregistrée au passage ? La liste la montrera la prochaine fois.
+    unawaited(
+      widget.api.get('/addresses').then((r) {
+        if (mounted && r.ok) {
+          setState(() {
+            _adresses = r
+                .list('addresses')
+                .where((a) => a['lat'] is num && a['lng'] is num)
+                .toList();
+          });
+        }
+      }),
+    );
   }
 
   // ---------------------------------------------------------------- vue ---
@@ -543,7 +616,7 @@ class _CartScreenState extends State<CartScreen> {
                   ),
                   const SizedBox(height: 20),
                   _ligneLivraison(),
-                  if (_position != null) _champRepere(),
+                  if (_position != null && _choisie == null) _champRepere(),
                   const _Separation(),
                   _lignePaiement(),
                   if (_paiement == 'mobile_money')
@@ -613,7 +686,15 @@ class _CartScreenState extends State<CartScreen> {
     final destination = _destination;
     String titre;
     String? sousTitre;
-    if (_position != null) {
+    final choisie = _choisie;
+    if (_localisation) {
+      titre = 'Localisation…';
+    } else if (choisie != null) {
+      titre = choisie.titre;
+      sousTitre = choisie.pourAutrui
+          ? 'Pour ${[choisie.contactNom, choisie.contactTelephone].where((v) => (v ?? '').isNotEmpty).join(' · ')}'
+          : (choisie.indication.isEmpty ? null : choisie.indication);
+    } else if (_position != null) {
       titre = 'Ma position actuelle';
       sousTitre = _repere.text.trim().isEmpty ? null : _repere.text.trim();
     } else if (destination != null) {
@@ -1024,14 +1105,15 @@ class _LigneReglage extends StatelessWidget {
 /// Un choix dans la feuille « Où livrer ? ».
 class _LigneChoix extends StatelessWidget {
   const _LigneChoix({
-    required this.icone,
+    required this.image,
     required this.titre,
     required this.choisi,
     required this.onTap,
     this.sousTitre,
   });
 
-  final IconData icone;
+  /// Une icône 3D (Fluent, la famille de l'écran d'accueil).
+  final String image;
   final String titre;
   final String? sousTitre;
   final bool choisi;
@@ -1040,7 +1122,16 @@ class _LigneChoix extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListTile(
     contentPadding: EdgeInsets.zero,
-    leading: Icon(icone, color: TovoTheme.ink),
+    leading: Container(
+      width: 44,
+      height: 44,
+      padding: const EdgeInsets.all(6),
+      decoration: const BoxDecoration(
+        color: TovoTheme.bloc,
+        shape: BoxShape.circle,
+      ),
+      child: Image.asset(image),
+    ),
     title: Text(titre, style: const TextStyle(fontWeight: FontWeight.w600)),
     subtitle: sousTitre == null ? null : Text(sousTitre!),
     trailing: choisi

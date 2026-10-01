@@ -4,7 +4,7 @@ import { SYSTEM_PROMPT, contexteUtilisateur } from './systemPrompt.js';
 import { EXECUTORS, TOOL_DEFINITIONS, type ToolContext } from './tools.js';
 import { collectIds, sanitizeToolResult, validateComponents } from './validate.js';
 import { envelope, merchantCard, type ChatEnvelope, type Component } from '../components/builders.js';
-import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type CataloguePage, type PendingMerchantChoice } from '../services/catalogue.js';
+import { alternativesHorsTovo, cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type CataloguePage, type PendingMerchantChoice } from '../services/catalogue.js';
 import {
   demandeBoutiqueOuverte,
   demandeDeCommandePassee,
@@ -243,7 +243,11 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     const page = pageInitiale && intent.merchants.length === 0 && requeteClient === requeteInitiale
       ? pageInitiale
       : await cataloguePage(input.db, filter, selectedBranch ? true : false);
-    if (page.total > 0 || page.category_id || selectedBranch || keyword) {
+    // Tovo ne l'a pas : où le trouver ailleurs à Niamey (services/commerces.ts).
+    if (page.total === 0 && !page.category_id && intent.merchants.length === 0) {
+      direct = await alternativesHorsTovo(input.db, input.message, input.position);
+    }
+    if (!direct && (page.total > 0 || page.category_id || selectedBranch || keyword)) {
       direct = searchAnswer(page, filter);
     }
   }

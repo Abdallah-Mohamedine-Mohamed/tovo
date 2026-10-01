@@ -1,6 +1,7 @@
 import 'registry.dart';
 import 'widgets/cards.dart';
 import 'widgets/cart_summary.dart';
+import 'widgets/commerces_hors_tovo.dart';
 import 'widgets/category_grid.dart';
 import 'widgets/courier_form.dart';
 import 'widgets/image_search_prompt.dart';
@@ -61,5 +62,8 @@ void registerTovoComponents() {
 
     'courier_form': (component, onInteraction) =>
         CourierForm(component: component, onInteraction: onInteraction),
+
+    'commerces_hors_tovo': (component, onInteraction) =>
+        CommercesHorsTovo(component: component, onInteraction: onInteraction),
   });
 }

@@ -32,6 +32,7 @@ const { chargerClassifieur, classerLocalement } = await import('../../src/ai/cla
 const { demandeUnColis, demandeUnLivreur } = await import('../../src/ai/intents.js');
 const { comprendre, essaiGemini, COUTEUSES: COUTEUSES_CERVEAU } = await import('../../src/ai/decideur.js');
 type Reflexion = import('../../src/ai/decideur.js').Reflexion;
+const { trieurEntraine } = await import('../../src/ai/trieurEntraine.js');
 
 type Prediction = Intention | 'tuiles' | null;
 interface Resultat { cas: Cas; predit: Prediction; ms: number; erreur?: string; via?: string }
@@ -124,9 +125,12 @@ async function openrouter(message: string, modele: string) {
       model: modele,
       messages: [{ role: 'system', content: CONSIGNE }, { role: 'user', content: message }],
       temperature: 0,
-      max_tokens: 60,
+      // Claude 5.x explique en une phrase avant son JSON (réflexion non désactivable) :
+      // 60 jetons le coupaient avant la réponse.
+      max_tokens: /anthropic/.test(modele) ? 400 : 60,
       // DeepSeek V4.x : le mode « non-reasoning » (le plus rapide).
       ...(/deepseek/.test(modele) ? { reasoning: { enabled: false } } : {}),
+      ...(/anthropic/.test(modele) ? { reasoning: { effort: 'low' } } : {}),
     }),
     signal: AbortSignal.timeout(20_000),
   });
@@ -191,6 +195,18 @@ function candidat(nom: string): Candidat | undefined {
   }
   if (fournisseur === 'openai') return (m) => openai(m, reste.join(':'));
   if (fournisseur === 'openrouter') return (m) => openrouter(m, reste.join(':'));
+  // « vertex:<point de terminaison> » : le trieur entraîné, avec le contexte
+  // comme en production. Clé du compte de service : VERTEX_CLE_FICHIER.
+  if (fournisseur === 'vertex') {
+    const cle = process.env.VERTEX_CLE_FICHIER;
+    if (!cle) throw new Error('VERTEX_CLE_FICHIER : chemin de la clé du compte de service');
+    const f = trieurEntraine(cle, reste.join(':'));
+    return async (m, cas) => {
+      const d = await f(m, { avant: cas?.avant ?? null });
+      const predit: Prediction = !d.sur && COUTEUSES_CERVEAU.has(d.intention) ? 'tuiles' : d.intention;
+      return { predit };
+    };
+  }
   return undefined;
 }
 
@@ -218,7 +234,8 @@ async function passer(nom: string, f: Candidat) {
   // Quelques requêtes à la fois : assez pour aller vite, pas assez pour
   // être freiné par les limites des fournisseurs. Claude via un compte
   // OpenRouter récent : 20 requêtes par minute, une à la fois, espacées.
-  const lent = /anthropic|claude/.test(nom);
+  // Le trieur réglé sur Vertex (projet récent) : 429 dès 5 requêtes à la fois.
+  const lent = /anthropic|claude|^vertex:/.test(nom);
   await Promise.all(Array.from({ length: lent ? 1 : 5 }, async () => {
     for (let cas = file.shift(); cas; cas = file.shift()) {
       const debut = Date.now();
@@ -239,12 +256,13 @@ function bilan({ nom, resultats }: { nom: string; resultats: Resultat[] }) {
   const seuls = resultats.filter((r) => !r.cas.contexte);
   const reels = seuls.filter((r) => r.cas.source === 'reel');
   const pieges = seuls.filter((r) => r.cas.source === 'piege');
-  const juste = (r: Resultat) => r.predit === r.cas.attendu;
+  const accepte = (r: Resultat) => Boolean(r.predit && r.cas.aussi?.includes(r.predit));
+  const juste = (r: Resultat) => r.predit === r.cas.attendu || accepte(r);
   // Livreur et colis déclenchent la MÊME course : confondre les deux n'est
   // pas une erreur coûteuse. Les phrases à contexte sont comptées à part.
   const course = (i: Prediction) => (i === 'livreur' || i === 'colis' ? 'course' : i);
   const aTort = seuls.filter((r) => r.predit && r.predit !== 'tuiles' && COUTEUSES.has(r.predit as Intention)
-    && course(r.predit) !== course(r.cas.attendu));
+    && course(r.predit) !== course(r.cas.attendu) && !accepte(r));
   const tuiles = resultats.filter((r) => r.predit === 'tuiles');
   const avecAvant = resultats.filter((r) => r.cas.avant);
   const erreurs = resultats.filter((r) => r.erreur);
@@ -293,7 +311,7 @@ for (const b of bilans) {
   // --detail : toutes les phrases ratées, pas seulement les coûteuses.
   if (process.argv.includes('--detail')) {
     const rates = tous.find((t) => t.nom === b.nom)!.resultats
-      .filter((r) => r.predit !== r.cas.attendu && !r.erreur);
+      .filter((r) => r.predit !== r.cas.attendu && !(r.predit && r.cas.aussi?.includes(r.predit)) && !r.erreur);
     console.log(`
 ${b.nom} — phrases ratées (${rates.length}) :`);
     for (const r of rates) console.log(`   « ${r.cas.texte} » → ${r.predit}${r.via ? ` (${r.via})` : ''}, attendu ${r.cas.attendu}${r.cas.contexte ? ' [contexte]' : ''}`);

@@ -455,7 +455,11 @@ class _PastilleCommande extends StatefulWidget {
   final Map<String, dynamic> order;
   final VoidCallback onTap;
 
-  static String etape(String statut, {required bool colis}) {
+  static String etape(
+    String statut, {
+    required bool colis,
+    bool livreur = false,
+  }) {
     if (colis) {
       return switch (statut) {
         'assigned' => 'Votre livreur arrive',
@@ -464,9 +468,20 @@ class _PastilleCommande extends StatefulWidget {
         _ => 'On cherche un livreur',
       };
     }
+    // Un livreur déjà dessus, avant la récupération (0071).
+    if (livreur &&
+        const {
+          'pending',
+          'confirmed',
+          'preparing',
+          'ready',
+          'assigned',
+        }.contains(statut)) {
+      return 'Un livreur va la chercher';
+    }
     return switch (statut) {
       'pending' => 'La boutique confirme',
-      'confirmed' => 'Commande acceptée',
+      'confirmed' => 'En cuisine',
       'preparing' => 'En cuisine',
       'ready' => 'Prête, un livreur arrive',
       'assigned' => 'Un livreur va la chercher',
@@ -518,7 +533,11 @@ class _PastilleCommandeState extends State<_PastilleCommande> {
     final roule =
         colis || const {'assigned', 'picked_up', 'delivering'}.contains(statut);
     final ecoule = _ecoule;
-    final etape = _PastilleCommande.etape(statut, colis: colis);
+    final etape = _PastilleCommande.etape(
+      statut,
+      colis: colis,
+      livreur: order['driver_id'] != null,
+    );
     return Semantics(
       button: true,
       label: 'Suivre ma commande. $etape',

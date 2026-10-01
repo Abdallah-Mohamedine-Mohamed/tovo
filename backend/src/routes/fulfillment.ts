@@ -148,14 +148,14 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    // Dès que la boutique a confirmé, le livreur peut accepter et filer
-    // vers elle pendant la préparation (0062). Seule une commande encore
-    // en attente de la boutique est refusée : elle peut ne jamais être
-    // confirmée.
-    if (!['confirmed', 'preparing', 'ready'].includes(commande.status as string)) {
+    // Le livreur accepte dès la commande passée (0071) : la plupart des
+    // boutiques n'ont pas encore l'app, il va sur place passer la commande
+    // et la récupérer. Seule une commande déjà en route, livrée ou annulée
+    // est refusée.
+    if (!['pending', 'confirmed', 'preparing', 'ready'].includes(commande.status as string)) {
       return reply.code(409).send({
-        error: 'la boutique n’a pas encore confirmé la commande',
-        code: 'NOT_READY',
+        error: 'cette course n’est plus disponible',
+        code: 'NOT_AVAILABLE',
       });
     }
 
@@ -170,9 +170,10 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(409).send({ error: 'course déjà prise', code: 'ALREADY_TAKEN' });
     }
 
-    // Prête : « assigned » ; en préparation : le statut ne bouge pas, mais la
-    // Live Activity du client affiche désormais le prénom du livreur.
-    notifierClient(params.data.orderId, commande.status === 'ready' ? 'assigned' : commande.status as string).catch(() => undefined);
+    // Un livreur est sur la commande : le client l'apprend tout de suite
+    // (« Un livreur est en route »), que la boutique ait confirmé ou non —
+    // le livreur passe maintenant la commande sur place (0071).
+    notifierClient(params.data.orderId, 'assigned').catch(() => undefined);
 
     const suivi = await db.rpc('order_tracking', { p_order_id: params.data.orderId });
     return reply.send(

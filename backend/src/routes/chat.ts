@@ -27,7 +27,7 @@ import { cerveauActif, comprendre } from '../ai/decideur.js';
 import { exemplesPour } from '../ai/banc/exemples.js';
 import { aiguiller, cascadeActive } from '../ai/cascade.js';
 import { rechercheProduitRapide } from '../ai/orchestrator.js';
-import { cataloguePage, type CataloguePage } from '../services/catalogue.js';
+import { cataloguePage, HORS_TOVO_NON, HORS_TOVO_OUI, reponseHorsTovo, type CataloguePage } from '../services/catalogue.js';
 import { serviceClient } from '../services/supabase.js';
 import { orderTracking, type Component } from '../components/builders.js';
 
@@ -485,6 +485,26 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const valeurTuile = body.data.interaction?.action === 'quick_reply'
       ? String(body.data.interaction.payload.value ?? '')
       : '';
+    // « Oui, envoyez un livreur » / « Non, voir ce que Tovo propose » : la
+    // réponse à une enseigne hors Tovo (catalogue.ts, enseigneHorsTovo).
+    if (valeurTuile.startsWith(HORS_TOVO_OUI) || valeurTuile.startsWith(HORS_TOVO_NON)) {
+      const resultat = await reponseHorsTovo(db, valeurTuile);
+      emit({ type: 'conversation', conversation_id: conversationId });
+      emit({ type: 'results', components: resultat.components });
+      emit({ type: 'text', text: resultat.content });
+      await db.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'user',
+        content: libelleLisible('quick_reply', body.data.interaction!.payload) ?? message,
+        client_message_id: body.data.client_message_id,
+      });
+      await db.from('messages').insert({
+        conversation_id: conversationId, role: 'assistant', content: resultat.content, components: resultat.components,
+      });
+      request.log.info({ conversationId, oui: valeurTuile.startsWith(HORS_TOVO_OUI) }, 'enseigne hors Tovo');
+      return output.finish({ conversation_id: conversationId, ...envelope(resultat.content, resultat.components) });
+    }
+
     if (valeurTuile.startsWith(ANNULER_CONFIRME) || valeurTuile === GARDER_COMMANDE) {
       const resultat = valeurTuile === GARDER_COMMANDE
         ? { components: [], content: 'D’accord, votre commande continue.' }

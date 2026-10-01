@@ -13,10 +13,10 @@ import '../registry.dart';
 import 'package:flutter/services.dart';
 import 'numero_nita.dart';
 
-/// Quatre moments pour un repas. « Prête » et « récupérée » sont dites par
-/// le titre au-dessus ; six étapes empilées faisaient une liste à lire.
+/// Trois moments pour un repas (29/09) : « confirmée » et « en préparation »
+/// ne faisaient qu'une — moins d'une minute les séparait. « Prête » et
+/// « récupérée » sont dites par le titre au-dessus.
 const List<String> _etapesCommandeVisibles = [
-  'Confirmée',
   'En préparation',
   'En route',
   'Livrée',
@@ -45,13 +45,16 @@ int _etapeColisVisible(String statut) => switch (statut) {
   _ => -1,
 };
 
-int _etapeCommandeVisible(String statut) => switch (statut) {
-  'confirmed' => 0,
-  'preparing' || 'ready' || 'assigned' => 1,
-  'picked_up' || 'delivering' => 2,
-  'delivered' => 3,
-  _ => -1,
-};
+/// Un livreur déjà sur une commande en attente (0071 : il la passe sur place)
+/// : elle est lancée, comme si la boutique l'avait acceptée.
+int _etapeCommandeVisible(String statut, {bool livreur = false}) =>
+    switch (statut) {
+      'pending' => livreur ? 0 : -1,
+      'confirmed' || 'preparing' || 'ready' || 'assigned' => 0,
+      'picked_up' || 'delivering' => 1,
+      'delivered' => 2,
+      _ => -1,
+    };
 
 /// La valeur par défaut que la base écrit quand le client n'a pas donné de
 /// destination : ce n'est pas une adresse, on ne l'affiche pas comme telle.
@@ -337,11 +340,11 @@ class _OrderTrackingState extends State<OrderTracking>
 
   static const Map<String, String> _libelles = {
     'pending': 'En attente de confirmation',
-    'confirmed': 'Commande confirmée',
+    'confirmed': 'En préparation',
     'preparing': 'En préparation',
     'ready': 'Prête, en attente d’un livreur',
     'assigned': 'Un livreur arrive',
-    'picked_up': 'Commande récupérée',
+    'picked_up': 'En route vers vous',
     'delivering': 'En route vers vous',
     'delivered': 'Livrée',
     'cancelled': 'Annulée',
@@ -387,14 +390,25 @@ class _OrderTrackingState extends State<OrderTracking>
         _ => 'Suivez votre livraison ici.',
       };
     }
+    // Un livreur est dessus avant la récupération : il va à la boutique, et
+    // y passe la commande si elle n'a pas l'app (0071).
+    if (_livreur != null &&
+        const {
+          'pending',
+          'confirmed',
+          'preparing',
+          'ready',
+          'assigned',
+        }.contains(_statut)) {
+      return 'Il se rend à la boutique et récupère votre commande.';
+    }
     return switch (_statut) {
       'pending' => 'La boutique doit encore confirmer votre commande.',
-      'confirmed' => 'La boutique a accepté votre commande.',
+      'confirmed' => 'La boutique prépare votre commande.',
       'preparing' => 'La boutique prépare votre commande.',
       'ready' => 'Votre commande attend qu’un livreur la récupère.',
       'assigned' => 'Un livreur se rend à la boutique.',
-      'picked_up' => 'Le livreur a récupéré votre commande.',
-      'delivering' => 'Votre commande est en chemin vers vous.',
+      'picked_up' || 'delivering' => 'Votre commande est en chemin vers vous.',
       'delivered' => 'Votre commande vous a été remise.',
       _ => 'Suivez votre commande ici.',
     };
@@ -408,7 +422,7 @@ class _OrderTrackingState extends State<OrderTracking>
         : _etapesCommandeVisibles;
     final courante = colis
         ? _etapeColisVisible(_statut)
-        : _etapeCommandeVisible(_statut);
+        : _etapeCommandeVisible(_statut, livreur: _livreur != null);
     final annulee = _statut == 'cancelled';
     // Même règle que la base (cancel_my_order) : tant qu'aucun livreur
     // n'est parti. La base tranche de toute façon, ce bouton ne fait
@@ -434,6 +448,17 @@ class _OrderTrackingState extends State<OrderTracking>
             'cancelled' => 'Livraison annulée',
             _ => _statut,
           }
+        : _livreur != null &&
+              const {
+                'pending',
+                'confirmed',
+                'preparing',
+                'ready',
+                'assigned',
+              }.contains(_statut)
+        ? (_prenomLivreur.isEmpty
+              ? 'Un livreur va la chercher'
+              : '$_prenomLivreur va la chercher')
         : _libelles[_statut] ?? _statut;
 
     final brute = ((widget.component.map('dropoff')['hint'] as String?) ?? '')

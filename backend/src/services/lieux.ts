@@ -176,3 +176,119 @@ export function reperer(texte: string, lieux: Lieu[] = chargerLieux()): Reperage
       : quartier?.nom ?? null,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Choisir où livrer (écran « Placer l'épingle », 28/09)
+// ---------------------------------------------------------------------------
+
+/** Ce qu'on renvoie à l'app : le strict nécessaire, sans l'identifiant OSM. */
+export interface LieuTrouve {
+  nom: string;
+  genre: string;
+  quartier: string | null;
+  lat: number;
+  lng: number;
+}
+
+const enLieuTrouve = (l: Lieu): LieuTrouve => ({
+  nom: l.nom,
+  genre: l.genre,
+  quartier: l.quartier,
+  lat: l.lat,
+  lng: l.lng,
+});
+
+/**
+ * Les genres qui guident un livreur, du plus parlant au moins parlant. Les
+ * boutiques et les bureaux (des centaines, souvent mal nommés) passent
+ * après ; les rues, trop longues pour situer une porte, en dernier.
+ */
+const PRIORITE_GENRE: Record<string, number> = {
+  quartier: 0, village: 0,
+  'marché': 1, 'mosquée': 1, 'santé': 1, 'église': 1, 'repère': 1, gare: 1, tourisme: 1,
+  pharmacie: 2, 'école': 2, 'station-service': 2, 'hôtel': 2, banque: 2, police: 2, 'supermarché': 2, loisir: 2,
+  restaurant: 3, bureau: 3, boutique: 3,
+  rue: 4,
+};
+
+/**
+ * Chercher un quartier ou un repère par son nom, pendant la frappe :
+ * « tallad » → Talladjé, Marché de Talladjé, École Talladjé II… Chaque mot
+ * tapé doit commencer un mot du nom (ou de son quartier). Les quartiers
+ * d'abord, puis les repères qui parlent, puis le reste.
+ */
+export function rechercherLieux(texte: string, lieux: Lieu[] = chargerLieux(), limite = 8): LieuTrouve[] {
+  const mots = normaliserIntention(texte).split(' ').filter((m) => m.length > 0);
+  if (mots.length === 0 || mots.join('').length < 2) return [];
+  const trouves: { lieu: Lieu; score: number }[] = [];
+  for (const lieu of lieux) {
+    const motsNom = lieu.nom_normalise.split(' ');
+    const motsQuartier = lieu.quartier ? normaliserIntention(lieu.quartier).split(' ') : [];
+    const tousDansLeNom = mots.every((m) => motsNom.some((n) => n.startsWith(m)));
+    const tous = tousDansLeNom || mots.every((m) => [...motsNom, ...motsQuartier].some((n) => n.startsWith(m)));
+    if (!tous) continue;
+    const debut = lieu.nom_normalise.startsWith(mots.join(' ')) ? 0 : 1;
+    const score = (PRIORITE_GENRE[lieu.genre] ?? 3) * 100 + (tousDansLeNom ? 0 : 50) + debut * 10
+      + Math.min(9, lieu.nom_normalise.length / 10);
+    trouves.push({ lieu, score });
+  }
+  // Un même nom dans le même quartier (deux nœuds OSM pour une mosquée) :
+  // une seule ligne.
+  const vus = new Set<string>();
+  return trouves
+    .sort((a, b) => a.score - b.score)
+    .filter(({ lieu }) => {
+      const cle = `${lieu.nom_normalise}|${lieu.quartier ?? ''}`;
+      if (vus.has(cle)) return false;
+      vus.add(cle);
+      return true;
+    })
+    .slice(0, limite)
+    .map(({ lieu }) => enLieuTrouve(lieu));
+}
+
+function metresEntre(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const dLat = (b.lat - a.lat) * 111_320;
+  const dLng = (b.lng - a.lng) * 111_320 * Math.cos((a.lat * Math.PI) / 180);
+  return Math.hypot(dLat, dLng);
+}
+
+/**
+ * Autour d'un point posé sur la carte : le repère le plus proche (à moins
+ * de 250 m, un genre qui guide), et le quartier (le centre de quartier le
+ * plus proche, à moins de 3 km, sinon celui du repère). Ce que lit le
+ * livreur : « Près du Marché de Talladjé », « Talladjé ».
+ */
+export function autourDe(point: { lat: number; lng: number }, lieux: Lieu[] = chargerLieux()): {
+  repere: LieuTrouve | null;
+  quartier: string | null;
+  distanceRepereM: number | null;
+} {
+  let repere: Lieu | null = null;
+  let dRepere = Infinity;
+  let quartier: Lieu | null = null;
+  let dQuartier = Infinity;
+  for (const lieu of lieux) {
+    const d = metresEntre(point, lieu);
+    if (lieu.genre === 'quartier' || lieu.genre === 'village') {
+      if (d < dQuartier) {
+        dQuartier = d;
+        quartier = lieu;
+      }
+      continue;
+    }
+    const priorite = PRIORITE_GENRE[lieu.genre] ?? 3;
+    // Un repère parlant l'emporte sur une boutique un peu plus proche.
+    if (priorite > 2 || d > 250) continue;
+    const pondere = d + priorite * 40;
+    if (pondere < dRepere) {
+      dRepere = pondere;
+      repere = lieu;
+    }
+  }
+  return {
+    repere: repere ? enLieuTrouve(repere) : null,
+    quartier: (dQuartier <= 3000 ? quartier?.nom : null) ?? repere?.quartier ?? null,
+    distanceRepereM: repere ? Math.round(metresEntre(point, repere)) : null,
+  };
+}

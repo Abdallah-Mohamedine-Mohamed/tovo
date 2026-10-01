@@ -27,6 +27,11 @@ export interface Cas {
   avant?: string;
   /** Pourquoi c'est un piège, ou ce que la phrase veut dire. */
   note?: string;
+  /**
+   * Autres réponses JUSTES quand la phrase en a plusieurs (tranché par
+   * l'utilisateur le 30/09). « tuiles » : demander au client est juste aussi.
+   */
+  aussi?: Array<Intention | 'tuiles'>;
 }
 
 /** Les actions qui coûtent si on les déclenche à tort. */
@@ -51,7 +56,8 @@ export const JEU: Cas[] = [
   r('casque audio', 'recherche'),
   r('va plus loin que la distance annoncée', 'recherche', { ...ctx, avant: 'Je ne trouve pas de pommade à moins de 3 km.', note: 'élargir la recherche précédente' }),
   r('je cherche des plats chauds', 'envie'),
-  r('Oui', 'social', { ...ctx, avant: 'Avez-vous besoin d’autre chose ?' }),
+  // Tranché le 30/09 : « oui, j'ai besoin d'autre chose » → il veut voir l'offre.
+  r('Oui', 'envie', { ...ctx, avant: 'Avez-vous besoin d’autre chose ?' }),
   r('quels restaurants sont ouverts ?', 'envie'),
   r('je veux voir tous les produits de otakoss', 'boutique'),
   r('va plus loin', 'recherche', { ...ctx, avant: 'Je ne trouve pas d’écouteurs à moins de 3 km.' }),
@@ -103,13 +109,15 @@ export const JEU: Cas[] = [
   r('Et tacos ?', 'recherche'),
   r('Bonjour', 'social'),
   r('Envoyer un colis', 'colis'),
-  r("J'ai changé d'avis", 'social', ctx),
+  // Tranché le 30/09 : phrase incomplète, il veut annuler OU modifier sa
+  // commande — jamais du bavardage. Lui demander (tuiles) est le mieux.
+  r("J'ai changé d'avis", 'annuler', { ...ctx, aussi: ['aide', 'tuiles'] }),
   r('Un plats a livrer', 'envie'),
   r('Je veux manger du poulet.', 'recherche'),
   r('Mahamadou cissé ? C\'est qui ça ?', 'social'),
   r("D'où tu tiens cette information ?", 'social'),
   r('Je parle de mahamadou cissé', 'social', ctx),
-  r('Montre', 'recherche', { note: 'une montre (bracelet)' }),
+  r('Montre', 'recherche', { note: 'une montre (bracelet), ou « montre-moi » (tranché le 30/09)', aussi: ['envie'] }),
   r('Il y a des montres quand même ? Quelle que soit la marque ?', 'recherche'),
   r('Boutique ouverte en ce moment sur otakoss', 'boutique'),
   r('Boutique ouverte présentement', 'envie'),
@@ -149,13 +157,16 @@ export const JEU: Cas[] = [
   r("Je veux manger du bon l'ukounou. Qu'est-ce que tu me, euh, réserves ? Qu'est-ce que tu me, qu'est-ce qu'il y a comme bon coin pour manger du bon l'ukounou ?", 'recherche', { note: 'doukounou mal transcrit' }),
   r('Je veux manger du bon doukounou, du bon doukounou.', 'recherche'),
   r('Quelles sont les boutiques ouvertes présentement ?', 'envie'),
-  r('Je veux du bon à checker.', 'recherche', { note: 'attiéké mal transcrit' }),
   r('Attiéké', 'recherche'),
   r("Je veux manger à Garbador. Qu'est-ce que Garbador a comme produit ?", 'boutique'),
   r('Je veux manger du poisson braisé.', 'recherche'),
   r('Où est mon panier ?', 'panier', { note: 'voir son panier' }),
-  r('Je veux commander de la viande chez CHOS.', 'recherche'),
-  r('Je veux commander de la viande, de la bouffe de street.', 'recherche'),
+  // Tranchés le 30/09. « Tchos » (transcrit CHOS) : vendeur de viande connu de
+  // tout Niamey, PAS sur Tovo. La viande est son produit, comme les tacos
+  // d'Otakoss → recherche. « de la bouffe de street » : une envie, pas un
+  // produit précis.
+  r('Je veux commander de la viande chez CHOS.', 'recherche', { note: 'Tchos, vendeur de viande hors Tovo' }),
+  r('Je veux commander de la viande, de la bouffe de street.', 'envie'),
   r('Je veux commander des tacos.', 'recherche'),
   r('Je veux un sandwich tacos.', 'recherche'),
   r('Je veux commander des couches pour bébé.', 'recherche'),
@@ -190,7 +201,7 @@ export const JEU: Cas[] = [
   r('Je voudrais un autre livre.', 'recherche', { note: 'un LIVRE, pas un livreur' }),
   r('Je voudrais un autre livret pour récupérer un colis.', 'livreur', { note: '« livret » pour « livreur »' }),
   r('Yantala.', 'livreur', { ...ctx, avant: 'Où le livreur doit-il récupérer le colis ?', note: 'où récupérer le colis, en réponse' }),
-  r('Je viens livrer.', 'social', { note: 'ambigu : un livreur qui se présente' }),
+  r('Je viens livrer.', 'question', { note: 'veut devenir livreur (tranché le 30/09)' }),
   r('Je manger aussi', 'envie'),
   r('Je cherche un livre', 'recherche', { note: 'un LIVRE, pas un livreur' }),
   r('Je cherche un livre euh', 'recherche', { note: 'un LIVRE, pas un livreur' }),

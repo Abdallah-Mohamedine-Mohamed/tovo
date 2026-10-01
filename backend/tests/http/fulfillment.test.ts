@@ -203,7 +203,7 @@ describe('Exécution — du panier à la livraison', () => {
         .not.toContain(orderId);
   }, 60_000);
 
-  it('une commande non confirmée est visible mais pas encore prenable', async () => {
+  it('une commande pas encore confirmée par la boutique se prend tout de suite (0071)', async () => {
     const orderId = await commander();
 
     const pool = await app.inject({
@@ -217,15 +217,18 @@ describe('Exécution — du panier à la livraison', () => {
       status: string;
       can_accept: boolean;
     }>).find((ordre) => ordre.id === orderId);
-    expect(commande).toMatchObject({ status: 'pending', can_accept: false });
+    expect(commande).toMatchObject({ status: 'pending', can_accept: true });
 
     const accept = await app.inject({
       method: 'POST',
       url: `/orders/${orderId}/accept`,
       headers: auth(livreur),
     });
-    expect(accept.statusCode).toBe(409);
-    expect(accept.json().code).toBe('NOT_READY');
+    expect(accept.statusCode).toBe(200);
+
+    // Deux gestes : récupérée, puis livrée.
+    await statut(livreur, orderId, 'delivering');
+    await statut(livreur, orderId, 'delivered');
   }, 40_000);
 
   it('deux livreurs sur la même course : le second reçoit un 409 explicite', async () => {

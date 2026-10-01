@@ -43,7 +43,8 @@
     "banc:exemples": "tsx --env-file=.env scripts/banc-ia/exemples.ts",
     "banc:reetiqueter": "tsx --env-file=.env scripts/banc-ia/reetiqueter.ts",
     "banc:massive": "tsx --env-file=.env scripts/banc-ia/massive.ts",
-    "lieux:importer": "tsx --env-file=.env scripts/lieux/importer.ts"
+    "lieux:importer": "tsx --env-file=.env scripts/lieux/importer.ts",
+    "clm:exporter": "tsx --env-file=.env scripts/clm/exporter.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",

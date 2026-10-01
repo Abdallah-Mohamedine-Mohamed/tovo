@@ -399,7 +399,12 @@ class DriverController extends ChangeNotifier {
 
   /// Acceptée pendant la préparation (migration 0062) : la course est à lui,
   /// mais la boutique ne l'a pas encore marquée « prête ».
-  static const _statutsAvantPret = {'confirmed', 'preparing', 'ready'};
+  static const _statutsAvantPret = {
+    'pending',
+    'confirmed',
+    'preparing',
+    'ready',
+  };
 
   String? _trouverCourseActive(TovoResponse reponse) {
     if (!reponse.ok) return null;
@@ -417,9 +422,6 @@ class DriverController extends ChangeNotifier {
     }
     return null;
   }
-
-  /// La course est acceptée, mais la boutique cuisine encore.
-  bool get enPreparation => _statutsAvantPret.contains(statut);
 
   static List<Map<String, dynamic>> _extraireOrdres(TovoResponse reponse) =>
       reponse.list('orders');
@@ -531,19 +533,27 @@ class DriverController extends ChangeNotifier {
   /// Étape suivante du parcours, ou `null` si la course est terminée.
   String? get prochaineEtape => etapeSuivante(statut);
 
+  /// Deux gestes, pas plus (0071, retour du 29/09) : « récupérée » — que la
+  /// boutique ait suivi dans l'app ou non, le livreur a la commande en main —
+  /// puis « livrée ». Plus d'étape « je pars livrer » : récupérer, c'est
+  /// partir.
   static String? etapeSuivante(String statut) => switch (statut) {
-    'assigned' => 'picked_up',
-    'picked_up' => 'delivering',
-    'delivering' => 'delivered',
+    'pending' ||
+    'confirmed' ||
+    'preparing' ||
+    'ready' ||
+    'assigned' => 'delivering',
+    // Une course commencée avec l'ancienne app.
+    'picked_up' || 'delivering' => 'delivered',
     _ => null,
   };
 
-  String get libelleProchaineEtape => switch (statut) {
-    'assigned' =>
-      course?['type'] == 'courier' ? 'Colis récupéré' : 'Repas récupéré',
-    'picked_up' => 'Je pars livrer',
-    'delivering' =>
-      course?['type'] == 'courier' ? 'Colis livré' : 'Commande livrée',
-    _ => '',
-  };
+  String get libelleProchaineEtape {
+    final colis = course?['type'] == 'courier';
+    return switch (prochaineEtape) {
+      'delivering' => colis ? 'Colis récupéré' : 'Commande récupérée',
+      'delivered' => colis ? 'Colis livré' : 'Commande livrée',
+      _ => '',
+    };
+  }
 }

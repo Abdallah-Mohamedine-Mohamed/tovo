@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../core/api.dart';
 import '../../core/location.dart';
+import '../../features/adresse/choix_adresse.dart';
 import '../../core/theme.dart';
 import '../registry.dart';
 import 'numero_nita.dart';
@@ -46,6 +48,13 @@ class _CourierFormState extends State<CourierForm> {
   late double? _lng = _num(_recuperer ? _dropoff['lng'] : _pickup['lng']);
 
   static double? _num(Object? v) => (v as num?)?.toDouble();
+
+  /// L'endroit du client choisi sur la carte (plutôt que sa position), et
+  /// son nom lisible : « Près du Marché de Talladjé ».
+  String? _lieuClient;
+
+  /// La destination d'un colis, placée sur la carte.
+  ({double lat, double lng})? _arriveeChoisie;
 
   // Venir chez moi.
   late final _repere = TextEditingController();
@@ -110,8 +119,12 @@ class _CourierFormState extends State<CourierForm> {
       // Le client a demandé un livreur : chercher sa position est la suite
       // logique, pas un geste de plus à lui demander. Déjà connue depuis
       // l'ouverture de l'app, elle est là tout de suite.
+      // Une position de moins de 2 minutes : le client n'a pas bougé. Plus
+      // vieille (celle de l'ouverture de l'app), on en cherche une fraîche.
       final recente = TovoLocation.recente;
-      if (recente != null) {
+      if (recente != null &&
+          DateTime.now().difference(recente.timestamp) <
+              const Duration(minutes: 2)) {
         _lat = recente.latitude;
         _lng = recente.longitude;
       } else {
@@ -161,16 +174,61 @@ class _CourierFormState extends State<CourierForm> {
         _lng = position.longitude;
       }
     });
-    if (position != null) _commanderSiAuto();
-    if (position == null && !discret) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Activez la localisation pour que le livreur vous trouve.',
-          ),
-        ),
-      );
+    if (position != null) {
+      _lieuClient = null;
+      _commanderSiAuto();
     }
+    // Introuvable : on laisse le client montrer l'endroit sur la carte, au
+    // lieu d'un message qui bloque.
+    if (position == null && !discret) await _choisirSurLaCarte();
+  }
+
+  /// La position du client, montrée sur la carte : là où le livreur vient
+  /// (venir chez moi), ou là où il livre (aller chercher).
+  Future<void> _choisirSurLaCarte() async {
+    final lat = _lat;
+    final lng = _lng;
+    final choisie = await choisirAdresse(
+      context,
+      api: TovoApi(),
+      depart: lat != null && lng != null ? (lat: lat, lng: lng) : null,
+      action: _recuperer ? 'Livrer ici' : 'Le livreur vient ici',
+      autrePersonne: false,
+      enregistrable: false,
+    );
+    if (!mounted || choisie == null) return;
+    setState(() {
+      _lat = choisie.lat;
+      _lng = choisie.lng;
+      _lieuClient = choisie.titre;
+      if (choisie.indication.isNotEmpty) {
+        _repere.text = choisie.indication;
+        _details = true;
+      }
+    });
+  }
+
+  /// La destination du colis, placée sur la carte — et à qui la remettre.
+  Future<void> _choisirDestination() async {
+    final choisie = await choisirAdresse(
+      context,
+      api: TovoApi(),
+      depart: _arriveeChoisie,
+      action: 'Livrer ici',
+      enregistrable: false,
+    );
+    if (!mounted || choisie == null) return;
+    setState(() {
+      _arriveeChoisie = (lat: choisie.lat, lng: choisie.lng);
+      _destination.text = [
+        choisie.titre,
+        if (choisie.indication.isNotEmpty) choisie.indication,
+        if ((choisie.contactNom ?? '').isNotEmpty) 'pour ${choisie.contactNom}',
+      ].join(' · ');
+      if ((choisie.contactTelephone ?? '').isNotEmpty) {
+        _destinataire.text = choisie.contactTelephone!;
+      }
+    });
   }
 
   void _appeler() {
@@ -185,7 +243,7 @@ class _CourierFormState extends State<CourierForm> {
           'pickup': {'lat': _lat, 'lng': _lng, 'hint': ou},
           'pickup_contact': _contactSurPlace.text.trim(),
           'dropoff': {'lat': _lat, 'lng': _lng},
-          'dropoff_hint': 'Chez le client',
+          'dropoff_hint': _lieuClient ?? 'Chez le client',
           'payment_method': _paiement,
           if (_paiement == 'mobile_money' && _numeroNita != null)
             'payment_phone': _numeroNita,
@@ -194,15 +252,18 @@ class _CourierFormState extends State<CourierForm> {
       return;
     }
     final repere = _repere.text.trim();
-    final dropLat = _num(_dropoff['lat']);
-    final dropLng = _num(_dropoff['lng']);
+    final dropLat = _arriveeChoisie?.lat ?? _num(_dropoff['lat']);
+    final dropLng = _arriveeChoisie?.lng ?? _num(_dropoff['lng']);
+    // Ce que lit le livreur au départ : le repère écrit, et l'endroit
+    // choisi sur la carte (« Près du Marché de Talladjé »).
+    final depart = [if (repere.isNotEmpty) repere, ?_lieuClient].join(' · ');
     widget.onInteraction(
       TovoInteraction('submit_courier', {
         'mode': 'deposer',
         'pickup': {
           'lat': _lat,
           'lng': _lng,
-          'hint': repere.isEmpty ? 'Position du client' : repere,
+          'hint': depart.isEmpty ? 'Position du client' : depart,
         },
         'dropoff_hint': _destination.text.trim(),
         if (dropLat != null && dropLng != null)
@@ -339,9 +400,10 @@ class _CourierFormState extends State<CourierForm> {
               Expanded(
                 child: Text(
                   positionConnue
-                      ? (_recuperer
-                            ? 'Livré à ma position'
-                            : 'Ma position actuelle')
+                      ? (_lieuClient ??
+                            (_recuperer
+                                ? 'Livré à ma position'
+                                : 'Ma position actuelle'))
                       : (_recuperer
                             ? 'Où vous l’apporter ?'
                             : 'Où le livreur doit-il venir ?'),
@@ -355,6 +417,13 @@ class _CourierFormState extends State<CourierForm> {
                 TextButton(
                   onPressed: _localisation ? null : () => _prendreMaPosition(),
                   child: Text(_localisation ? 'Recherche…' : 'Ma position'),
+                ),
+              // Ailleurs que là où il est, ou pour quelqu'un d'autre : sur
+              // la carte.
+              if (!_envoye)
+                TextButton(
+                  onPressed: _choisirSurLaCarte,
+                  child: Text(positionConnue ? 'Changer' : 'Sur la carte'),
                 ),
             ],
           ),
@@ -392,6 +461,27 @@ class _CourierFormState extends State<CourierForm> {
                 libelle: 'Destination',
                 exemple: 'Yantala, près du marché',
                 icone: Icons.flag_outlined,
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _choisirDestination,
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    foregroundColor: TovoTheme.ink,
+                  ),
+                  icon: Image.asset(
+                    'assets/icons/3d/lieu-carte.png',
+                    width: 20,
+                    height: 20,
+                  ),
+                  label: Text(
+                    _arriveeChoisie == null
+                        ? 'Placer la destination sur la carte'
+                        : 'Destination placée sur la carte · changer',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
               ),
               const SizedBox(height: 8),
               _Champ(

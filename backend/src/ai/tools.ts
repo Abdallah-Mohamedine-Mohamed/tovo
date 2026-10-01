@@ -16,7 +16,7 @@ import {
 } from '../components/builders.js';
 import { embed, embedImage } from '../services/embeddings.js';
 import { serviceClient } from '../services/supabase.js';
-import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, merchantMenu, type CatalogueIntent } from '../services/catalogue.js';
+import { alternativesHorsTovo, cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, merchantMenu, type CatalogueIntent } from '../services/catalogue.js';
 import { decrireImageDepuisOctets } from '../services/vision.js';
 import { offreVille } from '../services/livreur.js';
 import { paiementMobileActif } from '../config/env.js';
@@ -352,6 +352,11 @@ const rechercherProduits: Executor = async (args, ctx) => {
     category_id: categorieId, limit: 8,
   };
   const page = await cataloguePage(ctx.db, filter);
+  // Tovo ne l'a pas : où le trouver ailleurs à Niamey (services/commerces.ts).
+  if (page.total === 0 && !page.category_id && !intent.merchants.length) {
+    const ailleurs = await alternativesHorsTovo(ctx.db, ctx.currentMessage || requeteModele, ctx.position);
+    if (ailleurs) return ailleurs;
+  }
   const result = searchAnswer(page, filter);
   const options = await optionsCorrespondantes(ctx, filter.q, page.items.map((product) => product.id));
   result.summary.produits = page.items.map((product) => ({

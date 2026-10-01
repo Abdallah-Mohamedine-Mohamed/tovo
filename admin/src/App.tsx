@@ -22,6 +22,7 @@ import { CashList, DriverList } from './pages/drivers';
 import { SettingsEdit } from './pages/settings';
 import { QualiteIa } from './pages/qualiteIa';
 import { Signalements } from './pages/signalements';
+import { BoutiquesDemandees } from './pages/boutiquesDemandees';
 
 /**
  * Administration Tovo.
@@ -85,6 +86,11 @@ export const App = () => (
               meta: { label: 'Collectes' },
             },
             {
+              name: 'boutiques_demandees',
+              list: '/boutiques-demandees',
+              meta: { label: 'Boutiques demandées' },
+            },
+            {
               name: 'external_offers',
               list: '/offers',
               meta: { label: 'Prix concurrents' },
@@ -131,6 +137,7 @@ export const App = () => (
               <Route path="/settings" element={<SettingsEdit />} />
               <Route path="/qualite-ia" element={<QualiteIa />} />
               <Route path="/signalements" element={<Signalements />} />
+              <Route path="/boutiques-demandees" element={<BoutiquesDemandees />} />
               <Route path="*" element={<ErrorComponent />} />
             </Route>
 
