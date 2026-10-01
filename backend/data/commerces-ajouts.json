@@ -1,0 +1,26 @@
+{
+  "_lisez_moi": "Commerces ajoutés à la main (hors Tovo), que les données publiques ne connaissent pas. Fusionnés dans commerces-niamey.json par scripts/commerces/construire.ts. alias : les autres noms sous lesquels les gens le connaissent ; specialites : ce qui fait sa réputation, une demande qui contient l'un de ces mots le fait ressortir en premier.",
+  "commerces": [
+    {
+      "id": "tovo:merguez-toumo",
+      "nom": "Nouhou Merguez",
+      "alias": [
+        "Vendeur de merguez de la place Toumo",
+        "Vendeur de merguez de Cité Fayçal",
+        "Vendeur de merguez",
+        "Nouhou"
+      ],
+      "type": "grillades",
+      "specialites": ["merguez"],
+      "adresse": "Bd de l'Indépendance, près de la pharmacie Cité Fayçal",
+      "quartier": "Cité Fayçal",
+      "telephone": null,
+      "telephone_appel": null,
+      "lat": 13.504032,
+      "lng": 2.13398,
+      "fiabilite": 1,
+      "source": "tovo",
+      "note": "Ajouté le 01/10/2026 sur indication de l'équipe : très connu à Niamey (« Nouhou Merguez » sur Google Maps). Position exacte donnée par l’équipe (13.504032, 2.133980 ; plus code G43M+HHX) (pharmacie Cité Fayçal à 33 m). Numéro inconnu."
+    }
+  ]
+}

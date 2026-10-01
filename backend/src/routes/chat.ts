@@ -28,6 +28,7 @@ import { exemplesPour } from '../ai/banc/exemples.js';
 import { aiguiller, cascadeActive } from '../ai/cascade.js';
 import { rechercheProduitRapide } from '../ai/orchestrator.js';
 import { cataloguePage, HORS_TOVO_NON, HORS_TOVO_OUI, reponseHorsTovo, type CataloguePage } from '../services/catalogue.js';
+import { demandeDeGarde, reponseGarde } from '../services/pharmaciesGarde.js';
 import { serviceClient } from '../services/supabase.js';
 import { orderTracking, type Component } from '../components/builders.js';
 
@@ -485,6 +486,24 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const valeurTuile = body.data.interaction?.action === 'quick_reply'
       ? String(body.data.interaction.payload.value ?? '')
       : '';
+    // « Pharmacies de garde près de moi » (carte de l'accueil, ou écrit) :
+    // une réponse directe, sans modèle — les plus proches de la position.
+    if (body.data.text && demandeDeGarde(body.data.text)) {
+      const resultat = await reponseGarde(body.data.context ?? null, HORS_TOVO_OUI);
+      emit({ type: 'conversation', conversation_id: conversationId });
+      emit({ type: 'results', components: resultat.components });
+      emit({ type: 'text', text: resultat.content });
+      await db.from('messages').insert({
+        conversation_id: conversationId, role: 'user', content: body.data.text,
+        client_message_id: body.data.client_message_id,
+      });
+      await db.from('messages').insert({
+        conversation_id: conversationId, role: 'assistant', content: resultat.content, components: resultat.components,
+      });
+      request.log.info({ conversationId, position: Boolean(body.data.context) }, 'pharmacies de garde');
+      return output.finish({ conversation_id: conversationId, ...envelope(resultat.content, resultat.components) });
+    }
+
     // « Oui, envoyez un livreur » / « Non, voir ce que Tovo propose » : la
     // réponse à une enseigne hors Tovo (catalogue.ts, enseigneHorsTovo).
     if (valeurTuile.startsWith(HORS_TOVO_OUI) || valeurTuile.startsWith(HORS_TOVO_NON)) {

@@ -58,6 +58,9 @@ const schema = z.object({
   // serveur, restreinte à la seule Routes API. Absente : pas de tracé, la
   // carte montre quand même le livreur.
   GOOGLE_ROUTES_API_KEY: vide(z.string()),
+  // Le complément Google des commerces hors Tovo (services/googlePlaces.ts,
+  // « Places API (New) »). Absente : la clé des itinéraires, si elle y a droit.
+  GOOGLE_PLACE_API_KEY: vide(z.string()),
 
   GEMINI_API_KEY: z.string().optional(),
   // Version explicite, jamais un alias comme `gemini-flash-latest` : un

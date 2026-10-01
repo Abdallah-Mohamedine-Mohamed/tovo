@@ -812,8 +812,20 @@ class ConversationHome extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 10),
+                      // Les pharmacies de garde (01/10), « très importantes
+                      // pour aider les gens » : les plus proches d'abord.
                       entre(
                         6,
+                        _HomePromptCard(
+                          title: 'Pharmacies de garde près de moi',
+                          asset: 'assets/branding/suggestion-pharmacy.svg',
+                          onTap: () =>
+                              onSuggestion('Pharmacies de garde près de moi'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      entre(
+                        7,
                         _HomePromptCard(
                           title: 'Explorer les boutiques',
                           asset: 'assets/branding/suggestion-shops.svg',
@@ -822,7 +834,7 @@ class ConversationHome extends StatelessWidget {
                       ),
                       const SizedBox(width: 10),
                       entre(
-                        7,
+                        8,
                         _HomePromptCard(
                           title: 'Trouve-moi un bon repas à Niamey',
                           asset: 'assets/branding/suggestion-meal.svg',

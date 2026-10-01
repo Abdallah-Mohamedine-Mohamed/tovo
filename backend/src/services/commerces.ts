@@ -15,12 +15,12 @@ import type { Component } from '../components/builders.js';
  * Overture Maps (pages Facebook des commerces, CDLA Permissive 2.0) et
  * OpenStreetMap (ODbL). Elles connaissent le TYPE d'un commerce, pas ce qu'il
  * a en rayon : on dit « probablement », jamais « certainement ». Pharmacies
- * écartées pour le moment (secteur sensible).
+ * incluses depuis le 01/10 (d'abord écartées).
  */
 
 export type TypeCommerce =
   | 'supermarche' | 'marche' | 'boucherie' | 'boulangerie' | 'beaute'
-  | 'electronique' | 'vetements' | 'quincaillerie' | 'restaurant' | 'boutique';
+  | 'electronique' | 'vetements' | 'quincaillerie' | 'restaurant' | 'grillades' | 'pharmacie' | 'boutique';
 
 export interface Commerce {
   id: string;
@@ -34,7 +34,12 @@ export interface Commerce {
   lat: number;
   lng: number;
   fiabilite: number;
-  source: 'overture' | 'osm';
+  /** « tovo » : ajouté à la main (data/commerces-ajouts.json) ; « google » : demandé à Google, jamais conservé. */
+  source: 'overture' | 'osm' | 'tovo' | 'google';
+  /** Ce qui fait sa réputation (« merguez ») : demandé, il passe en premier. */
+  specialites?: string[];
+  /** Les autres noms sous lesquels on le connaît (« Vendeur de merguez de la place Toumo »). */
+  alias?: string[];
 }
 
 const LIBELLES: Record<TypeCommerce, { un: string; des: string; icone: string }> = {
@@ -47,6 +52,8 @@ const LIBELLES: Record<TypeCommerce, { un: string; des: string; icone: string }>
   vetements: { un: 'Vêtements', des: 'boutiques de vêtements', icone: 'vetements' },
   quincaillerie: { un: 'Quincaillerie', des: 'quincailleries', icone: 'boutiques' },
   restaurant: { un: 'Restaurant', des: 'restaurants', icone: 'restaurants' },
+  grillades: { un: 'Grillades', des: 'grilleurs', icone: 'grillades' },
+  pharmacie: { un: 'Pharmacie', des: 'pharmacies', icone: 'lieu-pharmacie' },
   boutique: { un: 'Boutique', des: 'boutiques', icone: 'boutiques' },
 };
 
@@ -55,7 +62,11 @@ const LIBELLES: Record<TypeCommerce, { un: string; des: string; icone: string }>
  * la beauté avant l'épicerie (« lait corporel », « savon »).
  */
 const PRODUITS: Array<[RegExp, TypeCommerce[]]> = [
-  [/\b(pommades?|cremes?|savons?|parfums?|lotions?|deodorants?|shampo\w*|maquillage|vaseline|lait corporel|karite|rouge a levres|vernis|gel douche)\b/, ['beaute', 'supermarche']],
+  [/\b(merguez|brochettes?|dibi|grillades?|kilichi|soya|suya)\b/, ['grillades', 'boucherie']],
+  // Les produits de pharmacie (01/10) : Tovo ne sait pas ce qu'elles ont en
+  // stock, il montre les plus proches et invite à appeler.
+  [/\b(pharmacies?|medicaments?|medocs?|paracetamol|doliprane|efferalgan|ibuprofene|aspirine|antibiotiques?|sirops?|comprimes?|gelules?|antipaludi\w*|coartem|quinine|vitamines?|pansements?|compresses?|betadine|alcool a 90|thermometres?|test de grossesse|preservatifs?|insuline|collyre|seringues?|ordonnance)\b/, ['pharmacie']],
+  [/\b(pommades?|cremes?|savons?|parfums?|lotions?|deodorants?|shampo\w*|maquillage|vaseline|lait corporel|karite|rouge a levres|vernis|gel douche)\b/, ['beaute', 'supermarche', 'pharmacie']],
   [/\b(viande|boeuf|mouton|chevre|poulets?|poissons?|saucisses?|steak|abats)\b/, ['boucherie', 'supermarche']],
   [/\b(pains?|baguettes?|croissants?|gateaux?|patisseries?|viennoiseries?)\b/, ['boulangerie', 'supermarche']],
   [/\b(riz|sucre|huile|lait|pates|spaghetti|macaroni|farine|cafe|the|conserves?|biscuits?|couches?|lessive|omo|eau|boissons?|jus|coca|sodas?|yaourts?|fromages?|chocolat|mayonnaise|ketchup|maggi|sel|cereales?|confiture|beurre|oeufs?|semoule|lentilles|haricots?)\b/, ['supermarche', 'marche']],
@@ -100,8 +111,8 @@ export function commercesNommes(nomNormalise: string, exclure: (c: Commerce) => 
   if (demande.length === 0 || demande.join('').length < 3) return [];
   return chargerCommerces()
     .filter((c) => {
-      const mots = coeur(c.nom_normalise);
-      return demande.every((m) => mots.includes(m)) && !exclure(c);
+      const noms = [c.nom_normalise, ...(c.alias ?? []).map((a) => normaliserIntention(a))];
+      return noms.some((nom) => demande.every((m) => coeur(nom).includes(m))) && !exclure(c);
     })
     .sort((a, b) => b.fiabilite - a.fiabilite)
     .slice(0, 3);
@@ -123,18 +134,22 @@ export function commercesPourProduit(
   exclure: (c: Commerce) => boolean = () => false,
   combien = 3,
 ): Commerce[] {
+  const n = normaliserIntention(texte);
+  const mots = new Set(n.split(' '));
+  // Ceux dont c'est la réputation (« le vendeur de merguez de la place
+  // Toumo ») passent devant, où qu'ils soient dans la ville.
+  const reputes = chargerCommerces().filter((c) => !exclure(c)
+    && (c.specialites ?? []).some((s) => mots.has(normaliserIntention(s)) || mots.has(`${normaliserIntention(s)}s`)));
   const types = typesPourProduit(texte);
-  if (types.length === 0) return [];
-  const candidats = chargerCommerces().filter((c) => types.includes(c.type) && !exclure(c));
-  if (position) {
-    return candidats
+  const candidats = chargerCommerces().filter((c) => types.includes(c.type) && !exclure(c) && !reputes.includes(c));
+  const proches = position
+    ? candidats
       .map((c) => ({ c, d: metres(position, c) }))
       .filter(({ d }) => d <= 8000)
       .sort((a, b) => a.d - b.d)
-      .slice(0, combien)
-      .map(({ c }) => c);
-  }
-  return candidats.sort((a, b) => b.fiabilite - a.fiabilite).slice(0, combien);
+      .map(({ c }) => c)
+    : candidats.sort((a, b) => b.fiabilite - a.fiabilite);
+  return [...reputes, ...proches].slice(0, combien);
 }
 
 /** « supermarchés » si tous sont du même type, sinon « commerces ». */
@@ -160,6 +175,7 @@ export function carteCommerces(
   achat: string,
   prefixeOui: string,
   position?: { lat: number; lng: number } | null,
+  note: string = NOTE_SOURCE,
 ): Component {
   return {
     type: 'commerces_hors_tovo',
@@ -182,7 +198,7 @@ export function carteCommerces(
           },
         };
       }),
-      note: NOTE_SOURCE,
+      note,
     },
   };
 }

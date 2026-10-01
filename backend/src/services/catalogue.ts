@@ -5,7 +5,9 @@ import { embed, embeddingsEnabled } from './embeddings.js';
 import { commandesRecentes, marquerLePlusCommande, parPopularite } from './popularite.js';
 import { offreVille } from './livreur.js';
 import { serviceClient } from './supabase.js';
-import { carteCommerces, commercesNommes, commercesPourProduit, libelleDes, typesPourProduit, type Commerce } from './commerces.js';
+import { carteCommerces, commercesNommes, commercesPourProduit, libelleDes, type Commerce } from './commerces.js';
+import { chercherSurGoogle, lieuGoogle, NOTE_GOOGLE } from './googlePlaces.js';
+import { heuresDeGarde, reponseGarde } from './pharmaciesGarde.js';
 import { paiementMobileActif } from '../config/env.js';
 
 export interface CataloguePage {
@@ -431,16 +433,51 @@ function sansDeterminant(article: string): string {
  * réclamées, c'est la liste de prospection. Sans attendre, et sans jamais
  * faire échouer la réponse au client (table absente, réseau…).
  */
-function noterBoutiqueDemandee(nom: string, article: string): void {
+function noterBoutiqueDemandee(
+  nom: string,
+  article: string,
+  trouvee: 'annuaire' | 'google' | 'inconnue',
+  googlePlaceId?: string,
+): void {
+  const ligne = {
+    nom: nom.slice(0, 120),
+    nom_normalise: normaliserIntention(nom).slice(0, 120) || nom.toLowerCase().slice(0, 120),
+    article: article.slice(0, 200) || null,
+  };
   try {
-    void Promise.resolve(serviceClient().from('boutiques_demandees').insert({
-      nom: nom.slice(0, 120),
-      nom_normalise: normaliserIntention(nom).slice(0, 120) || nom.toLowerCase().slice(0, 120),
-      article: article.slice(0, 200) || null,
-    })).catch(() => undefined);
+    const table = serviceClient().from('boutiques_demandees');
+    void Promise.resolve(table.insert({ ...ligne, trouvee, google_place_id: googlePlaceId ?? null }))
+      // Migration 0073 pas encore appliquée : la demande est notée quand même.
+      .then((r) => (r?.error ? table.insert(ligne) : r))
+      .catch(() => undefined);
   } catch {
     // Jamais bloquant.
   }
+}
+
+/**
+ * Le complément Google : l'identifiant Google déjà trouvé pour ce nom, s'il
+ * existe (redemandé directement), sinon une recherche. Rien d'autre n'est lu
+ * ni gardé de Google.
+ */
+async function trouverSurGoogle(nom: string): Promise<Array<Commerce & { place_id: string }>> {
+  try {
+    const { data } = await serviceClient().from('boutiques_demandees').select('google_place_id, trouvee, cree_le')
+      .eq('nom_normalise', normaliserIntention(nom)).in('trouvee', ['google', 'inconnue'])
+      .order('cree_le', { ascending: false }).limit(1).maybeSingle();
+    const derniere = data as { google_place_id?: string | null; trouvee?: string; cree_le?: string } | null;
+    if (derniere?.google_place_id) {
+      const lieu = await lieuGoogle(derniere.google_place_id, nom);
+      if (lieu) return [lieu];
+    }
+    // Google ne la connaissait pas il y a moins de 7 jours : chaque recherche
+    // est facturée, même sans résultat — on ne redemande pas.
+    if (derniere?.trouvee === 'inconnue' && derniere.cree_le
+      && Date.now() - new Date(derniere.cree_le).getTime() < 7 * 86_400_000) return [];
+  } catch {
+    // Table ou colonne absente : on cherche, simplement.
+  }
+  return chercherSurGoogle(nom);
 }
 
 /** Les deux tuiles de la question « un livreur va l'acheter ? ». */
@@ -473,7 +510,7 @@ async function estSurTovo(db: SupabaseClient): Promise<(c: Commerce) => boolean>
  * Tovo dit où elle est et donne son numéro, livreur d'abord (maquette validée
  * le 01/10, cas 2).
  */
-function commerceConnu(commerces: Commerce[], article: string): CatalogueAnswer {
+function commerceConnu(commerces: Commerce[], article: string, note?: string): CatalogueAnswer {
   const c = commerces[0]!;
   const achat = article ? `Acheter ${article}` : 'Faire les achats du client';
   const proposition = commenceParDeterminant(article)
@@ -487,7 +524,7 @@ function commerceConnu(commerces: Commerce[], article: string): CatalogueAnswer 
       article: article || null,
       consigne: 'La carte suffit : le client choisit « Envoyer un livreur » ou appelle. Ne pose aucune question.',
     },
-    components: [carteCommerces(commerces, achat, HORS_TOVO_OUI)],
+    components: [carteCommerces(commerces, achat, HORS_TOVO_OUI, null, note)],
   };
 }
 
@@ -502,15 +539,28 @@ export async function alternativesHorsTovo(
   position?: { lat: number; lng: number } | null,
 ): Promise<CatalogueAnswer | null> {
   const article = articleAvantEnseigne(message);
-  if (!article || typesPourProduit(article).length === 0) return null;
+  if (!article) return null;
   const commerces = commercesPourProduit(article, position, await estSurTovo(db));
   if (commerces.length === 0) return null;
   const produit = sansDeterminant(article);
+  // La nuit ou le dimanche, un médicament : seules les pharmacies de garde
+  // sont ouvertes — ce sont elles qu'on montre.
+  if (commerces.every((c) => c.type === 'pharmacie') && heuresDeGarde()) {
+    const garde = await reponseGarde(position, HORS_TOVO_OUI, 3);
+    if (garde.components.length > 0) {
+      return { ...garde, content: `À cette heure, seules les pharmacies de garde sont ouvertes. ${garde.content}` };
+    }
+  }
   const de = /^[aeiouyhàâéèêîôû]/i.test(produit) ? 'd’' : 'de ';
   const ou = commerces.length === 1 ? 'dans ce commerce' : `dans ces ${libelleDes(commerces)}`;
+  // Pharmacie : Tovo ne connaît pas leur stock, et un médicament peut exiger
+  // une ordonnance — on le dit, sans rien conseiller.
+  const pharmacie = commerces.some((c) => c.type === 'pharmacie')
+    ? ' Appelez pour vérifier qu’elles l’ont. Pour un médicament sur ordonnance, le livreur aura besoin de votre ordonnance.'
+    : '';
   return {
     content: `Tovo ne propose pas encore ${de}**${produit}**. Vous en trouverez probablement ${ou}, `
-      + `${position ? 'près de vous' : 'à Niamey'} :`,
+      + `${position ? 'près de vous' : 'à Niamey'} :${pharmacie}`,
     summary: {
       produit_hors_tovo: produit,
       commerces_proposes: commerces.map((c) => c.nom),
@@ -525,8 +575,15 @@ async function enseigneHorsTovo(db: SupabaseClient, intent: CatalogueIntent & { 
   const article = articleAvantEnseigne(intent.query);
   const connus = commercesNommes(intent.missing, await estSurTovo(db));
   if (connus.length > 0) {
-    noterBoutiqueDemandee(connus[0]!.nom, article);
+    noterBoutiqueDemandee(connus[0]!.nom, article, 'annuaire');
     return commerceConnu(connus, article);
+  }
+  // Inconnue de notre annuaire : Google, s'il la connaît (« Tchos » tel que
+  // le client l'a écrit, fautes comprises — la comparaison les tolère).
+  const google = await trouverSurGoogle(nom);
+  if (google.length > 0) {
+    noterBoutiqueDemandee(nom, article, 'google', google[0]!.place_id);
+    return commerceConnu(google, article, NOTE_GOOGLE);
   }
   const avecDeterminant = commenceParDeterminant(article);
   const question = !article
@@ -536,7 +593,7 @@ async function enseigneHorsTovo(db: SupabaseClient, intent: CatalogueIntent & { 
       : `Voulez-vous qu’un livreur aille vous l’acheter là-bas : **${article}** ?`;
   const achat = article ? `Acheter ${article} chez ${nom}` : `Chez ${nom}`;
   const cherche = sansDeterminant(article);
-  noterBoutiqueDemandee(nom, article);
+  noterBoutiqueDemandee(nom, article, 'inconnue');
   return {
     content: `**${nom}** n’est pas encore sur Tovo. ${question} `
       + 'Il avance l’achat, et vous le lui remboursez à la livraison, avec la course.',

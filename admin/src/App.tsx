@@ -23,6 +23,7 @@ import { SettingsEdit } from './pages/settings';
 import { QualiteIa } from './pages/qualiteIa';
 import { Signalements } from './pages/signalements';
 import { BoutiquesDemandees } from './pages/boutiquesDemandees';
+import { PharmaciesGarde } from './pages/pharmaciesGarde';
 
 /**
  * Administration Tovo.
@@ -86,6 +87,11 @@ export const App = () => (
               meta: { label: 'Collectes' },
             },
             {
+              name: 'pharmacies_garde',
+              list: '/pharmacies-garde',
+              meta: { label: 'Pharmacies de garde' },
+            },
+            {
               name: 'boutiques_demandees',
               list: '/boutiques-demandees',
               meta: { label: 'Boutiques demandées' },
@@ -138,6 +144,7 @@ export const App = () => (
               <Route path="/qualite-ia" element={<QualiteIa />} />
               <Route path="/signalements" element={<Signalements />} />
               <Route path="/boutiques-demandees" element={<BoutiquesDemandees />} />
+              <Route path="/pharmacies-garde" element={<PharmaciesGarde />} />
               <Route path="*" element={<ErrorComponent />} />
             </Route>
 

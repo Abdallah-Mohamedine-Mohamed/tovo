@@ -35,6 +35,8 @@ class CommercesHorsTovo extends StatelessWidget {
     'vetements',
     'boutiques',
     'restaurants',
+    'grillades',
+    'lieu-pharmacie',
   };
 
   @override

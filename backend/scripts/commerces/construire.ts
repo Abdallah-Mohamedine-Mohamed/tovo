@@ -11,8 +11,9 @@
  *  - OpenStreetMap (data/lieux-niamey.json) : supermarchés, marchés et
  *    restaurants, sans téléphone mais rarement inventés.
  *
- * Écartés volontairement : pharmacies (secteur sensible, 01/10), salons de
- * coiffure et de beauté (des services, pas des produits), bureaux.
+ * Écartés volontairement : salons de coiffure et de beauté (des services,
+ * pas des produits), bureaux. Les pharmacies, d'abord écartées, sont
+ * incluses depuis le 01/10.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { normaliserIntention } from '../../src/ai/intents.js';
@@ -28,6 +29,7 @@ const FIABILITE_MIN = 0.5;
 
 // L'ordre compte : le premier qui correspond l'emporte.
 const TYPES: Array<[TypeCommerce, RegExp]> = [
+  ['pharmacie', /pharmacy|drug_store|drugstore/],
   ['boucherie', /butcher|meat_shop|meat/],
   ['boulangerie', /bakery|patisserie|pastry/],
   ['beaute', /beauty_supply|cosmetic|perfume|personal_care_and_beauty_store/],
@@ -39,12 +41,13 @@ const TYPES: Array<[TypeCommerce, RegExp]> = [
   ['restaurant', /restaurant|fast_food|eatery|food_court|ice_cream|^cafe/],
   ['boutique', /^shopping|shopping_mall|general_store|specialty_store|home_goods_store/],
 ];
-const EXCLUS = /pharmacy|drug_store|salon|barber|spa|clinic|hospital|office|agency|service/;
+const EXCLUS = /salon|barber|spa|clinic|hospital|office|agency|service/;
 
 // Le nom dément souvent la catégorie d'Overture (« Restaurant La Corniche »
 // rangé en épicerie, « … Services & Consulting » en supermarché) : il passe
 // devant.
-const NOM_PAS_UN_COMMERCE = /\b(services?|consulting|consultants?|agence|cabinet|immobili\w*|ong|association|transit|transport|voyages?|assurances?|banque|clinique|ecole|institut|hotel|residence)\b/;
+// « Pharmacie des Produits Vétérinaires » ne vend pas de paracétamol.
+const NOM_PAS_UN_COMMERCE = /\b(services?|consulting|consultants?|agence|cabinet|immobili\w*|ong|association|transit|transport|voyages?|assurances?|banque|clinique|ecole|institut|hotel|residence|veterinaires?)\b/;
 const NOM_RESTAURANT = /\b(restaurant|resto|maquis|grill|grillade|brasserie|snack|fast food|pizzeria|cafeteria|lounge)\b/;
 
 function typeOverture(p: Overture): TypeCommerce | null {
@@ -103,11 +106,16 @@ for (const p of overture) {
   });
 }
 
-const GENRES_OSM: Record<string, TypeCommerce> = { 'supermarché': 'supermarche', 'marché': 'marche', restaurant: 'restaurant' };
+const GENRES_OSM: Record<string, TypeCommerce> = {
+  'supermarché': 'supermarche', 'marché': 'marche', restaurant: 'restaurant',
+  // Incluses le 01/10 à la demande de l'équipe (« c'est très important »).
+  pharmacie: 'pharmacie',
+};
 for (const l of lieux) {
   const type = GENRES_OSM[l.genre];
   if (!type || !l.nom) continue;
   const n = normaliserIntention(l.nom);
+  if (NOM_PAS_UN_COMMERCE.test(n)) continue;
   // Déjà connu par Overture (souvent avec un téléphone) : on garde celui-là.
   if (commerces.some((c) => c.nom_normalise === n && metres(c, l) < 400)) continue;
   commerces.push({
@@ -116,8 +124,18 @@ for (const l of lieux) {
   });
 }
 
+// Les ajouts à la main (data/commerces-ajouts.json) : ce que l'équipe connaît
+// et que personne n'a publié (« le vendeur de merguez de la place Toumo »).
+const ajouts = (JSON.parse(readFileSync('data/commerces-ajouts.json', 'utf8')) as {
+  commerces: Array<{ nom: string } & Record<string, unknown>>;
+}).commerces;
+for (const a of ajouts) {
+  const { note: _note, ...commerce } = a;
+  commerces.push({ ...commerce, nom_normalise: normaliserIntention(a.nom) } as (typeof commerces)[number]);
+}
+
 writeFileSync('data/commerces-niamey.json', JSON.stringify({
-  source: 'Overture Maps Foundation (CDLA Permissive 2.0) ; © les contributeurs d’OpenStreetMap (ODbL)',
+  source: 'Overture Maps Foundation (CDLA Permissive 2.0) ; © les contributeurs d’OpenStreetMap (ODbL) ; ajouts Tovo',
   construit_le: new Date().toISOString(),
   commerces,
 }));
