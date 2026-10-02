@@ -88,3 +88,30 @@ describe('les mots du client (évaluation externe, 02/10)', () => {
     expect(verifierTexte('Je cherche du **poulet braisé** pour vous.', faits).texte).toContain('poulet braisé');
   });
 });
+
+describe('article 4 de la constitution : rien n’est dit fait s’il ne l’est pas', () => {
+  it('« noté », « transmis » seulement si les données le confirment', () => {
+    expect(verifierTexte('Bien noté pour sans oignons !', new Faits()).texte).toBe('');
+    expect(verifierTexte('Je l’ai transmis à l’équipe.', new Faits()).texte).toBe('');
+    const garde = new Faits();
+    garde.ajouter({ precision: 'sans oignons', enregistree: true });
+    expect(verifierTexte('C’est noté : sans oignons.', garde).texte).toContain('noté');
+    // Un conseil n'est pas une affirmation.
+    expect(verifierTexte('Vous pouvez noter votre adresse.', new Faits()).texte).toContain('noter');
+  });
+  it('« en route » seulement si une commande existe', () => {
+    expect(verifierTexte('Un livreur se rend à votre position.', new Faits()).texte).toBe('');
+    const suivi = new Faits();
+    suivi.ajouter({ order_id: 'c1', status: 'picked_up' });
+    expect(verifierTexte('Votre livreur est en route.', suivi).texte).toContain('en route');
+  });
+});
+
+describe('article 4 : « annulé » seulement si une annulation a eu lieu', () => {
+  it('sans commande annulée, la phrase est retirée', () => {
+    expect(verifierTexte('Ça marche, c’est annulé.', new Faits()).texte).toBe('');
+    const annulee = new Faits();
+    annulee.ajouter({ order_id: 'c1', status: 'cancelled' });
+    expect(verifierTexte('Votre commande a été annulée.', annulee).texte).toContain('annulée');
+  });
+});

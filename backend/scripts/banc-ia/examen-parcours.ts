@@ -79,6 +79,11 @@ async function commandes(client: TestUser): Promise<number> {
   const { count } = await admin.from('orders').select('id', { count: 'exact', head: true }).eq('user_id', client.id);
   return count ?? 0;
 }
+/** La note de commande du client, telle qu'en base ('' si aucune ou table absente). */
+async function noteEnBase(client: TestUser): Promise<string> {
+  const { data, error } = await admin.from('notes_commande').select('note').eq('user_id', client.id).maybeSingle();
+  return error ? '' : String(data?.note ?? '');
+}
 const aucuneCommande: Verification = ['aucune commande créée sans toucher', async (_r, c) => (await commandes(c.client)) === 0];
 
 /** Un produit à options n'est jamais dans le panier sans ses choix. */
@@ -97,6 +102,14 @@ const panierSansOptionsOubliees: Verification = ['aucun produit à options ajout
 }];
 
 // D6 : Tovo ne promet plus que le livreur avance l'achat ; il appelle le client.
+// D0 : tant que le client n'a pas touché « Commander le livreur », aucun
+// livreur ne bouge — la phrase ne doit pas dire le contraire (relu le 02/10 :
+// « Un livreur se rend à votre position », « se dirige vers vous »).
+const pasDeLivreurEnRoute: Verification = ['ne dit pas qu’un livreur est déjà en route', (r) =>
+  !/(se rend|se rendra|se dirige|est en route|arrive|vient chez vous|va venir|vous rejoint)/i.test(r.texte)];
+/** La carte de course porte ce que le client a dit (lieu, nom, numéro). */
+const carteAvec = (motif: RegExp, quoi: string): Verification => [`la carte de course porte ${quoi}`, (r) =>
+  r.composants.some((c) => c.type === 'courier_form' && motif.test(sansAccents(JSON.stringify(c.data))))];
 const pasDAvancePromise: Verification = ['ne promet pas que le livreur avance l’achat', (r) => !/\bavance|rembours/i.test(r.texte)];
 
 // --- Les scénarios -----------------------------------------------------------
@@ -126,6 +139,12 @@ const SCENARIOS: Scenario[] = [
   { id: 'A5', parcours: 'A', titre: 'le sens, pas les mots', etapes: [{ dire: 'Je voudrais bien manger des merguez', verifier: [
     ['des plats aux merguez', produitsSurtout(/merguez/, 0.5)],
     ['ne reprend pas « bien manger »', (r) => !/bien manger/i.test(r.texte)],
+    // Article 6 (capture du 02/10 : des tacos dont la viande AU CHOIX peut être
+    // merguez) : s'il y a des produits qui SONT des merguez, rien d'autre.
+    ['seulement des produits qui sont des merguez', (r) => {
+      const p = produits(r);
+      return !p.some((i) => /merguez/.test(sansAccents(nom(i)))) || p.every((i) => /merguez/.test(sansAccents(nom(i))));
+    }],
   ] }] },
   { id: 'A6', parcours: 'A', titre: 'électronique', etapes: [{ dire: 'chargeur iphone', verifier: [
     ['jamais de nourriture', aucunProduit(/poulet|pizza|riz|tacos|jus|boisson|burger|viande|poisson/)],
@@ -141,7 +160,7 @@ const SCENARIOS: Scenario[] = [
 
   // B — Faire venir un livreur. D1 : une course part sur un toucher, jamais sur une phrase.
   { id: 'B1', parcours: 'B', titre: '« je veux un livreur » (D1)', etapes: [{ dire: 'Je veux un livreur', verifier: [
-    aucuneCommande,
+    aucuneCommande, pasDeLivreurEnRoute,
     ['la carte de course, prix visible', aLaCarte('courier_form')],
   ] }] },
   { id: 'B2', parcours: 'B', titre: 'piège : colis de riz', etapes: [{ dire: 'un colis de riz de 25 kg', verifier: [
@@ -157,10 +176,10 @@ const SCENARIOS: Scenario[] = [
     aucuneCommande, ['pas de carte de course', pasLaCarte('courier_form')],
   ] }] },
   { id: 'B6', parcours: 'B', titre: 'colis à déposer', etapes: [{ dire: 'J’ai un sac à faire déposer à Gamkalley', verifier: [
-    aucuneCommande, ['la carte de course', aLaCarte('courier_form')],
+    aucuneCommande, pasDeLivreurEnRoute, carteAvec(/gamkall?ey/, 'Gamkalley'), ['la carte de course', aLaCarte('courier_form')],
   ] }] },
   { id: 'B7', parcours: 'B', titre: 'colis à récupérer', etapes: [{ dire: 'Va chercher un colis chez Moussa au 90 12 34 56', verifier: [
-    aucuneCommande, ['la carte de course', aLaCarte('courier_form')],
+    aucuneCommande, carteAvec(/90 ?12 ?34 ?56/, 'le numéro'), carteAvec(/moussa/, 'Moussa'), ['la carte de course', aLaCarte('courier_form')],
   ] }] },
 
   // C — Ce que Tovo n'a pas. D6 : le livreur appelle le client, pas d'avance promise.
@@ -184,7 +203,7 @@ const SCENARIOS: Scenario[] = [
     ['jamais des pommes', aucunProduit(/\bpommes?\b/)], pasDAvancePromise,
   ] }] },
   { id: 'C4', parcours: 'C', titre: 'médicament', etapes: [{ dire: 'paracétamol', verifier: [
-    ['des pharmacies', (r) => commerces(r).length > 0 && commerces(r).every((i) => /pharmac/i.test(String(i.type ?? i.nom)))],
+    ['des pharmacies', (r) => commerces(r).length > 0 && commerces(r).every((i) => /pharmac|de garde/i.test(`${String(i.type ?? '')} ${nom(i)}`))],
     ['pas de produits de parapharmacie à la place', (r) => produits(r).length === 0],
   ] }] },
   { id: 'C5', parcours: 'C', titre: 'gâteau d’anniversaire', etapes: [{ dire: 'Je veux un gâteau d’anniversaire', verifier: [
@@ -199,13 +218,13 @@ const SCENARIOS: Scenario[] = [
   // passer) : elles vérifient que les corrections tiennent sur des phrases
   // jamais vues, pas seulement sur celles qui ont servi à corriger.
   { id: 'N1', parcours: 'B', titre: 'coursier pour des clés', etapes: [{ dire: 'Il me faut un coursier pour amener des clés à mon frère à Yantala', verifier: [
-    aucuneCommande, ['la carte de course', aLaCarte('courier_form')],
+    aucuneCommande, pasDeLivreurEnRoute, carteAvec(/yantala/, 'Yantala'), ['la carte de course', aLaCarte('courier_form')],
   ] }] },
   { id: 'N2', parcours: 'B', titre: 'piège : paquet de biscuits', etapes: [{ dire: 'un paquet de biscuits', verifier: [
     aucuneCommande, ['pas de carte de course', pasLaCarte('courier_form')],
   ] }] },
   { id: 'N3', parcours: 'B', titre: 'une moto, tout court', etapes: [{ dire: 'envoie-moi une moto', verifier: [
-    aucuneCommande,
+    aucuneCommande, pasDeLivreurEnRoute,
   ] }] },
   { id: 'N4', parcours: 'B', titre: 'piège : sac de riz livré', etapes: [{ dire: 'Livre-moi un sac de riz de 50 kg', verifier: [
     aucuneCommande, ['pas de carte de course', pasLaCarte('courier_form')],
@@ -214,7 +233,7 @@ const SCENARIOS: Scenario[] = [
     ['du coca', produitsSurtout(/coca/, 0.5)],
   ] }] },
   { id: 'N6', parcours: 'C', titre: 'médicament en phrase', etapes: [{ dire: 'J’ai besoin de médicaments contre le palu', verifier: [
-    ['des pharmacies', (r) => commerces(r).length > 0 && commerces(r).every((i) => /pharmac/i.test(String(i.type ?? i.nom)))],
+    ['des pharmacies', (r) => commerces(r).length > 0 && commerces(r).every((i) => /pharmac|de garde/i.test(`${String(i.type ?? '')} ${nom(i)}`))],
     pasDAvancePromise,
   ] }] },
   { id: 'N7', parcours: 'C', titre: 'chaussures', etapes: [{ dire: 'des chaussures de sport', verifier: [
@@ -228,8 +247,136 @@ const SCENARIOS: Scenario[] = [
     ['aucun produit', (r) => produits(r).length === 0], aucuneCommande,
   ] }] },
   { id: 'N10', parcours: 'B', titre: 'piège : livre', etapes: [{ dire: 'Avez-vous des livres pour enfants ?', verifier: [
-    aucuneCommande, ['pas de carte de course', pasLaCarte('courier_form')],
+    aucuneCommande,
+    // Relu le 02/10 : une console de jeu était proposée à la place.
+    ['aucun produit qui ne soit pas un livre', (r) => produits(r).every((i) => /livre/.test(sansAccents(nom(i))))], ['pas de carte de course', pasLaCarte('courier_form')],
   ] }] },
+
+  // M — Conversations de PLUSIEURS messages (02/10) : ce que le client fait
+  // après la première réponse — désigner, se corriger, compléter, changer
+  // d'avis, préciser. C'est là que se voient l'état du parcours et la
+  // cohérence de la recherche (principes 2 et 3 de docs/PARCOURS-CLIENTS.md).
+  { id: 'M1', parcours: 'A', titre: '« la première » après une liste', etapes: [
+    { dire: 'pizza', verifier: [['des pizzas', produitsSurtout(/pizza|^p\. /)]] },
+    { dire: 'ajoute la première au panier', verifier: [
+      panierSansOptionsOubliees, aucuneCommande,
+      ['c’est bien la première pizza : ses options, ou dans le panier', async (r, c) => {
+        const premiere = produits(c.reponses[0]!)[0];
+        if (!premiere) return false;
+        const ici = JSON.stringify(r.composants);
+        if (r.composants.some((x) => x.type === 'option_selector') && ici.includes(String(premiere.id))) return true;
+        const { data: panier } = await admin.from('carts').select('id').eq('user_id', c.client.id);
+        const ids = (panier ?? []).map((p) => p.id as string);
+        if (ids.length === 0) return false;
+        const { data: articles } = await admin.from('cart_items').select('product_id').in('cart_id', ids);
+        return (articles ?? []).some((a) => a.product_id === premiere.id);
+      }],
+    ] },
+  ] },
+  { id: 'M2', parcours: 'A', titre: 'se corriger : « non, plutôt du riz »', etapes: [
+    { dire: 'pizza', verifier: [] },
+    { dire: 'non pas ça, je veux du riz', verifier: [
+      ['du riz, plus de pizzas', (r) => produitsSurtout(/riz/, 0.5)(r) || commerces(r).length > 0],
+      ['aucune pizza', aucunProduit(/pizza/)],
+    ] },
+  ] },
+  { id: 'M3', parcours: 'A', titre: 'et à boire ?', etapes: [
+    { dire: 'des brochettes', verifier: [] },
+    { dire: 'et à boire ?', verifier: [
+      ['des boissons', produitsSurtout(/jus|coca|eau|soda|boisson|fanta|sprite|bissap|gingembre|the |cafe|limonade|cocktail|lait|youki|malta|bouye|tamarin|orange|ananas|pomme|mangue|citron|smoothie|milkshake|vimto|pepsi|7 ?up|schweppes|top|planete|world/, 0.5)],
+      ['plus de brochettes', aucunProduit(/brochette/)],
+    ] },
+  ] },
+  { id: 'M4', parcours: 'A', titre: 'une précision sans option : « sans oignons »', etapes: [
+    { dire: 'Je veux un tacos chez Otakoss centre aéré', verifier: [] },
+    { dire: 'sans oignons s’il vous plaît', verifier: [
+      // Une phrase « c'est noté » ne suffit pas : la précision doit être
+      // ENREGISTRÉE quelque part que la boutique verra (une carte qui la porte).
+      // Relu le 02/10 : « C'est bien noté pour sans oignons » sans rien
+      // enregistrer, ou « j'ai transmis votre consigne à l'équipe » (inventé).
+      ['la précision est GARDÉE (note de commande, lue en base)', async (_r, c) => /oignon/i.test(await noteEnBase(c.client))],
+      ['ne dit « noté / gardé / transmis » que si c’est vrai', async (r, c) => /oignon/i.test(await noteEnBase(c.client))
+        || !/\bnot[ée]|gard[ée]|transmis|signal[ée]|enregistr/i.test(r.texte)],
+      ['jamais un signalement à l’équipe pour une précision', async (_r, c) => {
+        const { count } = await admin.from('signalements').select('id', { count: 'exact', head: true }).eq('user_id', c.client.id);
+        return (count ?? 0) === 0;
+      }],
+      aucuneCommande,
+    ] },
+  ] },
+  { id: 'M5', parcours: 'A', titre: 'choisir l’agence après coup', etapes: [
+    { dire: 'Otakoss', verifier: [] },
+    { dire: 'centre aéré', verifier: [
+      // Seulement l'O'Takoss choisi : relu le 02/10, trois cartes de boutiques
+      // « du Centre Aéré » passaient le premier contrôle (le mot « centre »).
+      ['seulement l’O’Takoss Centre Aéré', (r) => {
+        const cartes = r.composants.filter((c) => c.type === 'merchant_card').map((c) => String(c.data.name ?? ''));
+        const noms = [...produits(r).map((i) => String(i.merchant_name ?? '')), ...cartes];
+        return cartes.length <= 1 && noms.length > 0
+          && noms.every((n) => /takoss/i.test(sansAccents(n)) && /centre/i.test(sansAccents(n)));
+      }],
+    ] },
+  ] },
+  { id: 'M6', parcours: 'B', titre: 'compléter la carte de course', etapes: [
+    { dire: 'Je veux un livreur', verifier: [aucuneCommande] },
+    { dire: 'c’est pour aller chercher un sac chez ma tante à Yantala', verifier: [
+      aucuneCommande, pasDeLivreurEnRoute,
+      ['la carte de course, avec Yantala', (r) => r.composants.some((c) => c.type === 'courier_form' && /yantala/i.test(JSON.stringify(c.data)))],
+    ] },
+  ] },
+  { id: 'M7', parcours: 'B', titre: 'changer d’avis sur une course', etapes: [
+    { dire: 'Je veux un livreur', verifier: [] },
+    { dire: 'non laisse tomber finalement', verifier: [
+      aucuneCommande, ['plus de carte de course', pasLaCarte('courier_form')],
+      // Aucune commande n'existe : proposer « Annuler ma commande » n'a pas de
+      // sens (relu le 02/10). Tovo sait que seule une carte était ouverte.
+      ['ne propose pas d’annuler une commande qui n’existe pas', (r) => !/annuler (ma|votre|la) commande/i.test(r.texte + JSON.stringify(r.composants))],
+    ] },
+  ] },
+  { id: 'M8', parcours: 'B', titre: 'demander deux fois un livreur', etapes: [
+    { dire: 'Je veux un livreur', verifier: [] },
+    { dire: 'je veux un livreur vite', verifier: [aucuneCommande, pasDeLivreurEnRoute, ['la carte de course', aLaCarte('courier_form')]] },
+  ] },
+  { id: 'M9', parcours: 'C', titre: 'boutique inconnue, puis « non »', etapes: [
+    { dire: 'Je veux commander de la viande chez Tchos', verifier: [] },
+    { toucher: (r) => {
+      const non = elements(r).find((i) => /hors-tovo-non:/.test(String(i.value ?? '')));
+      return non ? { action: 'quick_reply', payload: { label: String(non.label ?? 'Non'), value: String(non.value) } } : null;
+    }, verifier: [
+      aucuneCommande, ['pas de carte de course', pasLaCarte('courier_form')],
+      ['de la viande (Tovo ou ailleurs)', (r) => produitsSurtout(/viande|boeuf|mouton|steak|brochette|poulet|kilichi|grillade|chawarma|burger/, 0.5)(r) || commerces(r).length > 0],
+    ] },
+  ] },
+  { id: 'M10', parcours: 'C', titre: 'produit absent, puis « plus loin »', etapes: [
+    { dire: 'Je cherche de la pommade Nivea', verifier: [] },
+    { dire: 'il n’y a rien de plus loin ?', verifier: [
+      ['toujours de la pommade : des commerces, jamais d’autres produits', (r) => commerces(r).length > 0 || produitsSurtout(/pommade|nivea|creme/, 0.5)(r)],
+      // « Plus loin » : d'AUTRES commerces que ceux déjà montrés (relu le 02/10 :
+      // les deux mêmes revenaient), ou dire franchement qu'il n'y en a pas.
+      ['d’autres commerces, ou « il n’y en a pas d’autre »', (r, c) => {
+        const deja = new Set(commerces(c.reponses[0]!).map(nom));
+        return commerces(r).some((i) => !deja.has(nom(i)))
+          || (commerces(r).length === 0 && /pas d.autres?|aucun autre|rien d.autre/i.test(r.texte));
+      }],
+      ['jamais des pommes', aucunProduit(/\bpommes?\b/)], pasDAvancePromise,
+    ] },
+  ] },
+
+  { id: 'M11', parcours: 'C', titre: '« d’autres vendeurs » (capture du 02/10)', etapes: [
+    { dire: 'Je veux manger des bons merguez.', verifier: [] },
+    { dire: 'Il n’y a pas d’autres vendeurs de merguez ?', verifier: [
+      ['des choix qu’il n’avait pas encore vus', (r, c) => {
+        const avant = new Set([...produits(c.reponses[0]!).map((i) => String(i.id)), ...commerces(c.reponses[0]!).map(nom)]);
+        return [...produits(r).map((i) => String(i.id)), ...commerces(r).map(nom)].some((x) => !avant.has(x));
+      }],
+      ['les vendeurs hors Tovo aussi, dans la conversation (le grilleur réputé pour ses merguez)', (r, c) =>
+        [...commerces(c.reponses[0]!), ...commerces(r)].some((i) => /nouhou/i.test(nom(i)))],
+      // Et les merguez de TOVO, quelque part dans la conversation (jamais « nous n'en avons pas »).
+      ['les merguez de Tovo aussi, dans la conversation', (r, c) =>
+        [...produits(c.reponses[0]!), ...produits(r)].some((i) => /merguez/.test(sansAccents(nom(i))))],
+      pasDAvancePromise,
+    ] },
+  ] },
 
   // G — Conversation : rien à afficher.
   { id: 'G1', parcours: 'G', titre: 'remarque', etapes: [{ dire: 'Tu es sourd ?', verifier: [
@@ -270,7 +417,7 @@ async function parlerUneFois(app: FastifyInstance, client: TestUser, conversatio
 
 const resume = (r: Reponse) => `${r.texte.replace(/\s+/g, ' ').slice(0, 160)} || ${r.composants.map((c) => {
   const items = Array.isArray(c.data.items) ? (c.data.items as Array<Record<string, unknown>>) : [];
-  return `${c.type}${items.length ? ` [${items.slice(0, 4).map(nom).join(' ; ')}${items.length > 4 ? ' …' : ''}]` : ''}`;
+  return `${c.type}${c.data.name ? ` « ${String(c.data.name)} »` : ''}${items.length ? ` [${items.slice(0, 4).map(nom).join(' ; ')}${items.length > 4 ? ' …' : ''}]` : ''}`;
 }).join(' | ') || 'aucune carte'}`;
 
 /** Un client de test ; une coupure réseau passagère ne fait pas tout échouer. */

@@ -11,7 +11,12 @@
  * modèle, pas à le contraindre. Un prompt n'est jamais une mesure de
  * sécurité.
  */
+import { CONSTITUTION } from './constitution.js';
+
 export const SYSTEM_PROMPT = `Tu es l'assistant de commande de Tovo, un service de livraison à Niamey (Niger).
+
+${CONSTITUTION}
+
 Ton rôle : aider l'utilisateur à trouver des produits, composer sa commande,
 envoyer un colis, comparer des prix, et suivre sa livraison — dans une
 conversation fluide et interactive.

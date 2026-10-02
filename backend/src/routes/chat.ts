@@ -23,7 +23,8 @@ import { courseDejaEnRoute } from '../services/livreur.js';
 import { ombreJev, type Intention } from '../ai/jev.js';
 import { ouvrirSessionVoix, vocabulaire } from '../services/voixDirecte.js';
 import { decider, indication, intentionChoisie, routeDuCerveau, type Route } from '../ai/aiguillage.js';
-import { cerveauActif, comprendre, type Rayon } from '../ai/decideur.js';
+import { cerveauActif, comprendre, type Details, type Rayon } from '../ai/decideur.js';
+import { commandeEnCours, etatDuParcours } from '../ai/etat.js';
 import { exemplesPour } from '../ai/banc/exemples.js';
 import { aiguiller, cascadeActive } from '../ai/cascade.js';
 import { rechercheProduitRapide } from '../ai/orchestrator.js';
@@ -371,9 +372,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const decisionCerveau = cerveau
       ? Promise.all([
         dernierMessageTovo(db, body.data.conversation_id).catch(() => null),
+        etatDuParcours(db, body.data.conversation_id),
         env.CERVEAU_EXEMPLES === 'oui' ? exemplesPour(body.data.text!).catch(() => []) : Promise.resolve([]),
       ])
-        .then(([avant, exemples]) => comprendre(body.data.text!, { avant, exemples }))
+        .then(([avant, etat, exemples]) => comprendre(body.data.text!, { avant, etat, exemples }))
         .catch(() => null)
       : Promise.resolve(null);
     const decisionCascade = body.data.text && !cerveau && cascadeActive()
@@ -560,6 +562,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Ce que le client cherche, selon le cerveau (« merguez »).
     let requeteCerveau: string | undefined;
     let rayonCerveau: Rayon | undefined;
+    let suiteCerveau = false;
+    let detailsCerveau: Details | undefined;
     // Le rédacteur (ai/redacteur.ts) : chaque réponse directe à un message du
     // client est mise en mots par une IA, à partir de ce qu'il a VRAIMENT dit.
     // Les cartes partent d'abord ; la phrase suit.
@@ -568,9 +572,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       : Promise.resolve(prevue));
     let pageInitiale: CataloguePage | undefined;
 
-    // Produit trouvé exactement : la route est évidente, Jev n'est pas attendu.
+    // Produit trouvé exactement : sans cerveau (mode cascade), la route est
+    // évidente. Avec le cerveau, il décide TOUJOURS (article 1 de la
+    // constitution : un seul interprète) — « d'autres merguez » trouvait des
+    // merguez par les mots et perdait « d'autres » (article 7). Sa recherche
+    // faite en parallèle sert quand même, s'il est d'accord (plus bas).
     const prealable = choisie ? null : await recherchePrealable;
-    if (prealable && prealable.match_type === 'exact' && prealable.total > 0) {
+    if (!cerveau && prealable && prealable.match_type === 'exact' && prealable.total > 0) {
       intention = 'recherche';
       pageInitiale = prealable;
       request.log.info({ ref: body.data.client_message_id }, 'recherche exacte : réponse sans attendre Jev');
@@ -580,9 +588,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       let route: Route;
       if (cerveau) {
         const d = await decisionCerveau;
-        route = d ? routeDuCerveau(d, body.data.text) : { type: 'habituel', decision: null };
+        // Article 3 : on ne propose d'agir que sur ce qui existe.
+        route = d ? routeDuCerveau(d, body.data.text, { commande: await commandeEnCours(db) }) : { type: 'habituel', decision: null };
         requeteCerveau = d?.produit || undefined;
         rayonCerveau = d?.rayon;
+        suiteCerveau = d?.suite === true;
+        detailsCerveau = d?.details;
         request.log.info({
           ref: body.data.client_message_id,
           intention: d?.intention ?? null,
@@ -613,7 +624,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       if (route.type === 'intention') intention = route.intention;
       // Une recherche : celle faite en parallèle du cerveau (suggestions
       // proches comprises) sert telle quelle, sans la refaire.
-      if (intention === 'recherche' && prealable && !rayonCerveau
+      if (intention === 'recherche' && prealable && !rayonCerveau && !suiteCerveau && !detailsCerveau?.precision
         && (!requeteCerveau || requeteProduitUtilisateur(requeteCerveau) === requeteProduitUtilisateur(body.data.text ?? ''))) {
         pageInitiale = prealable;
       }
@@ -677,7 +688,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Avec des détails (« à Moussa, 90 12 34 56, Harobanda »), c'est le modèle
     // qui ouvre la carte : lui seul sait la pré-remplir. La voie rapide
     // l'ouvrait vide et le client retapait ce qu'il venait de dire.
-    const detailsDeColis = texteClient ? /\d{2}\s?\d{2}\s?\d{2}|\b(à|a|chez|pour)\s+\p{Lu}/u.test(texteClient) : false;
+    // Sans cerveau (panne), l'ancien repère à mots : des détails → le modèle.
+    // Avec le cerveau, ses précisions remplissent la carte (article 9).
+    const detailsDeColis = !parJev && texteClient ? /\d{2}\s?\d{2}\s?\d{2}|\b(à|a|chez|pour)\s+\p{Lu}/u.test(texteClient) : false;
     // « Va chercher un colis chez Moussa au 90 12 34 56 » : les détails sont
     // extraits sans modèle (lieu, numéro), la voie rapide suffit.
     const recuperation = texteClient ? demandeDeRecuperation(texteClient) : false;
@@ -688,7 +701,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       if (!executer) throw new Error('outil preparer_course absent');
 
       const resultat = await executer(
-        {},
+        argumentsDeCourse(detailsCerveau),
         {
           db,
           userId,
@@ -700,9 +713,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // course part au toucher de « Commander le livreur », prix affiché.
       // La carte prend la position d'elle-même : plus de « Touchez Ma
       // position », qui restait affiché même une fois le livreur demandé.
-      const prevue = recuperation
-        ? 'Un livreur va le chercher et vous l’apporte. Il vous appelle pour les détails.'
-        : 'Un livreur vient chez vous et vous appelle pour les détails.';
+      // Article 4 : rien ne bouge avant le toucher — la phrase le dit.
+      const prevue = 'Voici votre course. Vérifiez-la, puis touchez **Commander le livreur** : le livreur ne part qu’à ce moment-là, et il vous appelle.';
 
       emit({ type: 'conversation', conversation_id: conversationId });
       emit({ type: 'results', components: resultat.components });
@@ -880,6 +892,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         ...(intention ? { intention } : {}),
         ...(requeteCerveau ? { requete: requeteCerveau } : {}),
         ...(rayonCerveau ? { rayon: rayonCerveau } : {}),
+        ...(suiteCerveau ? { suite: true } : {}),
+        ...(detailsCerveau?.precision ? { precision: detailsCerveau.precision } : {}),
         ...(pageInitiale ? { pageInitiale } : {}),
         ...(messagePublic ? { messagePublic } : {}),
         clientMessageId: body.data.client_message_id,
@@ -944,6 +958,22 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
  * Le dernier message de Tovo dans la conversation, pour que le cerveau sache
  * à quoi le client répond. `null` pour une conversation neuve.
  */
+/**
+ * Les précisions du cerveau (article 9) → les arguments de preparer_course :
+ * un lieu où prendre quelque chose = « récupérer » ; sinon un lieu où
+ * l'apporter = « déposer ». Le numéro va au contact de l'endroit concerné.
+ */
+function argumentsDeCourse(d: Details | undefined): Record<string, unknown> {
+  if (!d) return {};
+  if (d.depart) {
+    return { mode: 'recuperer', ou_recuperer: d.depart, ...(d.telephone ? { contact_sur_place: d.telephone } : {}) };
+  }
+  if (d.arrivee) {
+    return { mode: 'deposer', arrivee: { hint: d.arrivee }, ...(d.telephone ? { destinataire: d.telephone } : {}) };
+  }
+  return d.telephone ? { destinataire: d.telephone } : {};
+}
+
 async function dernierMessageTovo(
   db: import('@supabase/supabase-js').SupabaseClient,
   conversationId: string | undefined,

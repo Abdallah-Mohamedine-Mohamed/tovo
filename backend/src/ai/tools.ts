@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { lireNote } from '../services/noteCommande.js';
 import type { LlmToolDefinition } from './llmClient.js';
 import type { Component } from '../components/builders.js';
 import { avecOuvertureReelle } from '../services/ouverture.js';
@@ -758,14 +759,17 @@ async function panierCourant(ctx: ToolContext): Promise<ToolOutcome> {
     return { summary: { panier: 'vide' }, components: [] };
   }
 
+  // La note de commande (article 9) : sur la carte, et dans les faits.
+  const note = await lireNote(ctx.db);
   return {
     summary: {
       articles: items.length,
       total: payload.total,
       boutique: payload.merchant_name,
       commandable: payload.can_checkout,
+      ...(note ? { note_pour_la_boutique: note } : {}),
     },
-    components: [cartSummary(payload)],
+    components: [cartSummary({ ...payload, ...(note ? { note } : {}) })],
   };
 }
 

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../core/icones_phosphor.dart';
 import '../../core/theme.dart';
 import '../registry.dart';
 
@@ -176,8 +175,8 @@ class _Commerce extends StatelessWidget {
             runSpacing: 8,
             children: [
               if ('${livreur['value'] ?? ''}'.isNotEmpty)
+                // Sans icône : le texte suffit (demande du fondateur, 02/10).
                 _Pilule(
-                  icone: Phosphor.moped,
                   texte: 'Envoyer un livreur',
                   plein: true,
                   onTap: () => onInteraction(
@@ -208,13 +207,13 @@ class _Commerce extends StatelessWidget {
 
 class _Pilule extends StatelessWidget {
   const _Pilule({
-    required this.icone,
+    this.icone,
     required this.texte,
     required this.plein,
     required this.onTap,
   });
 
-  final IconData icone;
+  final IconData? icone;
   final String texte;
   final bool plein;
   final VoidCallback onTap;
@@ -233,8 +232,10 @@ class _Pilule extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icone, size: 17, color: couleur),
-              const SizedBox(width: 7),
+              if (icone != null) ...[
+                Icon(icone, size: 17, color: couleur),
+                const SizedBox(width: 7),
+              ],
               Text(
                 texte,
                 style: TextStyle(

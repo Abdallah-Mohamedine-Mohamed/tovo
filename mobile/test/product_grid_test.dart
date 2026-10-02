@@ -61,30 +61,18 @@ void main() {
     expect(find.text('Produit 3', skipOffstage: false), findsOneWidget);
     expect(find.text('Produit 4', skipOffstage: false), findsNothing);
     expect(find.text('38 produits'), findsOneWidget);
-    // La suite : une tuile au bout de la rangée, et un bouton dessous.
-    // La tuile au bout de la rangée, et le bouton dessous.
+    // La suite : UN seul accès, le bouton sous la rangée (02/10 : la flèche
+    // du titre et la tuile au bout faisaient la même chose).
     expect(
       find.bySemanticsLabel(
         'Parcourir les 34 autres produits',
         skipOffstage: false,
       ),
-      findsNWidgets(2),
+      findsOneWidget,
     );
+    expect(find.bySemanticsLabel(RegExp('Tout voir')), findsNothing);
+    expect(find.text('Tout parcourir', skipOffstage: false), findsNothing);
     await tester.tap(find.byKey(const Key('parcourir-produits')));
-    expect(gestes.last.action, 'browse_catalog');
-    gestes.clear();
-
-    final fleche = find.bySemanticsLabel('Tout voir, 38 produits');
-    // À droite du titre, au-dessus du premier produit.
-    expect(
-      tester.getCenter(fleche).dy,
-      lessThan(tester.getTopLeft(find.text('Produit 0')).dy),
-    );
-    expect(
-      tester.getCenter(fleche).dx,
-      greaterThan(tester.getCenter(find.text('Résultats')).dx),
-    );
-    await tester.tap(fleche);
     expect(gestes.single.action, 'browse_catalog');
     expect(gestes.single.payload['query'], 'tacos');
     expect(tester.takeException(), isNull);

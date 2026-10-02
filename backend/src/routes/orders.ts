@@ -13,6 +13,7 @@ import { ouvrirPaiement } from '../services/payments.js';
 import { paiementMobileActif } from '../config/env.js';
 import { messageLivreurEnRoute } from '../services/livreur.js';
 import { serviceClient } from '../services/supabase.js';
+import { effacerNote, lireNote } from '../services/noteCommande.js';
 import { itinerairePour } from '../services/itineraire.js';
 
 /**
@@ -209,6 +210,10 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const db = request.supabase!;
+    // Article 9 : la note gardée (« sans oignons » dit dans le chat, ou écrite
+    // au panier) part avec la commande, dans la note que la boutique lit.
+    // Une note envoyée par l'app (même vide : le client l'a effacée) fait foi.
+    const noteGardee = body.data.type === 'delivery' && body.data.note === null ? await lireNote(db) : null;
 
     // Aucun montant n'est accepté du client : les fonctions ci-dessous ne
     // prennent pas de total en paramètre, elles le calculent.
@@ -220,7 +225,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
             p_lat: body.data.dropoff.lat,
             p_lng: body.data.dropoff.lng,
             p_payment: body.data.payment_method,
-            p_note: body.data.note,
+            p_note: body.data.type === 'delivery' ? ((body.data.note === null ? noteGardee : body.data.note.trim()) || null) : null,
           })
         : await db.rpc('place_courier_order', {
             p_client_order_id: body.data.client_order_id,
@@ -248,6 +253,8 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     }
 
     if (body.data.type === 'delivery') {
+      // Partie avec la commande : la note ne doit pas s'attacher à la suivante.
+      effacerNote(db, request.user!.id).catch(() => undefined);
       notifierBoutique(orderId as string).catch((cause) => {
         request.log.error({ cause, orderId }, 'notification boutique impossible');
       });

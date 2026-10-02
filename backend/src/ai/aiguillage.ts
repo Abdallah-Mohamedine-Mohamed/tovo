@@ -115,6 +115,9 @@ export function decider(decision: DecisionJev | null, message: string, seuil: nu
   };
 }
 
+/** Les actions qui portent sur une commande existante (article 3). */
+const SUR_UNE_COMMANDE = new Set<Intention>(['annuler', 'suivi']);
+
 /** Ce que la phrase peut vouloir dire d'autre, quand le cerveau hésite sur une action. */
 const AUTRE_LECTURE: Partial<Record<Intention, Intention>> = {
   livreur: 'recherche',
@@ -132,11 +135,24 @@ const AUTRE_LECTURE: Partial<Record<Intention, Intention>> = {
  *     des tuiles : ce qu'il a compris, l'autre lecture, « Autre chose ».
  *     Pas sûr sur une recherche : rien à confirmer, la recherche montre déjà.
  */
-export function routeDuCerveau(d: DecisionCerveau, message: string): Route {
+export function routeDuCerveau(
+  d: DecisionCerveau,
+  message: string,
+  /** `commande` : le client a-t-il une commande en cours ? (article 3) */
+  contexte: { commande?: boolean } = {},
+): Route {
   if (!d.intention) return { type: 'habituel', decision: null };
   const decision: DecisionJev = {
     choix: d.intention, confiance: d.sur ? 1 : 0.5, probabilites: {}, ms: d.ms, cout: 0,
   };
+  // Article 3 de la constitution : on n'agit que sur ce qui existe. Sans
+  // commande en cours, « annuler » ou « suivre » ne visent rien : le client
+  // renonce à ce qui est à l'écran, ou parle — c'est une conversation, sans
+  // tuile « Annuler ma commande » (« laisse tomber » après une carte de
+  // course la proposait, 02/10).
+  if (contexte.commande === false && SUR_UNE_COMMANDE.has(d.intention)) {
+    return { type: 'intention', intention: 'social', decision };
+  }
   if (d.sur || !COUTEUSES.has(d.intention)) return { type: 'intention', intention: d.intention, decision };
   const texte = message.trim().slice(0, 300);
   const pistes = [d.intention, AUTRE_LECTURE[d.intention]].filter((i): i is Intention => Boolean(i));

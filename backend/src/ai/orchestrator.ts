@@ -4,7 +4,8 @@ import { SYSTEM_PROMPT, contexteUtilisateur } from './systemPrompt.js';
 import { EXECUTORS, TOOL_DEFINITIONS, type ToolContext } from './tools.js';
 import { collectIds, sanitizeToolResult, validateComponents } from './validate.js';
 import { envelope, merchantCard, type ChatEnvelope, type Component } from '../components/builders.js';
-import { cataloguePage, horsTovo, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type CataloguePage, type PendingMerchantChoice } from '../services/catalogue.js';
+import { alternativesHorsTovo, cataloguePage, horsTovo, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type CataloguePage, type CatalogueAnswer, type PendingMerchantChoice } from '../services/catalogue.js';
+import { ajouterALaNote } from '../services/noteCommande.js';
 import {
   demandeBoutiqueOuverte,
   demandeDeCommandePassee,
@@ -89,6 +90,10 @@ export interface OrchestrateInput {
   requete?: string | undefined;
   /** Le rayon où chercher, selon le cerveau : la recherche y reste. */
   rayon?: Rayon | undefined;
+  /** Article 7 : le client veut d'autres résultats que ceux déjà montrés. */
+  suite?: boolean | undefined;
+  /** Article 9 : une précision à garder pour la commande (« sans oignons »). */
+  precision?: string | undefined;
   /**
    * Recherche lexicale déjà faite par la route, en parallèle de Jev, sur le
    * MÊME message : on ne la refait pas.
@@ -240,12 +245,75 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     if (!produits || input.audio) return { reponse, phrase: await enMots(reponse.content, reponse.summary, reponse.components) };
     const j = await redigerEtJuger({ message: input.messagePublic ?? input.message, prevue: reponse.content,
       faits: reponse.summary, composants: reponse.components, avant: dernierDeTovo });
+    // Une partie seulement répond (des merguez mêlées de tacos) : on ne garde
+    // qu'elle, et la phrase est réécrite sur ce qui reste.
+    if (j.pertinent === true && j.garder) {
+      const filtree = seulementPertinents(reponse, j.garder);
+      if (filtree !== reponse) return { reponse: filtree, phrase: await enMots(filtree.content, filtree.summary, filtree.components) };
+    }
     if (j.pertinent === false) {
       const ailleurs = await horsTovo(input.db, input.message, input.requete ?? requeteInitiale, input.position);
-      if (ailleurs) return { reponse: ailleurs, phrase: await enMots(ailleurs.content, ailleurs.summary, ailleurs.components) };
+      // Article 6 : jamais de produits sans rapport, même faute de mieux.
+      const repli = ailleurs ?? {
+        content: 'Tovo n’en propose pas pour le moment.',
+        summary: { aucun_resultat_pertinent: true, demande: input.requete ?? requeteInitiale },
+        components: [],
+      };
+      return { reponse: repli, phrase: await enMots(repli.content, repli.summary, repli.components) };
     }
     return { reponse, phrase: j.texte };
   };
+
+  // Une réponse directe : les cartes, puis la phrase du rédacteur.
+  const repondre = async (reponse: CatalogueAnswer) => {
+    input.onEvent?.({ type: 'results', components: reponse.components });
+    const phrase = await enMots(reponse.content, reponse.summary, reponse.components);
+    input.onEvent?.({ type: 'text', text: phrase });
+    const messageId = await persister(input, phrase, reponse.components);
+    return { ...envelope(phrase, reponse.components), messageId, rejected: [],
+      usage: { input: 0, output: 0, cached: 0, cycles: 0 } };
+  };
+
+  // ARTICLE 9 — ce que le client précise est GARDÉ : la note de commande,
+  // que la boutique lira et que le client modifie au panier. Si rien d'autre
+  // n'est demandé (pas de recherche), la réponse s'arrête là. Article 4 : on
+  // ne dit « c'est noté » que si l'écriture a réussi.
+  if (input.precision && !input.audio) {
+    const note = await ajouterALaNote(input.db, input.userId, input.precision);
+    if (!catalogueAutorise || input.intention === 'designe') {
+      const panier = note
+        ? await EXECUTORS.voir_panier!({}, { db: input.db, userId: input.userId, ...(input.position ? { position: input.position } : {}) })
+        : null;
+      return repondre({
+        content: note
+          ? `C’est gardé pour votre commande : « ${input.precision} ». La boutique le verra avec la commande, et vous pouvez le modifier au panier.`
+          : 'Je n’arrive pas à garder cette précision pour le moment. Vous pourrez l’écrire dans la note au moment de commander.',
+        summary: { precision: input.precision, enregistree: Boolean(note), note_de_commande: note },
+        components: panier?.components ?? [],
+      });
+    }
+  }
+
+  // ARTICLE 7 — « d'autres », « encore », « plus loin » : ce que le client n'a
+  // PAS encore vu. La suite du catalogue, puis les commerces hors Tovo (où
+  // qu'ils soient : « Nouhou Merguez » pour d'autres vendeurs de merguez).
+  if (input.suite && !input.audio) {
+    const suite = await laSuite(input, previous.dernierAffichage, requeteInitiale);
+    if (suite) {
+      // Article 6 aussi pour la suite : seulement ce qui répond (« plus loin »
+      // montrait une Vaseline pour une pommade Nivea).
+      const avecProduits = suite.components.some((c) => c.type === 'product_carousel' || c.type === 'product_list');
+      if (!avecProduits) return repondre(suite);
+      const j = await redigerEtJuger({ message: input.messagePublic ?? input.message, prevue: suite.content,
+        faits: suite.summary, composants: suite.components, avant: dernierDeTovo });
+      const gardee = j.garder ? seulementPertinents(suite, j.garder) : suite;
+      return repondre(gardee.components.length ? gardee : {
+        content: 'Je n’ai rien d’autre qui corresponde vraiment à votre demande.',
+        summary: { suite_de: input.requete ?? requeteInitiale, rien_d_autre: true },
+        components: [],
+      });
+    }
+  }
 
   const photoRecente = previous.history.slice(-4).some((turn) =>
     turn.role === 'user' && /photo envoyee/i.test(normaliserIntention(turn.content)));
@@ -291,7 +359,13 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // retrouve l'élément dans ce qu'il a affiché (voir memoire.ts).
   const intent = input.audio || versModele
     ? undefined
-    : await resolveCatalogueIntent(input.db, input.message, previous.pending);
+    // Article 1 : un seul interprète. Le cerveau a compris une boutique et la
+    // nomme (« centre aéré », réponse au choix d'agence → « O'TAKOSS Centre
+    // Aéré ») : c'est elle qu'on cherche, pas les mots bruts — sauf si la
+    // phrase nomme la boutique elle-même (« chez Tchos » garde son marqueur).
+    : await resolveCatalogueIntent(input.db,
+      input.intention === 'boutique' && input.requete && !boutiqueNommee ? input.requete : input.message,
+      previous.pending);
   let direct = intent ? await merchantIntentAnswer(input.db, intent) : null;
   // Ce que le cerveau a compris (« merguez »), sauf quand une boutique est
   // nommée : la requête est alors ce qui reste une fois son nom retiré.
@@ -418,6 +492,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     const dernierCycle = cycles === MAX_CYCLES - 1;
     let reponseOutil: string | undefined;
     let resumeOutil: unknown;
+    let approchant = false;
     input.onEvent?.({ type: 'text_start' });
 
     // Au fil de l'eau, mais phrase par phrase : une phrase ne s'affiche que
@@ -472,6 +547,11 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
         faits.ajouter(resultat.summary);
         faits.ajouter(resultat.content);
         for (const composant of resultat.components) faits.ajouter(composant.data);
+        // Des ressemblances seulement (« console de jeu » pour « livres pour
+        // enfants ») : jugées plus bas, avant d'être montrées (article 6).
+        if (appel.name === 'rechercher_produits' && (resultat.summary as { suggestions?: unknown } | undefined)?.suggestions === true) {
+          approchant = true;
+        }
 
         // Les identifiants viennent d'ici, et de nulle part ailleurs.
         collectIds(resultat.summary, idsAutorises);
@@ -505,6 +585,27 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
             erreur: cause instanceof Error ? cause.message : 'échec',
           }),
         });
+      }
+    }
+    // ARTICLE 6 — un résultat approchant sans rapport ne se montre pas : on
+    // dit où le trouver ailleurs, ou qu'on n'en a pas. Le même jugement que
+    // sur les voies rapides (produitsOuAilleurs), sur le chemin de l'assistant.
+    if (approchant && composantsDuTour.some((c) => c.type === 'product_carousel' || c.type === 'product_list')) {
+      const j = await redigerEtJuger({ message: input.messagePublic ?? input.message, prevue: reponseOutil ?? '',
+        faits: resumeOutil, composants: composantsDuTour, avant: dernierDeTovo });
+      if (j.pertinent === true && j.garder) {
+        const filtres = seulementPertinents({ content: '', summary: {}, components: [...composantsDuTour] }, j.garder).components;
+        composantsDuTour.length = 0;
+        composantsDuTour.push(...filtres);
+      }
+      if (j.pertinent === false) {
+        const ailleurs = await horsTovo(input.db, input.message, input.requete ?? requeteInitiale, input.position);
+        composantsDuTour.length = 0;
+        composantsDuTour.push(...(ailleurs?.components ?? []));
+        reponseOutil = ailleurs?.content ?? 'Tovo n’en propose pas pour le moment.';
+        resumeOutil = ailleurs?.summary ?? { aucun_resultat_pertinent: true };
+        faits.ajouter(resumeOutil);
+        for (const composant of composantsDuTour) collectIds(composant.data, idsAutorises);
       }
     }
     const verified = validateComponents(composantsDuTour, idsAutorises);
@@ -562,6 +663,80 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
 }
 
 /**
+ * ARTICLE 6 — ne garder, dans les listes de produits, que ceux que le juge a
+ * reconnus comme répondant à la demande. Une liste vidée disparaît. La même
+ * réponse (même objet) si rien n'est retiré.
+ */
+function seulementPertinents(reponse: CatalogueAnswer, garder: ReadonlySet<string>): CatalogueAnswer {
+  let retire = false;
+  const components = reponse.components.flatMap((c) => {
+    if (c.type !== 'product_carousel' && c.type !== 'product_list') return [c];
+    const items = Array.isArray(c.data.items) ? c.data.items as Array<{ id?: string }> : [];
+    const gardes = items.filter((i) => garder.has(String(i.id)));
+    if (gardes.length === items.length) return [c];
+    retire = true;
+    // Sans « browse » : « Parcourir les N autres » ramènerait les produits retirés.
+    const { browse: _browse, ...data } = c.data as Record<string, unknown>;
+    return gardes.length ? [{ ...c, data: { ...data, items: gardes } }] : [];
+  });
+  if (!retire) return reponse;
+  // Le total de la recherche ne vaut plus : seulement ce qui est montré.
+  const { total: _total, produits: _produits, ...summary } = reponse.summary as Record<string, unknown>;
+  const montres = components.flatMap((c) => (Array.isArray(c.data.items) ? c.data.items as Array<{ name?: string }> : []));
+  return { ...reponse, components,
+    summary: { ...summary, produits_qui_repondent: montres.map((i) => i.name), nombre: montres.length } };
+}
+
+/**
+ * ARTICLE 7 — ce que le client n'a pas encore vu, pour la même demande :
+ *  - la suite du catalogue, après les produits déjà montrés ;
+ *  - les commerces hors Tovo qui en ont probablement, sauf ceux déjà montrés
+ *    (tous types, jusqu'à 20 km).
+ * null s'il n'y a pas de demande à prolonger (le chemin habituel reprend).
+ */
+async function laSuite(input: OrchestrateInput, vu: Component[], requeteInitiale: string): Promise<CatalogueAnswer | null> {
+  const liste = vu.find((c) => c.type === 'product_carousel' || c.type === 'product_list');
+  const parcourir = (liste?.data.browse ?? {}) as { query?: string; total?: number; merchant_ids?: string[]; category_id?: string };
+  const commercesVus = vu.find((c) => c.type === 'commerces_hors_tovo');
+  const sujetAffiche = String(parcourir.query || commercesVus?.data.produit || '').trim();
+  const requete = (input.requete || sujetAffiche || (liste ? requeteInitiale : '') || '').trim();
+  if (!requete) return null;
+  const montres = Array.isArray(liste?.data.items) ? (liste!.data.items as unknown[]).length : 0;
+
+  const filtre = { q: requete, limit: 8, offset: montres,
+    ...(parcourir.merchant_ids?.length ? { merchant_ids: parcourir.merchant_ids } : {}),
+    ...(parcourir.category_id ? { category_id: parcourir.category_id } : {}) };
+  // Aucune liste Tovo montrée encore : le catalogue entier est « pas encore vu ».
+  const page = !liste || (parcourir.total ?? 0) > montres ? await cataloguePage(input.db, filtre, false) : null;
+  const autresProduits = page && page.items.length > 0 ? searchAnswer(page, filtre) : null;
+
+  const dejaVus = new Set(vu.filter((c) => c.type === 'commerces_hors_tovo')
+    .flatMap((c) => (Array.isArray(c.data.items) ? c.data.items as Array<{ nom?: string }> : []).map((i) => String(i.nom ?? ''))));
+  const ailleurs = await alternativesHorsTovo(input.db, requete, input.position, requete, { dejaVus });
+
+  if (!autresProduits && !ailleurs) {
+    return {
+      content: `Je n’ai rien d’autre pour « ${requete} » que ce que je vous ai déjà montré.`,
+      summary: { suite_de: requete, rien_d_autre: true },
+      components: [],
+    };
+  }
+  return {
+    content: [
+      autresProduits ? 'Voici d’autres choix sur Tovo.' : '',
+      ailleurs ? 'Hors de Tovo, ces commerces en ont probablement ; un livreur peut y aller, il vous appelle pour convenir de l’achat.' : '',
+    ].filter(Boolean).join(' '),
+    summary: {
+      suite_de: requete,
+      ...(autresProduits ? { autres_produits_tovo: autresProduits.summary } : {}),
+      ...(ailleurs ? { commerces_hors_tovo: ailleurs.summary } : {}),
+      consigne: 'Le client a demandé d’autres choix : ce sont des choix qu’il n’avait pas encore vus. Dis-le simplement, sans répéter les précédents.',
+    },
+    components: [...(autresProduits?.components ?? []), ...(ailleurs?.components ?? [])],
+  };
+}
+
+/**
  * Historique récent, remis dans le format du client LLM.
  *
  * Dix messages : au-delà, le contexte enfle sans que la conversation y gagne,
@@ -570,7 +745,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
 async function chargerHistorique(
   db: SupabaseClient,
   conversationId: string,
-): Promise<{ history: LlmTurn[]; pending?: PendingMerchantChoice; affichage: boolean }> {
+): Promise<{ history: LlmTurn[]; pending?: PendingMerchantChoice; affichage: boolean; dernierAffichage: Component[] }> {
   const { data } = await db
     .from('messages')
     .select('role, content, components')
@@ -609,7 +784,11 @@ async function chargerHistorique(
     })
     .reverse()
     .filter((t) => t.content.length > 0);
-  return { history, ...(pending ? { pending } : {}), affichage: resume !== null };
+  // Les cartes du dernier message qui en montrait : ce que le client a vu
+  // (article 7 — « d'autres » part de là).
+  const dernierAffichage = (lignes.find((m) => m.role === 'assistant' && Array.isArray(m.components) && (m.components as unknown[]).length > 0)
+    ?.components ?? []) as Component[];
+  return { history, ...(pending ? { pending } : {}), affichage: resume !== null, dernierAffichage };
 }
 
 /**

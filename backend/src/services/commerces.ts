@@ -127,12 +127,17 @@ export function typesPourProduit(texte: string): TypeCommerce[] {
 /**
  * Les commerces où chercher ce produit : du bon type, les plus proches (8 km
  * au plus) si l'on connaît la position du client, sinon les plus fiables.
+ *
+ * `elargir` (article 7 de la constitution : « d'autres », « plus loin ») :
+ * tous les types possibles et jusqu'à 20 km — avec `exclure`, ce que le
+ * client n'a pas encore vu.
  */
 export function commercesPourProduit(
   texte: string,
   position: { lat: number; lng: number } | null | undefined,
   exclure: (c: Commerce) => boolean = () => false,
   combien = 3,
+  elargir = false,
 ): Commerce[] {
   const n = normaliserIntention(texte);
   const mots = new Set(n.split(' '));
@@ -149,7 +154,7 @@ export function commercesPourProduit(
     return position
       ? candidats
         .map((c) => ({ c, d: metres(position, c) }))
-        .filter(({ d }) => d <= 8000)
+        .filter(({ d }) => d <= (elargir ? 20_000 : 8000))
         .sort((a, b) => a.d - b.d)
         .map(({ c }) => c)
       : candidats.sort((a, b) => b.fiabilite - a.fiabilite);
@@ -168,8 +173,9 @@ export function commercesPourProduit(
     if (retenus.length >= combien) break;
     const avant = retenus.length;
     garder(parType(type), retenus);
-    // Ce type a des commerces à portée : on s'en tient à lui.
-    if (retenus.length > avant) break;
+    // Ce type a des commerces à portée : on s'en tient à lui (sauf pour
+    // élargir : alors tous les types, du plus probable au moins probable).
+    if (retenus.length > avant && !elargir) break;
   }
   return retenus;
 }

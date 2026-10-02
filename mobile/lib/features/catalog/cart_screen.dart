@@ -95,6 +95,10 @@ class _CartScreenState extends State<CartScreen> {
   _DeliveryPoint? _position;
   final _repere = TextEditingController();
 
+  /// La note pour la boutique (« sans oignons ») : celle gardée depuis la
+  /// conversation, que le client relit et modifie avant de commander.
+  final _note = TextEditingController();
+
   /// L'endroit choisi sur la carte (« Autre adresse »), s'il l'a été : son
   /// repère, l'indication, la personne à livrer.
   AdresseChoisie? _choisie;
@@ -115,6 +119,7 @@ class _CartScreenState extends State<CartScreen> {
   void initState() {
     super.initState();
     _cart = widget.initialCart;
+    _note.text = widget.initialCart?.str('note') ?? '';
     _chargement = widget.initialCart == null;
     unawaited(_demarrer());
   }
@@ -122,6 +127,7 @@ class _CartScreenState extends State<CartScreen> {
   @override
   void dispose() {
     _repere.dispose();
+    _note.dispose();
     super.dispose();
   }
 
@@ -221,6 +227,7 @@ class _CartScreenState extends State<CartScreen> {
       }
       _erreurArticles = null;
       _cart = _panierDans(reponse);
+      if (_note.text.isEmpty) _note.text = _cart?.str('note') ?? '';
       _devisPour = null;
     });
   }
@@ -365,6 +372,8 @@ class _CartScreenState extends State<CartScreen> {
       'dropoff_hint': destination.hint,
       'dropoff': {'lat': destination.lat, 'lng': destination.lng},
       'payment_method': _paiement,
+      // Toujours envoyée, même vide : effacée ici, elle ne revient pas.
+      'note': _note.text.trim(),
       if (_paiement == 'mobile_money' && _numeroNita != null)
         'payment_phone': _numeroNita,
       if (widget.conversationId != null)
@@ -614,6 +623,7 @@ class _CartScreenState extends State<CartScreen> {
                       child: const Text('Ajouter des articles'),
                     ),
                   ),
+                  _champNote(),
                   const SizedBox(height: 20),
                   _ligneLivraison(),
                   if (_position != null && _choisie == null) _champRepere(),
@@ -726,6 +736,31 @@ class _CartScreenState extends State<CartScreen> {
       style: const TextStyle(fontSize: 14),
       decoration: InputDecoration(
         hintText: 'Un repère pour le livreur (facultatif)',
+        isDense: true,
+        filled: true,
+        fillColor: TovoTheme.bloc,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    ),
+  );
+
+  Widget _champNote() => Padding(
+    padding: const EdgeInsets.only(top: 4, bottom: 12),
+    child: TextField(
+      key: const Key('panier-note-champ'),
+      controller: _note,
+      enabled: !_commandeEnCours,
+      minLines: 1,
+      maxLines: 3,
+      maxLength: 500,
+      textCapitalization: TextCapitalization.sentences,
+      style: const TextStyle(fontSize: 14),
+      decoration: InputDecoration(
+        hintText: 'Une précision pour la boutique (facultatif)',
+        counterText: '',
         isDense: true,
         filled: true,
         fillColor: TovoTheme.bloc,

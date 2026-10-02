@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { toHttpFailure } from '../lib/errors.js';
 import { cartSummary, envelope, quickReplies } from '../components/builders.js';
+import { ecrireNote, lireNote } from '../services/noteCommande.js';
 
 /**
  * Panier — sans tour LLM.
@@ -58,14 +59,27 @@ export async function cartRoutes(app: FastifyInstance): Promise<void> {
 
     const payload = (data ?? {}) as Record<string, unknown>;
     const vide = !payload.cart_id || (payload.items as unknown[])?.length === 0;
+    // La note de commande (article 9) : visible sur la carte du panier.
+    const note = vide ? null : await lireNote(db);
 
     return {
       envelope: envelope(
         vide ? 'Votre panier est vide.' : content,
-        vide ? [] : [cartSummary(payload)],
+        vide ? [] : [cartSummary({ ...payload, ...(note ? { note } : {}) })],
       ),
     };
   }
+
+  // La note de commande (article 9) : le client la relit et la modifie au panier.
+  app.get('/cart/note', { preHandler: app.requireAuth }, async (request, reply) => {
+    return reply.send({ note: await lireNote(request.supabase!) });
+  });
+  app.put('/cart/note', { preHandler: app.requireAuth }, async (request, reply) => {
+    const body = z.object({ note: z.string().max(500) }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: 'note invalide' });
+    const ok = await ecrireNote(request.supabase!, request.user!.id, body.data.note);
+    return ok ? reply.send({ note: body.data.note.trim() || null }) : reply.code(503).send({ error: 'note indisponible' });
+  });
 
   app.get('/cart', { preHandler: app.requireAuth }, async (request, reply) => {
     const query = positionSchema.safeParse(request.query);

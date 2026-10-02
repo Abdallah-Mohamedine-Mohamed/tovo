@@ -19,6 +19,12 @@ import { normaliserIntention } from './intents.js';
 export class Faits {
   private readonly nombres = new Set<number>();
   private readonly textes: string[] = [];
+  /**
+   * Les actions que les données CONFIRMENT (article 4 de la constitution) :
+   * « gardee » (une précision enregistrée, un signalement transmis),
+   * « commande » (une commande ou une course existe).
+   */
+  private readonly actions = new Set<'gardee' | 'commande' | 'annulee'>();
 
   /** Ajoute tout ce que contient une valeur (résumé d'outil, composant, texte). */
   ajouter(valeur: unknown, profondeur = 0): void {
@@ -38,8 +44,16 @@ export class Faits {
       return;
     }
     if (typeof valeur === 'object') {
-      for (const v of Object.values(valeur as Record<string, unknown>)) this.ajouter(v, profondeur + 1);
+      const o = valeur as Record<string, unknown>;
+      if (o.enregistree === true || o.signale === true) this.actions.add('gardee');
+      if (typeof o.order_id === 'string' || o.livreur_assigne === true) this.actions.add('commande');
+      if (o.annulee === true || o.status === 'cancelled') this.actions.add('annulee');
+      for (const v of Object.values(o)) this.ajouter(v, profondeur + 1);
     }
+  }
+
+  confirme(action: 'gardee' | 'commande' | 'annulee'): boolean {
+    return this.actions.has(action);
   }
 
   /**
@@ -83,9 +97,20 @@ const DUREE = /(\d+)\s*(?:min\b|mins\b|minutes?\b|heures?\b|h\b)/gi;
 const GRAS = /\*\*([^*]{2,80})\*\*/g;
 
 export interface Affirmation {
-  genre: 'montant' | 'duree' | 'nom';
+  genre: 'montant' | 'duree' | 'nom' | 'action';
   valeur: string;
 }
+
+/**
+ * ARTICLE 4 de la constitution, garanti ici et non seulement demandé : une
+ * phrase qui dit qu'une chose est FAITE n'est gardée que si les données le
+ * confirment. Vu le 02/10 : « C'est bien noté pour sans oignons » alors que
+ * rien n'était enregistré ; « un livreur se rend à votre position » avant
+ * tout toucher.
+ */
+const DIT_GARDE = /\b(?:c.est (?:bien )?(?:not[ée]|gard[ée]|enregistr[ée]|transmis)|(?:bien )?not[ée]e?(?![\wà-ÿ])|j.ai (?:bien )?(?:not[ée]|gard[ée]|enregistr[ée]|transmis|signal[ée])|je l.ai (?:not[ée]|transmis|signal[ée])|(?:est|a été|sont|ont été) (?:not[ée]e?s?|transmise?s?|enregistr[ée]e?s?|signal[ée]e?s?))/i;
+const DIT_ANNULE = /\b(?:c.est (?:bien )?annul[ée]|j.ai (?:bien )?annul[ée]|(?:est|a été) annul[ée]e?)/i;
+const DIT_EN_ROUTE = /\b(?:(?:est|sont) en route|se rend\b|se rendra\b|se dirige|vous rejoint|est parti|arrive (?:chez|à) vous|vient chez vous)/i;
 
 /** Les affirmations d'une phrase qui ne viennent pas des faits. */
 export function affirmationsInventees(phrase: string, faits: Faits): Affirmation[] {
@@ -96,6 +121,9 @@ export function affirmationsInventees(phrase: string, faits: Faits): Affirmation
   for (const m of phrase.matchAll(DUREE)) {
     if (!faits.connaitNombre(Number(m[1]))) inventees.push({ genre: 'duree', valeur: m[0] });
   }
+  if (DIT_GARDE.test(phrase) && !faits.confirme('gardee')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_GARDE)![0] });
+  if (DIT_EN_ROUTE.test(phrase) && !faits.confirme('commande')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_EN_ROUTE)![0] });
+  if (DIT_ANNULE.test(phrase) && !faits.confirme('annulee')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_ANNULE)![0] });
   for (const m of phrase.matchAll(GRAS)) {
     const contenu = m[1]!.trim();
     const nombres = nombresDans(contenu);

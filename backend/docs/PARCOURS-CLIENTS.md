@@ -277,3 +277,54 @@ Reste instable : « deux litres de lait » (A4). Le jugement de pertinence du r�
   - Il faut d'abord des scénarios de **plusieurs messages** : se corriger (« plutôt bœuf »), « le premier » après une liste, compléter une carte de course.
 - **A4** : rendre stable le jugement de pertinence du rédacteur.
 - **« Sans oignons »** : une précision sans option prévue ne doit pas se perdre (A4 cible du parcours A).
+
+### Scénarios sur plusieurs messages (02/10, suite)
+
+Dix conversations (M1 à M10) ont été ajoutées : désigner, se corriger, compléter, changer d'avis, préciser.
+
+**Une leçon de méthode.** Au premier passage, l'examen affichait 44/44. En **relisant les réponses une par une**, j'ai trouvé des réponses fausses que mes vérifications laissaient passer :
+- « C'est bien noté pour sans oignons » alors que rien n'est enregistré ;
+- trois boutiques au lieu de l'agence choisie ;
+- « Annuler ma commande » sans commande ;
+- « un livreur se rend à votre position » avant tout toucher ;
+- une console de jeu proposée pour des livres pour enfants ;
+- une carte de course vide alors que le client avait dit où aller.
+
+Les vérifications ont été durcies. **Relire les réponses reste obligatoire : un score ne suffit pas.**
+
+**Référence honnête : 37 puis 38 sur 44.** Six échecs sont stables.
+
+| Échec | Ce que fait Tovo | Cause | Principe en jeu |
+|---|---|---|---|
+| B6, N1 | « Sac à déposer à Gamkalley », « clés à mon frère à Yantala » → carte de course **vide**, et « un livreur se rend à votre position » | Le chemin rapide ouvre la carte sans ce que le client a dit ; le cerveau ne donne que l'intention | 1. Un seul interprète, qui doit aussi extraire le lieu et le destinataire |
+| M5 | « Otakoss » → choix de l'agence → « centre aéré » → **trois boutiques** « du Centre Aéré » (Boba, O'Takoss, Baaklini) | Le choix en attente passe après la reconnaissance des enseignes | 2. État de parcours |
+| M4 | « sans oignons » après des tacos → compris comme une **réclamation** : « j'ai transmis votre consigne à notre équipe » (un signalement est réellement créé) | Aucun état « choisit un produit », donc une précision devient une plainte | 2. État de parcours, et précision sans option (A4 cible) |
+| M10 | « plus loin ? » → les deux mêmes commerces | L'annuaire n'a que 2 boutiques de beauté, et « plus loin » n'ouvre pas les types suivants (supermarché, pharmacie) | 3. Recherche cohérente |
+| N10 | « livres pour enfants » → une console de jeu | Un résultat approximatif sans rapport est affiché | 3. Recherche cohérente (pertinence) |
+
+Instable : M7 (« laisse tomber » propose parfois « Annuler ma commande » sans commande) et A4 (lait).
+
+### La constitution (02/10, soir)
+
+À la demande du fondateur (« des règles, pas du cas par cas »), dix articles généraux ont été écrits dans `src/ai/constitution.ts`. Les trois IA les lisent, et le serveur garantit chacun d'eux là où il se vérifie sans IA (voir `docs/CONSTITUTION.md`).
+
+**Résultat : 44/45 sur trois passages**, contre 37 à 38/44 avant (dernier passage : `parcours-2026-10-02-21-45.json`). Le seul échec du dernier passage est une erreur technique (401). Toutes les réponses ont été **relues**.
+
+La relecture a encore permis de corriger trois inventions qui passaient les vérifications :
+- « librairies du centre-ville » ;
+- « c'est annulé » sans commande ;
+- « 21 options » annoncées pour un seul produit affiché.
+
+La migration 0075 a été appliquée :
+- « merguez » ne renvoie plus que l'assiette et la pizza merguez, sans les tacos ;
+- la note « sans oignons » est enregistrée en base.
+
+**Côté application** (à reconstruire) :
+- un seul bouton « Parcourir les N autres produits » ;
+- plus d'icône dans « Envoyer un livreur » ;
+- la note pour la boutique, sur la carte du panier et dans l'écran du panier.
+
+**Points ouverts** :
+- Le juge retire la « Pizza merguez » quand on demande des merguez : article 6, un produit se juge par ce qu'il est. À confirmer par le fondateur.
+- Une réponse de conversation a tutoyé (« si tu as besoin »).
+- Deux tests mobiles cherchent encore la carte d'accueil « Explorer les boutiques », remplacée le 01/10. Ils échouaient déjà avant aujourd'hui.

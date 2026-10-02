@@ -173,7 +173,9 @@ describe('les deux sortes de livreur', () => {
     expect(carte.data.pickup_contact).toBe('90 12 34 56');
     // L'arrivée : chez le client.
     expect(carte.data.dropoff).toMatchObject({ lat: NIAMEY.lat, lng: NIAMEY.lng });
-    expect(res.json().content).toContain('apporte');
+    // Article 4 : rien ne part avant le toucher, et la phrase le dit.
+    expect(res.json().content).toContain('Commander le livreur');
+    expect(res.json().content).not.toMatch(/se rend|est en route|vient chez vous/);
     expect(db.rpc).not.toHaveBeenCalledWith('place_courier_order', expect.anything());
     await app.close();
   });

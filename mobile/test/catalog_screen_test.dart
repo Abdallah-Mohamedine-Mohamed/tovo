@@ -337,7 +337,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.bySemanticsLabel('Tout voir, 76 produits'));
+    await tester.ensureVisible(find.byKey(const Key('parcourir-produits')));
+    await tester.tap(find.byKey(const Key('parcourir-produits')));
     expect(selected?.action, 'browse_catalog');
     expect(selected?.payload['merchant_ids'], ['centre']);
     expect(selected?.payload['query'], 'poulet');

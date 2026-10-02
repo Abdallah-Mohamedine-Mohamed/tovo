@@ -71,6 +71,17 @@ class CartSummary extends StatelessWidget {
               onInteraction: onInteraction,
               modifiable: !commande,
             ),
+          // La note pour la boutique (« sans oignons ») : ce que le client a
+          // précisé dans la conversation, gardé et visible (02/10).
+          if (component.str('note').isNotEmpty)
+            Padding(
+              key: const Key('panier-note'),
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: Text(
+                'Note pour la boutique : ${component.str('note')}',
+                style: const TextStyle(fontSize: 13, color: TovoTheme.inkDoux),
+              ),
+            ),
           const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),

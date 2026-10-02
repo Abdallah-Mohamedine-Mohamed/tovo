@@ -304,7 +304,9 @@ describe('POST /chat — le cerveau', () => {
     const app = await appAvec(db);
     await envoyer(app, { text: 'Yantala.', conversation_id: '33333333-3333-4333-8333-333333333333' });
     // Aucun exemple ici : CERVEAU_EXEMPLES est éteint par défaut.
-    expect(cerveau.contextes[0]).toEqual({ avant: 'Où le livreur doit-il récupérer le colis ?', exemples: [] });
+    expect(cerveau.contextes[0]).toMatchObject({ avant: 'Où le livreur doit-il récupérer le colis ?', exemples: [] });
+    // Et l'état du parcours (article 2 de la constitution), ou null sans base.
+    expect(cerveau.contextes[0]).toHaveProperty('etat');
     await app.close();
   });
 });

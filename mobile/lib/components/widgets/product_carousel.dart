@@ -9,10 +9,10 @@ import '../registry.dart';
 /// Les produits trouvés, dans le fil.
 ///
 /// Une rangée qui glisse : quatre produits, deux visibles et le troisième qui
-/// dépasse — on comprend qu'il faut glisser. Au bout, une tuile « Parcourir
-/// les 34 autres », et le même appel en bouton sous la rangée : la suite est
-/// DITE, pas seulement suggérée par une flèche (retour du client, 26/09).
-/// Tous deux ouvrent l'explorateur de produits.
+/// dépasse — on comprend qu'il faut glisser. La suite : UN seul bouton sous la
+/// rangée, « Parcourir les 34 autres produits », qui ouvre l'explorateur. La
+/// flèche du titre et la tuile « +34 / Tout parcourir » faisaient la même
+/// chose : trois gestes pour une action (retour du fondateur, 02/10).
 ///
 /// Le « + » sur la photo ajoute au panier sans ouvrir la fiche. Un produit à
 /// personnaliser ouvre sa fiche : ses options ne se devinent pas.
@@ -57,9 +57,7 @@ class _ProductCollectionState extends State<ProductCollection> {
         ? items.take(_visibles).toList()
         : items;
     final reste = total - montres.length;
-    // « Tout voir » en haut à droite, à côté du titre (comme les rangées
-    // d'Uber Eats) : on voit d'abord quelques produits, et la suite est
-    // annoncée là où l'œil commence, pas dans une barre grise tout en bas.
+    // Une suite à parcourir : le nombre sous le titre, et le bouton dessous.
     final toutVoir =
         widget.horizontal && browse.isNotEmpty && total > montres.length;
     final titre = component.str('title');
@@ -102,32 +100,6 @@ class _ProductCollectionState extends State<ProductCollection> {
                       ],
                     ),
                   ),
-                  if (toutVoir)
-                    Semantics(
-                      container: true,
-                      button: true,
-                      label: 'Tout voir, $total produits',
-                      excludeSemantics: true,
-                      child: Material(
-                        color: const Color(0xFFF4F5F5),
-                        shape: const CircleBorder(),
-                        child: InkWell(
-                          customBorder: const CircleBorder(),
-                          onTap: () => widget.onInteraction(
-                            TovoInteraction('browse_catalog', browse),
-                          ),
-                          child: const SizedBox(
-                            width: 44,
-                            height: 44,
-                            child: Icon(
-                              Icons.arrow_forward_rounded,
-                              size: 21,
-                              color: TovoTheme.ink,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
                 ],
               ),
             ),
@@ -165,18 +137,6 @@ class _ProductCollectionState extends State<ProductCollection> {
                               data: montres[i],
                               onOpen: () => _open(montres[i], onInteraction),
                               onAdd: () => _ajouter(montres[i], onInteraction),
-                            ),
-                          ),
-                        ),
-                      ],
-                      if (toutVoir) ...[
-                        const SizedBox(width: 14),
-                        SizedBox(
-                          width: largeur,
-                          child: _TuileSuite(
-                            reste: reste,
-                            onTap: () => onInteraction(
-                              TovoInteraction('browse_catalog', browse),
                             ),
                           ),
                         ),
@@ -309,80 +269,6 @@ class _LigneVedette extends StatelessWidget {
 String _parcourir(int reste) => reste == 1
     ? 'Parcourir l’autre produit'
     : 'Parcourir les $reste autres produits';
-
-/// La dernière tuile de la rangée : « Parcourir les 34 autres ».
-class _TuileSuite extends StatelessWidget {
-  const _TuileSuite({required this.reste, required this.onTap});
-
-  final int reste;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    container: true,
-    button: true,
-    label: _parcourir(reste),
-    excludeSemantics: true,
-    child: InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AspectRatio(
-            aspectRatio: 1,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: const Color(0xFFF4F5F5),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '+$reste',
-                      style: const TextStyle(
-                        fontSize: 30,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.8,
-                        color: TovoTheme.ink,
-                      ),
-                    ),
-                    const Text(
-                      'autres produits',
-                      style: TextStyle(fontSize: 14, color: TovoTheme.inkDoux),
-                    ),
-                    const Spacer(),
-                    const Align(
-                      alignment: Alignment.bottomRight,
-                      child: CircleAvatar(
-                        radius: 22,
-                        backgroundColor: TovoTheme.ink,
-                        foregroundColor: Colors.white,
-                        child: Icon(Icons.arrow_forward_rounded, size: 21),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Tout parcourir',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: TovoTheme.ink,
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-}
 
 String _majuscule(String texte) =>
     texte.isEmpty ? texte : texte[0].toUpperCase() + texte.substring(1);

@@ -370,8 +370,14 @@ export async function resolveCatalogueIntent(db: SupabaseClient, message: string
     const offered = pending.merchant_ids.flatMap((id) => catalogue.filter((merchant) => merchant.id === id));
     const ordinal = /^(le )?(premier|1|1er)$/.test(normaliserIntention(message)) ? 0
       : /^(le )?(deuxieme|second|2|2e)$/.test(normaliserIntention(message)) ? 1 : -1;
-    const selected = ordinal >= 0 ? offered.slice(ordinal, ordinal + 1) : boutiquesCorrespondantes(message, offered);
-    if (selected.length === 1 && (candidates.length === 0 || candidates[0]?.id === selected[0]?.id)) {
+    // Article 2 de la constitution : ce qui attend une réponse donne le sens.
+    // « centre aéré » après « Centre Aéré ou Nouveau Marché ? » désigne l'une
+    // des adresses PROPOSÉES — pas les autres boutiques « du Centre Aéré »
+    // (Boba, Baaklini…), qui l'emportaient (02/10).
+    const parSesMots = agenceNommee(message, offered);
+    const selected = ordinal >= 0 ? offered.slice(ordinal, ordinal + 1)
+      : parSesMots.length === 1 ? parSesMots : boutiquesCorrespondantes(message, offered);
+    if (selected.length === 1) {
       return { merchants: selected, query: pending.query, menu: pending.query.length === 0 };
     }
   }
@@ -621,13 +627,18 @@ export async function alternativesHorsTovo(
   texte: string,
   position?: { lat: number; lng: number } | null,
   produit?: string,
+  /** Article 7 : « d'autres », « plus loin » — hors ce qui a déjà été montré, tous types, plus loin. */
+  suite?: { dejaVus: ReadonlySet<string> },
 ): Promise<CatalogueAnswer | null> {
-  const commerces = commercesPourProduit(texte, position, await estSurTovo(db));
+  const surTovo = await estSurTovo(db);
+  const commerces = suite
+    ? commercesPourProduit(texte, position, (x) => suite.dejaVus.has(x.nom) || surTovo(x), 3, true)
+    : commercesPourProduit(texte, position, surTovo);
   if (commerces.length === 0) return null;
   const quoi = (produit ?? '').trim();
   // La nuit ou le dimanche, un médicament : seules les pharmacies de garde
   // sont ouvertes — ce sont elles qu'on montre.
-  if (commerces.every((c) => c.type === 'pharmacie') && heuresDeGarde()) {
+  if (!suite && commerces.every((c) => c.type === 'pharmacie') && heuresDeGarde()) {
     const garde = await reponseGarde(position, HORS_TOVO_OUI, 3);
     if (garde.components.length > 0) {
       return {
@@ -663,8 +674,13 @@ export async function alternativesHorsTovo(
         + (pharmacie ? 'Pharmacie : invite à appeler pour vérifier qu’elles l’ont, rappelle qu’un médicament sur ordonnance exige l’ordonnance, aucun conseil médical. ' : '')
         + 'La carte affiche les boutons « Envoyer un livreur » et le numéro : ne pose aucune question.',
     },
-    components: [carteCommerces(commerces, quoi ? `Acheter : ${quoi}` : 'Faire les achats du client', HORS_TOVO_OUI, position)],
+    components: [avecProduit(carteCommerces(commerces, quoi ? `Acheter : ${quoi}` : 'Faire les achats du client', HORS_TOVO_OUI, position), quoi)],
   };
+}
+
+/** La carte retient ce qu'on y cherche : « plus loin ? » repart de là (article 7). */
+function avecProduit(carte: Component, produit: string): Component {
+  return produit ? { ...carte, data: { ...carte.data, produit } } : carte;
 }
 
 /**
@@ -686,7 +702,15 @@ export async function horsTovo(
 ): Promise<CatalogueAnswer | null> {
   const nom = requete.trim();
   if (nom) {
-    const connus = commercesNommes(normaliserIntention(nom), await estSurTovo(db));
+    // Un nom de commerce n'est reconnu que si le client NOMME une boutique
+    // (le cerveau a compris « boutique »), ou en donne le nom exact. Sinon
+    // c'est un produit : « merguez » trouvait « Nouhou Merguez » comme si le
+    // client l'avait demandé, au lieu des plats aux merguez de Tovo (article
+    // 1 : le sens, pas les mots). Le vendeur réputé sort quand même, par sa
+    // spécialité, parmi les commerces qui en ont (étape 3).
+    const nomme = normaliserIntention(nom);
+    const connus = commercesNommes(nomme, await estSurTovo(db))
+      .filter((c) => options.boutique || normaliserIntention(c.nom) === nomme);
     if (connus.length > 0) {
       noterBoutiqueDemandee(connus[0]!.nom, '', 'annuaire');
       return commerceConnu(connus, '');

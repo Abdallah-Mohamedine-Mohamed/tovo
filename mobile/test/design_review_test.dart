@@ -426,7 +426,7 @@ void main() {
     await capture(tester, '13-accueil-historique');
     await tester.tap(find.text('Je voudrais du garba'));
     await tester.pumpAndSettle();
-    expect(find.bySemanticsLabel('Tout voir, 6 produits'), findsOneWidget);
+    expect(find.byKey(const Key('parcourir-produits')), findsOneWidget);
     await capture(tester, '02-conversation');
   });
 
