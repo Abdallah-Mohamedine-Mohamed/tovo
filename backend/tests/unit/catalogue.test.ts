@@ -193,13 +193,14 @@ describe('catalogue complet', () => {
     expect(llmGenerate).not.toHaveBeenCalled();
   });
 
-  it('« De la pommade », que Tovo n’a pas : sans modèle, les commerces où en trouver (01/10)', async () => {
+  it('« De la pommade », que Tovo n’a pas : les commerces où en trouver, sans l’assistant (02/10)', async () => {
+    // Le chemin rapide trouve ; le rédacteur (coupé pendant les tests) met
+    // en mots. La phrase prévue ne recopie jamais la demande du client.
     llmGenerate.mockClear();
     const answer = await orchestrate({ db: adapter, userId: randomUUID(), conversationId: randomUUID(),
       clientMessageId: randomUUID(), message: 'De la pommade' });
     expect(answer.components.map((c) => c.type)).toEqual(['commerces_hors_tovo']);
-    expect(answer.content).toContain('Tovo ne propose pas encore de **pommade**');
-    expect(answer.usage.cycles).toBe(0);
+    expect(answer.content).not.toContain('De la pommade');
     expect(llmGenerate).not.toHaveBeenCalled();
   });
 
@@ -540,16 +541,22 @@ describe('Tovo dit où trouver ce qu’il n’a pas (annuaire public, 01/10)', (
   afterAll(() => installerCommerces(null));
 
   it('un produit que Tovo n’a pas : les commerces du bon type, les plus proches', async () => {
-    const r = await alternativesHorsTovo(adapter, 'Je cherche de la pommade Nivea', position);
-    expect(r?.content).toBe('Tovo ne propose pas encore de **pommade Nivea**. '
-      + 'Vous en trouverez probablement dans ces supermarchés, près de vous :');
+    const r = await alternativesHorsTovo(adapter, 'Je cherche de la pommade Nivea', position, 'pommade nivea');
+    // Le secours ne recopie jamais la demande : c'est l'assistant qui rédige (02/10).
+    expect(r?.content).toBe('Tovo ne le propose pas encore, mais ces supermarchés en ont probablement, près de vous :');
+    // Ce que l'assistant reçoit pour rédiger : noms, distances exactes, règle du livreur.
+    expect(r?.summary.commerces_hors_tovo).toEqual([
+      expect.objectContaining({ nom: 'Haddad Khalil Super Market', distance: '1,1 km', telephone: '20 73 61 60' }),
+      expect.objectContaining({ nom: 'Supermarché Azar', distance: '3,3 km' }),
+    ]);
+    expect(String(r?.summary.consigne)).toContain('jamais sa phrase recopiée');
     const items = r?.components[0]?.data.items as Array<Record<string, unknown>>;
     expect(r?.components[0]?.type).toBe('commerces_hors_tovo');
     // Les plus proches d'abord, à 8 km au plus, jamais une boutique Tovo.
     expect(items.map((i) => i.nom)).toEqual(['Haddad Khalil Super Market', 'Supermarché Azar']);
     expect(items[0]).toMatchObject({ telephone: '20 73 61 60', icone: 'supermarche', type: 'Supermarché' });
     expect((items[0]!.livreur as { value: string }).value)
-      .toBe(`${HORS_TOVO_OUI}Acheter de la pommade Nivea chez Haddad Khalil Super Market (Rue du Commerce, Plateau)|+22720736160`);
+      .toBe(`${HORS_TOVO_OUI}Acheter : pommade nivea chez Haddad Khalil Super Market (Rue du Commerce, Plateau)|+22720736160`);
   });
 
   it('« Envoyer un livreur » : la carte livreur, avec le numéro du commerce comme contact', async () => {

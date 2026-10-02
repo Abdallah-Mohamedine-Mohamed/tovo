@@ -40,6 +40,10 @@ describe('intentions de catalogue', () => {
 
   it('distingue une demande de boutique ouverte de son nom', () => {
     expect(demandeBoutiqueOuverte('Qu’importe, une boutique ouverte présentement')).toBe(true);
+    // 02/10 : « actuellement » seul ne parle pas d'ouverture, et les
+    // commerces hors Tovo ne sont pas une liste de boutiques Tovo.
+    expect(demandeBoutiqueOuverte('Quels sont tous les commerces hors de Tovo actuellement ?')).toBe(false);
+    expect(demandeBoutiqueOuverte('Les boutiques ouvertes qui ne sont pas sur Tovo')).toBe(false);
     expect(nomBoutiqueApresMarqueur('Boutique ouverte présentement')).toBeNull();
     expect(nomBoutiqueApresMarqueur('Boutique ouverte en ce moment sur Otakoss')).toBe('otakoss');
     expect(nomBoutiqueApresMarqueur('Boutique Otakoss')).toBe('otakoss');

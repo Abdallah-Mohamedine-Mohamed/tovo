@@ -29,6 +29,7 @@ import { aiguiller, cascadeActive } from '../ai/cascade.js';
 import { rechercheProduitRapide } from '../ai/orchestrator.js';
 import { cataloguePage, HORS_TOVO_NON, HORS_TOVO_OUI, reponseHorsTovo, type CataloguePage } from '../services/catalogue.js';
 import { demandeDeGarde, reponseGarde } from '../services/pharmaciesGarde.js';
+import { rediger } from '../ai/redacteur.js';
 import { serviceClient } from '../services/supabase.js';
 import { orderTracking, type Component } from '../components/builders.js';
 
@@ -492,6 +493,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       const resultat = await reponseGarde(body.data.context ?? null, HORS_TOVO_OUI);
       emit({ type: 'conversation', conversation_id: conversationId });
       emit({ type: 'results', components: resultat.components });
+      resultat.content = await rediger({ message: body.data.text, prevue: resultat.content, faits: resultat.summary, composants: resultat.components });
       emit({ type: 'text', text: resultat.content });
       await db.from('messages').insert({
         conversation_id: conversationId, role: 'user', content: body.data.text,
@@ -555,6 +557,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       ?? (body.data.interaction ? libelleLisible(body.data.interaction.action, body.data.interaction.payload) : null)
       ?? message;
     let intention: Intention | 'modele' | undefined = choisie?.intention;
+    // Le rédacteur (ai/redacteur.ts) : chaque réponse directe à un message du
+    // client est mise en mots par une IA, à partir de ce qu'il a VRAIMENT dit.
+    // Les cartes partent d'abord ; la phrase suit.
+    const enMots = (prevue: string, faits: unknown, composants: Component[]) => (texteClient
+      ? rediger({ message: texteClient, prevue, faits, composants })
+      : Promise.resolve(prevue));
     let pageInitiale: CataloguePage | undefined;
 
     // Produit trouvé exactement : la route est évidente, Jev n'est pas attendu.
@@ -607,6 +615,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // devinée fait déplacer un livreur ou annule une commande.
         emit({ type: 'conversation', conversation_id: conversationId });
         emit({ type: 'results', components: route.components });
+        route.contenu = await enMots(route.contenu, null, route.components);
         emit({ type: 'text', text: route.contenu });
         await db.from('messages').insert({
           conversation_id: conversationId,
@@ -644,6 +653,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
       emit({ type: 'conversation', conversation_id: conversationId });
       emit({ type: 'results', components: resultat.components });
+      resultat.content = await enMots(resultat.content, null, resultat.components);
       emit({ type: 'text', text: resultat.content });
 
       await db.from('messages').insert({
@@ -704,12 +714,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       }
       // La carte prend la position d'elle-même : plus de « Touchez Ma
       // position », qui restait affiché même une fois le livreur demandé.
-      const contenu = recuperation
+      const prevue = recuperation
         ? 'Un livreur va le chercher et vous l’apporte. Il vous appelle pour les détails.'
         : 'Un livreur vient chez vous et vous appelle pour les détails.';
 
       emit({ type: 'conversation', conversation_id: conversationId });
       emit({ type: 'results', components: resultat.components });
+      const contenu = await enMots(prevue, resultat.summary, resultat.components);
       emit({ type: 'text', text: contenu });
 
       await db.from('messages').insert({
@@ -736,9 +747,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // « Non, la garder », sans passer par le modèle. Rien n'est annulé ici.
     if (intention === 'annuler') {
       const resultat = await EXECUTORS['annuler_commande']!({}, { db, userId, currentMessage: texteClient });
-      const contenu = resultat.content ?? 'Voulez-vous vraiment annuler cette commande ?';
       emit({ type: 'conversation', conversation_id: conversationId });
       emit({ type: 'results', components: resultat.components });
+      const contenu = await enMots(resultat.content ?? 'Voulez-vous vraiment annuler cette commande ?', resultat.summary, resultat.components);
       emit({ type: 'text', text: contenu });
       await db.from('messages').insert({
         conversation_id: conversationId,
@@ -770,11 +781,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       if (erreurSignalement) {
         request.log.error({ erreur: erreurSignalement.message }, 'signalement impossible (migration 0067 appliquée ?)');
       }
-      const contenu = erreurSignalement
+      const prevue = erreurSignalement
         ? 'Désolé pour ce souci. Je n’arrive pas à le transmettre pour le moment : réessayez dans un instant.'
         : `Désolé pour ce souci. Je l’ai transmis à l’équipe Tovo, qui va s’en occuper.${orderId ? ' Voici la commande concernée.' : ''}`;
       emit({ type: 'conversation', conversation_id: conversationId });
       emit({ type: 'results', components: composants });
+      const contenu = await enMots(prevue, { signale: !erreurSignalement, commande_concernee: Boolean(orderId) }, composants);
       emit({ type: 'text', text: contenu });
       await db.from('messages').insert({
         conversation_id: conversationId, role: 'user', content: contenuClient, client_message_id: body.data.client_message_id,
@@ -791,9 +803,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       const resultat = await EXECUTORS['voir_panier']!({}, {
         db, userId, currentMessage: texteClient, ...(body.data.context ? { position: body.data.context } : {}),
       });
-      const contenu = resultat.components.length > 0 ? 'Voici votre panier.' : 'Votre panier est vide pour le moment.';
       emit({ type: 'conversation', conversation_id: conversationId });
       emit({ type: 'results', components: resultat.components });
+      const contenu = await enMots(resultat.components.length > 0 ? 'Voici votre panier.' : 'Votre panier est vide pour le moment.', resultat.summary, resultat.components);
       emit({ type: 'text', text: contenu });
       await db.from('messages').insert({
         conversation_id: conversationId, role: 'user', content: contenuClient, client_message_id: body.data.client_message_id,
@@ -821,11 +833,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           position: body.data.context,
         },
       );
-      const contenu =
-        'Avec plaisir. Voici les **restaurants** disponibles — choisissez celui qui vous fait envie.';
-
       emit({ type: 'conversation', conversation_id: conversationId });
       emit({ type: 'results', components: resultat.components });
+      const contenu = await enMots(
+        'Avec plaisir. Voici les **restaurants** disponibles — choisissez celui qui vous fait envie.',
+        resultat.summary, resultat.components);
       emit({ type: 'text', text: contenu });
 
       await db.from('messages').insert({

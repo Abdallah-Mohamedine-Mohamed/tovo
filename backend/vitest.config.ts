@@ -37,6 +37,10 @@ if (!process.env.NITA_LIVE_TEST) {
   }
 }
 
+// Le rédacteur (ai/redacteur.ts) appellerait Gemini à chaque réponse rapide :
+// les tests vérifient la phrase prévue, sans réseau. `REDACTEUR=1` le rétablit.
+process.env.REDACTEUR ??= '0';
+
 export default defineConfig({
   test: {
     environment: 'node',

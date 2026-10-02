@@ -500,9 +500,25 @@ const commenceParDeterminant = (article: string) =>
  * Un commerce de l'annuaire public qui serait en fait sur Tovo ne doit jamais
  * être présenté « hors Tovo ».
  */
+// La comparaison tolérante aux fautes coûte cher (466 commerces × toutes les
+// enseignes : 10 s, mesuré le 02/10) : elle n'est faite que sur les quelques
+// commerces retenus, et son résultat est gardé tant que la liste des
+// enseignes ne change pas.
+let surTovoEnMemoire: { enseignes: unknown; resultats: Map<string, boolean> } | null = null;
+
 async function estSurTovo(db: SupabaseClient): Promise<(c: Commerce) => boolean> {
-  const variantes = avecVariantes(await enseignesApprouvees(db));
-  return (c) => boutiquesCorrespondantes(c.nom, variantes).length > 0;
+  const enseignes = await enseignesApprouvees(db);
+  if (surTovoEnMemoire?.enseignes !== enseignes) surTovoEnMemoire = { enseignes, resultats: new Map() };
+  const { resultats } = surTovoEnMemoire;
+  const variantes = avecVariantes(enseignes);
+  return (c) => {
+    let sur = resultats.get(c.id);
+    if (sur === undefined) {
+      sur = boutiquesCorrespondantes(c.nom, variantes).length > 0;
+      resultats.set(c.id, sur);
+    }
+    return sur;
+  };
 }
 
 /**
@@ -522,52 +538,121 @@ function commerceConnu(commerces: Commerce[], article: string, note?: string): C
     summary: {
       boutique_hors_tovo: c.nom,
       article: article || null,
-      consigne: 'La carte suffit : le client choisit « Envoyer un livreur » ou appelle. Ne pose aucune question.',
+      commerces_hors_tovo: commerces.map((x) => ({
+        nom: x.nom, ou: [x.adresse, x.quartier].filter(Boolean).join(', ') || null, telephone_du_commerce: x.telephone,
+      })),
+      consigne: 'Ce commerce n’est pas sur Tovo : dis où il est. Un livreur peut y aller (il avance l’achat, '
+        + 'le client le rembourse à la livraison avec la course). Le numéro affiché est celui DU COMMERCE, '
+        + 'jamais celui de Tovo. La carte affiche les boutons : ne pose aucune question.',
     },
     components: [carteCommerces(commerces, achat, HORS_TOVO_OUI, null, note)],
   };
 }
 
+/** « 600 m », « 6,3 km ». */
+const distanceLisible = (m: number) => (m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1).replace('.', ',')} km`);
+const metresEntre = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) =>
+  Math.hypot((a.lat - b.lat) * 111_000, (a.lng - b.lng) * 108_000);
+
 /**
- * Un produit que Tovo n'a pas (« de la pommade Nivea ») : les commerces du
- * bon type les plus proches, d'après l'annuaire public (maquette validée le
- * 01/10, cas 1). Rien si l'on ne sait pas quel commerce en vend.
+ * Un produit que Tovo n'a pas (« des merguez », « de la pommade ») : les
+ * commerces du bon type les plus proches, d'après l'annuaire public
+ * (maquette validée le 01/10, cas 1). Rien si l'on ne sait pas quel commerce
+ * en vend.
+ *
+ * C'est l'ASSISTANT qui rédige la réponse (02/10) : il reçoit dans le résumé
+ * les commerces, leur type, leur distance et la règle du livreur. La phrase
+ * toute faite (« Tovo ne propose pas encore de bien manger des merguez »)
+ * recopiait mal les mots du client. `content` n'est plus qu'un secours
+ * neutre, qui ne les recopie jamais.
+ *
+ * @param texte   la demande (et la requête de l'assistant) : sert à choisir le type de commerce
+ * @param produit ce que l'assistant a compris (« merguez »), pour la consigne du livreur
  */
 export async function alternativesHorsTovo(
   db: SupabaseClient,
-  message: string,
+  texte: string,
   position?: { lat: number; lng: number } | null,
+  produit?: string,
 ): Promise<CatalogueAnswer | null> {
-  const article = articleAvantEnseigne(message);
-  if (!article) return null;
-  const commerces = commercesPourProduit(article, position, await estSurTovo(db));
+  const commerces = commercesPourProduit(texte, position, await estSurTovo(db));
   if (commerces.length === 0) return null;
-  const produit = sansDeterminant(article);
+  const quoi = (produit ?? '').trim();
   // La nuit ou le dimanche, un médicament : seules les pharmacies de garde
   // sont ouvertes — ce sont elles qu'on montre.
   if (commerces.every((c) => c.type === 'pharmacie') && heuresDeGarde()) {
     const garde = await reponseGarde(position, HORS_TOVO_OUI, 3);
     if (garde.components.length > 0) {
-      return { ...garde, content: `À cette heure, seules les pharmacies de garde sont ouvertes. ${garde.content}` };
+      return {
+        ...garde,
+        content: `À cette heure, seules les pharmacies de garde sont ouvertes. ${garde.content}`,
+        summary: { ...garde.summary, consigne: 'Dis en une phrase qu’à cette heure seules les pharmacies de garde sont ouvertes, et que la carte montre les plus proches. Ne donne aucun conseil médical.' },
+      };
     }
   }
-  const de = /^[aeiouyhàâéèêîôû]/i.test(produit) ? 'd’' : 'de ';
-  const ou = commerces.length === 1 ? 'dans ce commerce' : `dans ces ${libelleDes(commerces)}`;
-  // Pharmacie : Tovo ne connaît pas leur stock, et un médicament peut exiger
-  // une ordonnance — on le dit, sans rien conseiller.
-  const pharmacie = commerces.some((c) => c.type === 'pharmacie')
-    ? ' Appelez pour vérifier qu’elles l’ont. Pour un médicament sur ordonnance, le livreur aura besoin de votre ordonnance.'
-    : '';
+  const distances = position ? commerces.map((c) => metresEntre(position, c)) : [];
+  const proche = distances.length > 0 && Math.min(...distances) < 2000;
+  // Un médicament (toutes des pharmacies) : appeler, et l'ordonnance. Pas pour une pommade.
+  const pharmacie = commerces.every((c) => c.type === 'pharmacie');
   return {
-    content: `Tovo ne propose pas encore ${de}**${produit}**. Vous en trouverez probablement ${ou}, `
-      + `${position ? 'près de vous' : 'à Niamey'} :${pharmacie}`,
+    // Secours, si l'assistant ne rédige rien : neutre, sans les mots du client.
+    content: `Tovo ne le propose pas encore, mais ${commerces.length === 1 ? 'ce commerce en a' : `ces ${libelleDes(commerces)} en ont`} probablement`
+      + `${proche ? ', près de vous' : ''} :`
+      + (pharmacie ? ' appelez pour vérifier qu’elles l’ont. Pour un médicament sur ordonnance, le livreur aura besoin de votre ordonnance.' : ''),
     summary: {
-      produit_hors_tovo: produit,
-      commerces_proposes: commerces.map((c) => c.nom),
-      consigne: 'La carte suffit : le client choisit « Envoyer un livreur » ou appelle. Ne pose aucune question.',
+      produit_hors_tovo: quoi || null,
+      commerces_hors_tovo: commerces.map((c, i) => ({
+        nom: c.nom,
+        type: c.type,
+        ou: [c.adresse, c.quartier].filter(Boolean).join(', ') || null,
+        distance: position ? distanceLisible(distances[i]!) : null,
+        telephone: c.telephone,
+      })),
+      consigne: 'Tovo n’a pas ce produit. Réponds en une ou deux phrases naturelles, en nommant ce que le client cherche '
+        + 'avec tes propres mots (jamais sa phrase recopiée) : ces commerces hors Tovo en ont probablement ; '
+        + 'donne le nom du plus proche et sa distance exacte ci-dessus (« près de vous » seulement sous 2 km). '
+        + 'Un livreur peut y aller : il avance l’achat, le client le rembourse à la livraison avec la course. '
+        + (pharmacie ? 'Pharmacie : invite à appeler pour vérifier qu’elles l’ont, rappelle qu’un médicament sur ordonnance exige l’ordonnance, aucun conseil médical. ' : '')
+        + 'La carte affiche les boutons « Envoyer un livreur » et le numéro : ne pose aucune question.',
     },
-    components: [carteCommerces(commerces, `Acheter ${article}`, HORS_TOVO_OUI, position)],
+    components: [carteCommerces(commerces, quoi ? `Acheter : ${quoi}` : 'Faire les achats du client', HORS_TOVO_OUI, position)],
   };
+}
+
+/**
+ * Tovo n'a rien trouvé : où le trouver ailleurs (02/10). Une seule règle,
+ * quelle que soit la phrase du client :
+ *  1. un nom que notre annuaire connaît (« Haddad Khalil », « Marina
+ *     market ») : où est ce commerce, son numéro, un livreur ;
+ *  2. une boutique (le cerveau l'a compris, ou l'assistant l'a nommée) :
+ *     Google, s'il la connaît ;
+ *  3. un produit : les commerces du bon type les plus proches.
+ * La phrase du code n'est qu'une base : le rédacteur la réécrit.
+ */
+export async function horsTovo(
+  db: SupabaseClient,
+  message: string,
+  requete: string,
+  position: { lat: number; lng: number } | null | undefined,
+  options: { boutique?: boolean } = {},
+): Promise<CatalogueAnswer | null> {
+  const nom = requete.trim();
+  if (nom) {
+    const connus = commercesNommes(normaliserIntention(nom), await estSurTovo(db));
+    if (connus.length > 0) {
+      noterBoutiqueDemandee(connus[0]!.nom, '', 'annuaire');
+      return commerceConnu(connus, '');
+    }
+    if (options.boutique) {
+      const google = await trouverSurGoogle(nom);
+      if (google.length > 0) {
+        noterBoutiqueDemandee(nom, '', 'google', google[0]!.place_id);
+        return commerceConnu(google, '', NOTE_GOOGLE);
+      }
+      noterBoutiqueDemandee(nom, '', 'inconnue');
+    }
+  }
+  return alternativesHorsTovo(db, message || nom, position, nom || undefined);
 }
 
 async function enseigneHorsTovo(db: SupabaseClient, intent: CatalogueIntent & { missing: string }): Promise<CatalogueAnswer> {

@@ -70,6 +70,12 @@ const schema = z.object({
   // Les tâches mécaniques (transcription et mots-clés d'une photo) ne
   // doivent pas payer la latence du modèle conversationnel principal.
   GEMINI_FAST_MODEL: z.string().default('gemini-3.5-flash-lite'),
+  // Le rédacteur (ai/redacteur.ts) : il écrit la phrase de chaque réponse
+  // rapide, à partir du message du client. Le modèle du cerveau, sans
+  // réflexion : rapide et peu cher.
+  REDACTEUR_MODELE: z.string().default('gemini-3.1-flash-lite'),
+  // « 0 » : les phrases prévues, telles quelles (tests, ou panne prolongée).
+  REDACTEUR: z.enum(['0', '1']).default('1'),
 
   // Jev (TypeSafe) via OpenRouter, en mode ombre : consulté en arrière-plan
   // sur chaque message, sa décision est JOURNALISÉE mais jamais utilisée.

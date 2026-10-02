@@ -138,10 +138,10 @@ export function commercesPourProduit(
   const mots = new Set(n.split(' '));
   // Ceux dont c'est la réputation (« le vendeur de merguez de la place
   // Toumo ») passent devant, où qu'ils soient dans la ville.
-  const reputes = chargerCommerces().filter((c) => !exclure(c)
-    && (c.specialites ?? []).some((s) => mots.has(normaliserIntention(s)) || mots.has(`${normaliserIntention(s)}s`)));
+  const reputes = chargerCommerces().filter((c) =>
+    (c.specialites ?? []).some((s) => mots.has(normaliserIntention(s)) || mots.has(`${normaliserIntention(s)}s`)));
   const types = typesPourProduit(texte);
-  const candidats = chargerCommerces().filter((c) => types.includes(c.type) && !exclure(c) && !reputes.includes(c));
+  const candidats = chargerCommerces().filter((c) => types.includes(c.type) && !reputes.includes(c));
   const proches = position
     ? candidats
       .map((c) => ({ c, d: metres(position, c) }))
@@ -149,7 +149,14 @@ export function commercesPourProduit(
       .sort((a, b) => a.d - b.d)
       .map(({ c }) => c)
     : candidats.sort((a, b) => b.fiabilite - a.fiabilite);
-  return [...reputes, ...proches].slice(0, combien);
+  // `exclure` (« est-il en fait sur Tovo ? ») coûte cher : seulement sur les
+  // premiers, jusqu'à en avoir assez.
+  const retenus: Commerce[] = [];
+  for (const c of [...reputes, ...proches]) {
+    if (retenus.length >= combien) break;
+    if (!exclure(c)) retenus.push(c);
+  }
+  return retenus;
 }
 
 /** « supermarchés » si tous sont du même type, sinon « commerces ». */

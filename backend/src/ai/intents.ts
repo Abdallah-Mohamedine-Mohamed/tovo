@@ -43,7 +43,9 @@ export function requeteProduitUtilisateur(texte: string): string {
     .split(' ')
     .filter(Boolean)
     .filter((mot) => !MOTS_RECHERCHE_VIDES.has(mot))
-    .filter((mot) => !['envie', 'dans', 'votre', 'comme', 'commander'].includes(mot));
+    // « bien », « besoin » : « je voudrais bien manger des merguez » cherchait
+    // « bien merguez » (02/10).
+    .filter((mot) => !['envie', 'dans', 'votre', 'comme', 'commander', 'bien', 'besoin', 'stp', 'svp'].includes(mot));
   // Sans doublons : à l'oral on répète (« garbador… garbador »), et le mot
   // répété s'affichait deux fois en titre.
   return [...new Set(mots)].join(' ');
@@ -199,8 +201,13 @@ export function demandeDeProximite(texte: string): boolean {
 
 export function demandeBoutiqueOuverte(texte: string): boolean {
   const normalise = normaliserIntention(texte);
+  // « Ouvert » doit être dit. « Quels sont tous les commerces hors de Tovo
+  // actuellement ? » partait en « Voici les boutiques ouvertes » (02/10) :
+  // « actuellement » seul ne parle pas d'ouverture. Et une question sur ce
+  // qui n'est PAS sur Tovo n'est jamais une liste de boutiques Tovo.
   return /\b(boutique|boutiques|enseigne|enseignes|commerce|commerces|restaurant|restaurants|resto|restos)\b/.test(normalise)
-    && /\b(ouvert|ouverte|ouverts|ouvertes|presentement|maintenant|actuellement)\b/.test(normalise);
+    && /\b(ouvert|ouverte|ouverts|ouvertes)\b/.test(normalise)
+    && !/\b(hors|pas sur tovo|ne sont pas)\b/.test(normalise);
 }
 
 export function nomBoutiqueApresMarqueur(texte: string): string | null {

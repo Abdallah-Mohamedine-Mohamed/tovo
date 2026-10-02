@@ -4,7 +4,7 @@ import { SYSTEM_PROMPT, contexteUtilisateur } from './systemPrompt.js';
 import { EXECUTORS, TOOL_DEFINITIONS, type ToolContext } from './tools.js';
 import { collectIds, sanitizeToolResult, validateComponents } from './validate.js';
 import { envelope, merchantCard, type ChatEnvelope, type Component } from '../components/builders.js';
-import { alternativesHorsTovo, cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type CataloguePage, type PendingMerchantChoice } from '../services/catalogue.js';
+import { cataloguePage, horsTovo, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type CataloguePage, type PendingMerchantChoice } from '../services/catalogue.js';
 import {
   demandeBoutiqueOuverte,
   demandeDeCommandePassee,
@@ -18,6 +18,7 @@ import { resumeAffichage } from './memoire.js';
 import type { Intention } from './jev.js';
 import { avecOuvertureReelle } from '../services/ouverture.js';
 import { Faits, FluxVerifie, verifierTexte, type Verification } from './verificateur.js';
+import { rediger } from './redacteur.js';
 
 /**
  * Boucle d'orchestration.
@@ -183,6 +184,14 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     // (« le premier ») reste résolu sans modèle, comme plus haut.
     || (!catalogueAutorise && !(input.intention === 'designe' && previous.pending));
 
+  // Le rédacteur (ai/redacteur.ts) : toute réponse rapide est mise en mots
+  // par une IA, à partir du message EXACT du client. Les cartes partent
+  // d'abord ; la phrase suit, ~0,5–1 s plus tard.
+  const dernierDeTovo = [...previous.history].reverse().find((t) => t.role === 'model')?.content ?? null;
+  const enMots = (prevue: string, faits: unknown, composants: Component[]) => (input.audio
+    ? Promise.resolve(prevue)
+    : rediger({ message: input.messagePublic ?? input.message, prevue, faits, composants, avant: dernierDeTovo }));
+
   const photoRecente = previous.history.slice(-4).some((turn) =>
     turn.role === 'user' && /photo envoyee/i.test(normaliserIntention(turn.content)));
   const correctionPhoto = !versModele && photoRecente
@@ -200,9 +209,10 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
       ? `Vous avez raison, j’ai mal interprété la photo. Voici des ${requeteInitiale} correspondant au catalogue.`
       : `Vous avez raison, j’ai mal interprété la photo. Je ne trouve pas de ${requeteInitiale} correspondant dans le catalogue actuellement.`;
     input.onEvent?.({ type: 'results', components: answer.components });
-    input.onEvent?.({ type: 'text', text: content });
-    const messageId = await persister(input, content, answer.components);
-    return { ...envelope(content, answer.components), messageId, rejected: [],
+    const phrase = await enMots(content, answer.summary, answer.components);
+    input.onEvent?.({ type: 'text', text: phrase });
+    const messageId = await persister(input, phrase, answer.components);
+    return { ...envelope(phrase, answer.components), messageId, rejected: [],
       usage: { input: 0, output: 0, cached: 0, cycles: 0 } };
   }
 
@@ -216,9 +226,10 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     && (pageInitiale.total > 0 || pageInitiale.category_id)) {
     const direct = searchAnswer(pageInitiale, { q: requeteInitiale, limit: 8 });
     input.onEvent?.({ type: 'results', components: direct.components });
-    input.onEvent?.({ type: 'text', text: direct.content });
-    const messageId = await persister(input, direct.content, direct.components);
-    return { ...envelope(direct.content, direct.components), messageId, rejected: [],
+    const phrase = await enMots(direct.content, direct.summary, direct.components);
+    input.onEvent?.({ type: 'text', text: phrase });
+    const messageId = await persister(input, phrase, direct.components);
+    return { ...envelope(phrase, direct.components), messageId, rejected: [],
       usage: { input: 0, output: 0, cached: 0, cycles: 0 } };
   }
 
@@ -243,9 +254,14 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     const page = pageInitiale && intent.merchants.length === 0 && requeteClient === requeteInitiale
       ? pageInitiale
       : await cataloguePage(input.db, filter, selectedBranch ? true : false);
-    // Tovo ne l'a pas : où le trouver ailleurs à Niamey (services/commerces.ts).
-    if (page.total === 0 && !page.category_id && intent.merchants.length === 0) {
-      direct = await alternativesHorsTovo(input.db, input.message, input.position);
+    // Tovo n'a rien : où le trouver ailleurs (un commerce nommé, Google si le
+    // cerveau a compris « boutique », ou les commerces du bon type). La phrase
+    // est ensuite réécrite par le rédacteur.
+    // Des ressemblances seulement (« pomme » pour « pommade ») : un commerce
+    // qui vend vraiment le produit demandé passe devant.
+    if ((page.total === 0 || page.match_type === 'similar') && !page.category_id && intent.merchants.length === 0) {
+      direct = await horsTovo(input.db, input.message, requeteClient || intent.query, input.position,
+        { boutique: input.intention === 'boutique' });
     }
     if (!direct && (page.total > 0 || page.category_id || selectedBranch || keyword)) {
       direct = searchAnswer(page, filter);
@@ -276,9 +292,10 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   }
   if (direct) {
     input.onEvent?.({ type: 'results', components: direct.components });
-    input.onEvent?.({ type: 'text', text: direct.content });
-    const messageId = await persister(input, direct.content, direct.components);
-    return { ...envelope(direct.content, direct.components), messageId, rejected: [],
+    const phrase = await enMots(direct.content, direct.summary, direct.components);
+    input.onEvent?.({ type: 'text', text: phrase });
+    const messageId = await persister(input, phrase, direct.components);
+    return { ...envelope(phrase, direct.components), messageId, rejected: [],
       usage: { input: 0, output: 0, cached: 0, cycles: 0 } };
   }
   const client = llmClient();
@@ -332,6 +349,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   cyclesOrchestration: for (; cycles < MAX_CYCLES; cycles++) {
     const dernierCycle = cycles === MAX_CYCLES - 1;
     let reponseOutil: string | undefined;
+    let resumeOutil: unknown;
     input.onEvent?.({ type: 'text_start' });
 
     // Au fil de l'eau, mais phrase par phrase : une phrase ne s'affiche que
@@ -379,7 +397,10 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
 
       try {
         const resultat = await executeur(appel.args, ctx);
-        if (resultat.content?.trim()) reponseOutil = resultat.content.trim();
+        if (resultat.content?.trim()) {
+          reponseOutil = resultat.content.trim();
+          resumeOutil = resultat.summary;
+        }
         faits.ajouter(resultat.summary);
         faits.ajouter(resultat.content);
         for (const composant of resultat.components) faits.ajouter(composant.data);
@@ -421,11 +442,12 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     const verified = validateComponents(composantsDuTour, idsAutorises);
     input.onEvent?.({ type: 'results', components: verified.components });
 
-    // Les outils de catalogue produisent déjà un texte court, fondé sur les
-    // données réellement trouvées. Un deuxième appel Gemini servant seulement
-    // à dire « voici les résultats » doublait presque le temps de réponse.
+    // Les outils de catalogue produisent déjà une base de phrase, fondée sur
+    // les données réellement trouvées. Un deuxième appel de l'assistant
+    // doublait presque le temps de réponse ; le rédacteur (Flash-Lite, ~0,5 s)
+    // la met en mots à partir du message du client — jamais telle quelle.
     if (reponseOutil && reponse.toolCalls.length === 1) {
-      texteFinal = reponseOutil;
+      texteFinal = await enMots(reponseOutil, resumeOutil, verified.components);
       input.onEvent?.({ type: 'text', text: texteFinal });
       break cyclesOrchestration;
     }

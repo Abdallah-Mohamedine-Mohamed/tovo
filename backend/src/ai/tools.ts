@@ -16,7 +16,7 @@ import {
 } from '../components/builders.js';
 import { embed, embedImage } from '../services/embeddings.js';
 import { serviceClient } from '../services/supabase.js';
-import { alternativesHorsTovo, cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, merchantMenu, type CatalogueIntent } from '../services/catalogue.js';
+import { horsTovo, cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, merchantMenu, type CatalogueIntent } from '../services/catalogue.js';
 import { decrireImageDepuisOctets } from '../services/vision.js';
 import { offreVille } from '../services/livreur.js';
 import { paiementMobileActif } from '../config/env.js';
@@ -331,7 +331,12 @@ const rechercherProduits: Executor = async (args, ctx) => {
   const requeteModele = texte(args, 'requete');
   if (!requeteModele) return vide;
   const boutique = texte(args, 'boutique');
-  const intent = await catalogueDuContexte(ctx, boutique ? `${requeteModele} chez ${boutique}` : requeteModele);
+  let intent = await catalogueDuContexte(ctx, boutique ? `${requeteModele} chez ${boutique}` : requeteModele);
+  // L'assistant a nommé une boutique que la phrase du client ne marquait pas
+  // (« Marina market », sans « chez ») : on la cherche telle qu'il l'a nommée.
+  if (boutique && intent.merchants.length === 0 && !intent.missing) {
+    intent = await resolveCatalogueIntent(ctx.db, `chez ${boutique}`);
+  }
   const menu = await merchantIntentAnswer(ctx.db, intent);
   if (menu) return menu;
   // Le modèle choisit l'outil, pas les mots recherchés. Quand le client a
@@ -353,8 +358,12 @@ const rechercherProduits: Executor = async (args, ctx) => {
   };
   const page = await cataloguePage(ctx.db, filter);
   // Tovo ne l'a pas : où le trouver ailleurs à Niamey (services/commerces.ts).
-  if (page.total === 0 && !page.category_id && !intent.merchants.length) {
-    const ailleurs = await alternativesHorsTovo(ctx.db, ctx.currentMessage || requeteModele, ctx.position);
+  // Rien, ou des ressemblances seulement (« pomme » pour « pommade ») : un
+  // commerce qui vend vraiment le produit demandé passe devant.
+  if ((page.total === 0 || page.match_type === 'similar') && !page.category_id && !intent.merchants.length) {
+    // Les mots du CLIENT, pas ceux de l'assistant : il lui arrive d'inventer
+    // sa requête (« lait corps crème beurre karité » pour « de la pommade »).
+    const ailleurs = await horsTovo(ctx.db, ctx.currentMessage || requeteModele, requete, ctx.position);
     if (ailleurs) return ailleurs;
   }
   const result = searchAnswer(page, filter);
