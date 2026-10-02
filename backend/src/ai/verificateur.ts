@@ -25,6 +25,8 @@ export class Faits {
    * « commande » (une commande ou une course existe).
    */
   private readonly actions = new Set<'gardee' | 'commande' | 'annulee'>();
+  /** Les numéros de téléphone que les données OU le client ont donnés (article 13). */
+  private readonly telephones = new Set<string>();
 
   /** Ajoute tout ce que contient une valeur (résumé d'outil, composant, texte). */
   ajouter(valeur: unknown, profondeur = 0): void {
@@ -37,6 +39,7 @@ export class Faits {
       const propre = normaliserIntention(valeur);
       if (propre) this.textes.push(propre);
       for (const n of nombresDans(valeur)) this.nombres.add(n);
+      for (const t of telephonesDans(valeur)) this.telephones.add(t);
       return;
     }
     if (Array.isArray(valeur)) {
@@ -65,6 +68,12 @@ export class Faits {
   ajouterParole(texte: string | null | undefined): void {
     const propre = texte ? normaliserIntention(texte) : '';
     if (propre) this.textes.push(propre);
+    // Son propre numéro, ou celui qu'il donne, peut être repris (article 13).
+    for (const t of telephonesDans(texte ?? '')) this.telephones.add(t);
+  }
+
+  connaitTelephone(chiffres: string): boolean {
+    return this.telephones.has(chiffres);
   }
 
   connaitNombre(n: number): boolean {
@@ -97,7 +106,7 @@ const DUREE = /(\d+)\s*(?:min\b|mins\b|minutes?\b|heures?\b|h\b)/gi;
 const GRAS = /\*\*([^*]{2,80})\*\*/g;
 
 export interface Affirmation {
-  genre: 'montant' | 'duree' | 'nom' | 'action';
+  genre: 'montant' | 'duree' | 'nom' | 'action' | 'sante' | 'ton' | 'donnees';
   valeur: string;
 }
 
@@ -109,6 +118,30 @@ export interface Affirmation {
  * tout toucher.
  */
 const DIT_GARDE = /\b(?:c.est (?:bien )?(?:not[ée]|gard[ée]|enregistr[ée]|transmis)|(?:bien )?not[ée]e?(?![\wà-ÿ])|j.ai (?:bien )?(?:not[ée]|gard[ée]|enregistr[ée]|transmis|signal[ée])|je l.ai (?:not[ée]|transmis|signal[ée])|(?:est|a été|sont|ont été) (?:not[ée]e?s?|transmise?s?|enregistr[ée]e?s?|signal[ée]e?s?))/i;
+/**
+ * ARTICLE 12 — la santé n'est pas notre métier : une dose, une posologie, un
+ * médicament conseillé ne sortent jamais, quelles que soient les données.
+ */
+const DOSE = /\b(?:posologie|\d+(?:[.,]\d+)?\s?mg\b|(?:comprim[ée]s?|g[ée]lules?|cuill[èe]res?|doses?|sachets?) (?:par|chaque|toutes les) (?:jour|heure|repas|\d)|\d+\s?fois par jour|toutes les \d+\s?h(?:eures?)?\b)/i;
+// Un conseil n'est médical que s'il porte sur un médicament : « je vous
+// recommande le tacos » reste permis.
+const CONSEILLER = /\b(?:je vous (?:conseille|recommande)|prenez|il faut prendre)\b/i;
+const MEDICAMENT = /\b(?:m[ée]dicaments?|comprim[ée]s?|sirops?|g[ée]lules?|parac[ée]tamol|doliprane|efferalgan|ibuprof[èe]ne|aspirine|antibiotiques?|antipalud\w*|coartem|quinine)\b/i;
+const CONSEIL_MEDICAL = {
+  test: (p: string) => DOSE.test(p) || (CONSEILLER.test(p) && MEDICAMENT.test(p)),
+  match: (p: string) => p.match(DOSE) ?? p.match(CONSEILLER),
+};
+/**
+ * ARTICLE 14 — on vouvoie toujours, même si le client tutoie (vu le 02/10 :
+ * « si tu as besoin d'autre chose »).
+ */
+const TUTOIEMENT = /(?:^|[\s,;:(«"'’])(?:tu|toi|ton|tes|te|t['’])(?=[\s,.!?;:)»"]|$)/i;
+/** Un numéro de téléphone du Niger : 8 chiffres, avec ou sans +227. */
+const TELEPHONE = /(?:\+?227[\s.]?)?\b\d{2}(?:[\s.]?\d{2}){3}\b/g;
+function telephonesDans(texte: string): string[] {
+  return [...texte.matchAll(TELEPHONE)].map((m) => m[0].replace(/\D/g, '').replace(/^227/, ''));
+}
+
 const DIT_ANNULE = /\b(?:c.est (?:bien )?annul[ée]|j.ai (?:bien )?annul[ée]|(?:est|a été) annul[ée]e?)/i;
 const DIT_EN_ROUTE = /\b(?:(?:est|sont) en route|se rend\b|se rendra\b|se dirige|vous rejoint|est parti|arrive (?:chez|à) vous|vient chez vous)/i;
 
@@ -124,6 +157,11 @@ export function affirmationsInventees(phrase: string, faits: Faits): Affirmation
   if (DIT_GARDE.test(phrase) && !faits.confirme('gardee')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_GARDE)![0] });
   if (DIT_EN_ROUTE.test(phrase) && !faits.confirme('commande')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_EN_ROUTE)![0] });
   if (DIT_ANNULE.test(phrase) && !faits.confirme('annulee')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_ANNULE)![0] });
+  if (CONSEIL_MEDICAL.test(phrase)) inventees.push({ genre: 'sante', valeur: CONSEIL_MEDICAL.match(phrase)?.[0] ?? phrase });
+  if (TUTOIEMENT.test(phrase)) inventees.push({ genre: 'ton', valeur: phrase.match(TUTOIEMENT)![0].trim() });
+  for (const t of telephonesDans(phrase)) {
+    if (!faits.connaitTelephone(t)) inventees.push({ genre: 'donnees', valeur: t });
+  }
   for (const m of phrase.matchAll(GRAS)) {
     const contenu = m[1]!.trim();
     const nombres = nombresDans(contenu);

@@ -31,6 +31,19 @@ Deux règles d'écriture :
 | 8 | **Ce que Tovo n'a pas : dire où le trouver** ; le livreur appelle le client et ne promet jamais d'avance. | `catalogue.ts` : `horsTovo`, `alternativesHorsTovo`, `commerceConnu`. L'examen vérifie qu'aucune avance n'est promise. |
 | 9 | **Ce que le client a dit est gardé.** | Le cerveau extrait les `details` : départ, arrivée, téléphone, précision. La carte de course est remplie avec eux (`argumentsDeCourse`). Une précision est rangée dans la note de commande (`notes_commande`, migration 0075, `noteCommande.ts`), visible et modifiable au panier, et part avec la commande. |
 | 10 | **Une seule chose à la fois, clairement.** | Le rédacteur : une ou deux phrases ; `sansPromesseVide`. Dans l'application, un seul accès à « la suite » des produits. |
+| 11 | **Dans le doute, demander plutôt que deviner.** | `aiguillage.ts`, `routeDuCerveau` : une action coûteuse dont le cerveau n'est pas sûr donne des tuiles de choix. Une décision sans « sûr » est incertaine (`lireDecision`). *Limite : pour une recherche, on devine encore, ce qui ne coûte rien à corriger.* |
+| 12 | **La santé n'est pas notre métier.** | Le vérificateur (`CONSEIL_MEDICAL`) retire toute dose, toute posologie et tout médicament conseillé. Un médicament mène vers les pharmacies (de garde la nuit). |
+| 13 | **Les données d'un client ne regardent que lui.** | La RLS de la base : chaque client ne lit que ses propres données. Le vérificateur retire tout numéro de téléphone qui ne vient ni des données de Tovo ni du client lui-même (`telephonesDans`, `connaitTelephone`). |
+| 14 | **Le respect, dans la langue du client.** | Le vérificateur retire toute phrase qui tutoie (`TUTOIEMENT`). L'examen le vérifie sur **chaque** réponse. *Limite : la qualité de la compréhension du haoussa et du zarma reste celle du modèle.* |
+| 15 | **Savoir passer la main.** | Le cerveau classe « parler à une personne » et les échecs répétés en `aide`. La route `aide` transmet réellement à l'équipe (table `signalements`) ; le vérificateur ne laisse dire « transmis » que si c'est fait (article 4). *Limite : « la même demande échoue deux fois » n'est pas encore détecté par le serveur.* |
+
+## Solidité de chaque article (bilan du 02/10)
+
+- **Garantis par le code**, l'IA ne peut pas les violer : 3, 4, 5, 12, 13, 14.
+- **En partie garantis** : 2 et 11 (le serveur décrit l'état et propose des tuiles, mais c'est le cerveau qui lit), 6 (un juge IA trie les produits), 9 (le cerveau doit extraire la précision), 15.
+- **Seulement demandés** : 1, 7, 8, 10. Ils reposent sur la compréhension du cerveau, mesurée à environ 96 %.
+
+**Test de complétude** : chaque nouvelle erreur doit se rattacher à un article. Si c'est le cas, on renforce sa garantie. Sinon, il manque un principe, et on l'ajoute. Jamais une règle pour la seule phrase fautive.
 
 ## Comment on le vérifie
 

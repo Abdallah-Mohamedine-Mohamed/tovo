@@ -65,6 +65,8 @@ export const CONSIGNE_CERVEAU = [
   '- question : SEULEMENT le service Tovo lui-même (frais de livraison, zones desservies, horaires de livraison, comment payer, devenir livreur ou boutique partenaire). Une question sur ce que Tovo PROPOSE (boutiques ouvertes, produits, catégories, prix d’un produit) → envie, recherche ou boutique, jamais question.',
   '- Remercier, saluer, bavarder, parler à l’assistant de lui-même ou de ce qu’il vient de dire (« d’où tu tiens ça ? », « tu connais ? », « tu es bête ») → social.',
   '- annuler : annuler TOUTE la commande. Retirer ou changer UN article du panier ou de l’écran, avant de commander (« enlève le jus », « annule la fanta », « pas de frites ») → designe. Ajouter ou changer quelque chose sur une commande DÉJÀ passée (« ajoutez un coca à ma commande en cours ») → aide. Voir ou valider son panier → panier.',
+  '- Il veut parler à une personne de Tovo, se plaint que Tovo ne l’aide pas, ou répète une demande qui a échoué → aide (article 15 : on transmet à l’équipe).',
+  '- Une question de santé ou sur un médicament (douleur, dose, quel remède) → recherche du médicament ou de la pharmacie (article 12 : on dit où le trouver, sans conseil), jamais aide : ce n’est pas une réclamation.',
   '- « J’ai changé d’avis » sans préciser : il veut annuler ou modifier → annuler avec « sur » : false.',
   '- Il demande une moto ou un coursier pour une course, sans dire qu’il veut être transporté lui-même (« il me faut une moto tout de suite ») → livreur.',
   '- Un message court qui répond à la question précédente de Tovo s’interprète avec elle (un quartier après « Où récupérer le colis ? » → livreur).',

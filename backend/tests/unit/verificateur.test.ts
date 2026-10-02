@@ -115,3 +115,30 @@ describe('article 4 : « annulé » seulement si une annulation a eu lieu', () =
     expect(verifierTexte('Votre commande a été annulée.', annulee).texte).toContain('annulée');
   });
 });
+
+describe('articles 12 à 14 de la constitution', () => {
+  it('12 — aucune dose ni posologie', () => {
+    expect(verifierTexte('Prenez 500 mg trois fois par jour.', new Faits()).texte).toBe('');
+    expect(verifierTexte('Je vous conseille le Doliprane.', new Faits()).texte).toBe('');
+    expect(verifierTexte('Une pharmacie de garde peut vous renseigner.', new Faits()).texte).toContain('pharmacie');
+  });
+  it('13 — un numéro seulement s’il vient des données ou du client', () => {
+    const faits = new Faits();
+    faits.ajouter({ telephone: '20 73 67 90' });
+    faits.ajouterParole('rappelez-moi au 96 11 22 33');
+    expect(verifierTexte('Appelez-la au 20 73 67 90.', faits).texte).toContain('20 73 67 90');
+    expect(verifierTexte('Je vous rappelle au 96 11 22 33.', faits).texte).toContain('96 11 22 33');
+    expect(verifierTexte('Votre voisin a le 90 44 55 66.', faits).texte).toBe('');
+  });
+  it('14 — toujours le vouvoiement', () => {
+    expect(verifierTexte('Si tu as besoin, je suis là.', new Faits()).texte).toBe('');
+    expect(verifierTexte('La boutique Tutti Frutti est ouverte.', new Faits()).texte).toContain('Tutti');
+  });
+});
+
+describe('article 12 : un conseil n’est médical que s’il porte sur un médicament', () => {
+  it('« je vous recommande le tacos » et les poids et volumes restent permis', () => {
+    expect(verifierTexte('Je vous recommande le tacos.', new Faits()).texte).toContain('tacos');
+    expect(verifierTexte('Un sac de riz de 500 g ou un Coca de 330 ml.', new Faits()).texte).toContain('500 g');
+  });
+});

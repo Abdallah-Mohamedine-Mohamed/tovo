@@ -699,7 +699,11 @@ async function laSuite(input: OrchestrateInput, vu: Component[], requeteInitiale
   const parcourir = (liste?.data.browse ?? {}) as { query?: string; total?: number; merchant_ids?: string[]; category_id?: string };
   const commercesVus = vu.find((c) => c.type === 'commerces_hors_tovo');
   const sujetAffiche = String(parcourir.query || commercesVus?.data.produit || '').trim();
-  const requete = (input.requete || sujetAffiche || (liste ? requeteInitiale : '') || '').trim();
+  // Article 2 : ce qui est à l'écran donne le sens. Le sujet de ce qui était
+  // affiché passe avant la relecture du cerveau, qui prenait « Haute Qualité
+  // et couture » (le commerce montré) pour le produit (« plus loin ? » →
+  // « pas d'autres boutiques de couture », 02/10).
+  const requete = (sujetAffiche || input.requete || (liste ? requeteInitiale : '') || '').trim();
   if (!requete) return null;
   const montres = Array.isArray(liste?.data.items) ? (liste!.data.items as unknown[]).length : 0;
 
