@@ -58,6 +58,17 @@ interface CommandeLivreur {
  * livreur » dit deux fois, c'est de l'impatience, pas deux colis.
  */
 export async function commanderUnLivreur(db: SupabaseClient, commande: CommandeLivreur) {
+  const deja = await courseDejaEnRoute(db);
+  if (deja) return deja;
+  return passerLaCourse(db, commande);
+}
+
+/**
+ * Une course de moins de deux heures, pas encore livrée : sa carte de suivi,
+ * ou null. Utilisée par la route : « je veux un livreur » dit deux fois ne
+ * prépare pas une seconde course.
+ */
+export async function courseDejaEnRoute(db: SupabaseClient) {
   const { data: enCours } = await db
     .from('orders')
     .select('id')
@@ -75,7 +86,10 @@ export async function commanderUnLivreur(db: SupabaseClient, commande: CommandeL
       suivi.data ? [orderTracking(suivi.data as Record<string, unknown>)] : [],
     );
   }
+  return null;
+}
 
+async function passerLaCourse(db: SupabaseClient, commande: CommandeLivreur) {
   const { data: orderId, error } = await db.rpc('place_courier_order', {
     p_client_order_id: commande.clientOrderId,
     p_pickup_hint: 'Position du client',

@@ -7,7 +7,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import Fastify from 'fastify';
 import { installerCommerces, type Commerce } from '../../src/services/commerces.js';
 import { normaliserIntention } from '../../src/ai/intents.js';
-import { alternativesHorsTovo, cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, reponseHorsTovo, HORS_TOVO_NON, HORS_TOVO_OUI, requeteSansEnseigne, filtrerSuggestionsTextuelles, type CataloguePage } from '../../src/services/catalogue.js';
+import { agenceNommee, alternativesHorsTovo, cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, reponseHorsTovo, HORS_TOVO_NON, HORS_TOVO_OUI, requeteSansEnseigne, filtrerSuggestionsTextuelles, type CataloguePage } from '../../src/services/catalogue.js';
 import { catalogRoutes } from '../../src/routes/catalog.js';
 import { EXECUTORS, filtrerProduitsPhoto } from '../../src/ai/tools.js';
 import { orchestrate } from '../../src/ai/orchestrator.js';
@@ -445,7 +445,7 @@ describe('catalogue complet', () => {
     const answer = await merchantIntentAnswer(adapter,
       await resolveCatalogueIntent(adapter, 'Je veux commander de la viande chez Tchos.'));
     expect(answer?.content).toBe('**Tchos** n’est pas encore sur Tovo. Voulez-vous qu’un livreur aille vous '
-      + 'acheter **de la viande** là-bas ? Il avance l’achat, et vous le lui remboursez à la livraison, avec la course.');
+      + 'acheter **de la viande** là-bas ? Il vous appelle pour convenir avec vous de ce qu’il faut acheter.');
     const tuiles = answer?.components[0]?.data.items as Array<{ label: string; value: string }>;
     expect(tuiles.map((t) => t.label)).toEqual(['Oui, envoyez un livreur', 'Non, voir ce que Tovo propose']);
 
@@ -575,5 +575,21 @@ describe('Tovo dit où trouver ce qu’il n’a pas (annuaire public, 01/10)', (
       await resolveCatalogueIntent(adapter, 'Je veux faire mes courses chez Haddad Khalil'));
     expect(r?.content).toContain('**Haddad Khalil Super Market** n’est pas encore sur Tovo, mais le voici.');
     expect(r?.components[0]?.type).toBe('commerces_hors_tovo');
+  });
+});
+
+describe('agenceNommee — le client a dit l’agence', () => {
+  const agences = [
+    { id: 'a', name: "O'TAKOSS ( Centre Aéré )" },
+    { id: 'b', name: "O'TAKOSS ( Nouveau Marché )" },
+  ];
+  it('garde l’agence nommée, fautes d’accents comprises', () => {
+    expect(agenceNommee('Otakoss centre aéré', agences).map((a) => a.id)).toEqual(['a']);
+    expect(agenceNommee('otakoss nouveau marche', agences).map((a) => a.id)).toEqual(['b']);
+    expect(agenceNommee('un tacos chez otakoss centre aere', agences).map((a) => a.id)).toEqual(['a']);
+  });
+  it('sans agence dite, toutes restent (le client choisit)', () => {
+    expect(agenceNommee('Otakoss', agences)).toHaveLength(2);
+    expect(agenceNommee('un tacos chez otakoss', agences)).toHaveLength(2);
   });
 });

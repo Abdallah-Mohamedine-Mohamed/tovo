@@ -9,6 +9,7 @@ import { carteCommerces, commercesNommes, commercesPourProduit, libelleDes, type
 import { chercherSurGoogle, lieuGoogle, NOTE_GOOGLE } from './googlePlaces.js';
 import { heuresDeGarde, reponseGarde } from './pharmaciesGarde.js';
 import { paiementMobileActif } from '../config/env.js';
+import { SLUG_DU_RAYON, type Rayon } from '../ai/decideur.js';
 
 export interface CataloguePage {
   items: ProductRow[];
@@ -228,7 +229,10 @@ async function cataloguePageBrute(db: SupabaseClient, filter: CatalogueFilter, s
       const category = exact.length === 1 ? exact[0] : matches.length === 1 ? matches[0] : undefined;
       if (category) parameters.p_category = category.id as string;
     }
-    if (parameters.p_category) {
+    // Seulement une catégorie NOMMÉE par le client (« boissons »). Un rayon
+    // imposé (le cerveau) sans correspondance n'affiche pas tout le rayon :
+    // « montre » donnait les 59 vêtements, « paracétamol » la parapharmacie.
+    if (parameters.p_category && parameters.p_category !== filter.category_id) {
       response = await db.rpc('catalog_products_page', { ...parameters, p_query: '', p_embedding: null });
       if (response.error) throw response.error;
       page = response.data as CataloguePage;
@@ -249,6 +253,25 @@ async function cataloguePageBrute(db: SupabaseClient, filter: CatalogueFilter, s
   }
   if (parameters.p_category && !filter.category_id) page.category_id = parameters.p_category;
   return page;
+}
+
+/**
+ * L'identifiant de la catégorie racine d'un rayon (« supermarche » →
+ * Supermarché), gardé en mémoire : la recherche s'y limite, sous-rayons
+ * compris (catalog_products_page, categories_scope).
+ */
+const idsDesRayons = new Map<string, string | null>();
+export async function idDuRayon(db: SupabaseClient, rayon: Rayon): Promise<string | undefined> {
+  const slug = SLUG_DU_RAYON[rayon];
+  if (!idsDesRayons.has(slug)) {
+    const { data, error } = await db.from('categories').select('id').eq('slug', slug).eq('is_active', true).maybeSingle();
+    // Une panne passagère n'est pas une absence : rien n'est mémorisé, on
+    // relira au prochain message (sinon le rayon restait perdu jusqu'au
+    // redémarrage — évaluation externe, 02/10).
+    if (error) return undefined;
+    idsDesRayons.set(slug, (data?.id as string | undefined) ?? null);
+  }
+  return idsDesRayons.get(slug) ?? undefined;
 }
 
 const COLONNES_ENSEIGNE = 'id, name, description, logo_url, address_hint, is_open, rating, prep_time_min';
@@ -309,6 +332,27 @@ async function enseignesApprouvees(db: SupabaseClient): Promise<Array<MerchantRo
   return catalogue;
 }
 
+/**
+ * Plusieurs agences d'une enseigne, et le client en a nommé une (« Otakoss
+ * centre aéré ») : on garde celle-là. Les variantes communes (« OTAKOSS »)
+ * trouvaient les deux, et Tovo redemandait l'agence que le client venait de
+ * dire (examen du 02/10). Seuls comptent les mots PROPRES au nom d'une agence
+ * (« centre », « aere » ; « nouveau », « marche ») — jamais les variantes,
+ * qui ne distinguent rien.
+ */
+export function agenceNommee<T extends { id: string; name: string }>(message: string, candidates: T[]): T[] {
+  if (candidates.length < 2) return candidates;
+  const mots = (texte: string) => new Set(normaliserIntention(texte).split(' ').filter((m) => m.length >= 3));
+  const dansLeMessage = mots(message);
+  const nomsDe = candidates.map((c) => mots(c.name));
+  const scores = nomsDe.map((nom, i) => [...nom]
+    .filter((m) => nomsDe.every((autre, j) => j === i || !autre.has(m)))
+    .filter((m) => dansLeMessage.has(m)).length);
+  const meilleur = Math.max(...scores);
+  if (meilleur === 0) return candidates;
+  return candidates.filter((_, i) => scores[i] === meilleur);
+}
+
 export async function resolveCatalogueIntent(db: SupabaseClient, message: string, pending?: PendingMerchantChoice): Promise<CatalogueIntent> {
   const catalogue = await enseignesApprouvees(db);
   const variantes = avecVariantes(catalogue);
@@ -321,6 +365,7 @@ export async function resolveCatalogueIntent(db: SupabaseClient, message: string
   if (!marker && candidates.length === 0 && productQuery) {
     candidates = retrouver(boutiquesCorrespondantes(productQuery, variantes), catalogue);
   }
+  candidates = agenceNommee(message, candidates);
   if (!marker && pending && normaliserIntention(message).split(' ').length <= 4) {
     const offered = pending.merchant_ids.flatMap((id) => catalogue.filter((merchant) => merchant.id === id));
     const ordinal = /^(le )?(premier|1|1er)$/.test(normaliserIntention(message)) ? 0
@@ -489,9 +534,10 @@ const propre = (s: string) => s.replaceAll(SEP, ' ').slice(0, 120);
 /**
  * Une enseigne que Tovo ne connaît pas (« de la viande chez Tchos ») : le
  * client veut CE produit-là, pas un autre. Plutôt que « Je ne trouve pas
- * l'enseigne », on lui DEMANDE si un livreur doit aller l'acheter : il avance
- * l'achat, le client le lui rembourse à la livraison avec la course (tranché
- * le 30/09). Rien n'est commandé sans son « oui ».
+ * l'enseigne », on lui DEMANDE si un livreur doit aller l'acheter. Le livreur
+ * APPELLE le client pour convenir de l'achat (décision D6 du 02/10 : plus de
+ * promesse d'avance, aucune règle figée de plafond ou de preuve — le fondateur
+ * la garde à sa main). Rien n'est commandé sans son « oui ».
  */
 const commenceParDeterminant = (article: string) =>
   Boolean(article) && DETERMINANT.test(normaliserIntention(article.split(/\s+/)[0]!).split(' ')[0]!);
@@ -534,15 +580,16 @@ function commerceConnu(commerces: Commerce[], article: string, note?: string): C
     : 'Un livreur peut y faire vos achats';
   return {
     content: `**${c.nom}** n’est pas encore sur Tovo, mais le voici. ${proposition} : `
-      + 'il avance l’achat, et vous le lui remboursez à la livraison, avec la course.',
+      + 'il vous appelle pour convenir avec vous de ce qu’il faut acheter.',
     summary: {
       boutique_hors_tovo: c.nom,
       article: article || null,
       commerces_hors_tovo: commerces.map((x) => ({
         nom: x.nom, ou: [x.adresse, x.quartier].filter(Boolean).join(', ') || null, telephone_du_commerce: x.telephone,
       })),
-      consigne: 'Ce commerce n’est pas sur Tovo : dis où il est. Un livreur peut y aller (il avance l’achat, '
-        + 'le client le rembourse à la livraison avec la course). Le numéro affiché est celui DU COMMERCE, '
+      consigne: 'Ce commerce n’est pas sur Tovo : dis où il est. Un livreur peut y aller : il appelle le client '
+        + 'pour convenir de l’achat. Ne promets JAMAIS que le livreur avance ou paie l’achat, ni un remboursement. '
+        + 'Le numéro affiché est celui DU COMMERCE, '
         + 'jamais celui de Tovo. La carte affiche les boutons : ne pose aucune question.',
     },
     components: [carteCommerces(commerces, achat, HORS_TOVO_OUI, null, note)],
@@ -611,7 +658,8 @@ export async function alternativesHorsTovo(
       consigne: 'Tovo n’a pas ce produit. Réponds en une ou deux phrases naturelles, en nommant ce que le client cherche '
         + 'avec tes propres mots (jamais sa phrase recopiée) : ces commerces hors Tovo en ont probablement ; '
         + 'donne le nom du plus proche et sa distance exacte ci-dessus (« près de vous » seulement sous 2 km). '
-        + 'Un livreur peut y aller : il avance l’achat, le client le rembourse à la livraison avec la course. '
+        + 'Un livreur peut y aller : il appelle le client pour convenir de l’achat. Ne promets JAMAIS que le livreur '
+        + 'avance ou paie l’achat, ni un remboursement. '
         + (pharmacie ? 'Pharmacie : invite à appeler pour vérifier qu’elles l’ont, rappelle qu’un médicament sur ordonnance exige l’ordonnance, aucun conseil médical. ' : '')
         + 'La carte affiche les boutons « Envoyer un livreur » et le numéro : ne pose aucune question.',
     },
@@ -652,7 +700,7 @@ export async function horsTovo(
       noterBoutiqueDemandee(nom, '', 'inconnue');
     }
   }
-  return alternativesHorsTovo(db, message || nom, position, nom || undefined);
+  return alternativesHorsTovo(db, `${message} ${nom}`.trim(), position, nom || undefined);
 }
 
 async function enseigneHorsTovo(db: SupabaseClient, intent: CatalogueIntent & { missing: string }): Promise<CatalogueAnswer> {
@@ -681,7 +729,7 @@ async function enseigneHorsTovo(db: SupabaseClient, intent: CatalogueIntent & { 
   noterBoutiqueDemandee(nom, article, 'inconnue');
   return {
     content: `**${nom}** n’est pas encore sur Tovo. ${question} `
-      + 'Il avance l’achat, et vous le lui remboursez à la livraison, avec la course.',
+      + 'Il vous appelle pour convenir avec vous de ce qu’il faut acheter.',
     summary: {
       boutique_introuvable: intent.missing,
       boutique_hors_tovo: nom,

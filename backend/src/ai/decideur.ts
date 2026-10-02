@@ -29,6 +29,18 @@ import { blocExemples, type Exemple } from './banc/exemples.js';
 export const COUTEUSES = new Set<Intention>(['livreur', 'colis', 'annuler', 'habitude']);
 
 /**
+ * Les rayons du catalogue où chercher (02/10), et leur catégorie racine.
+ * « huile » mélangeait Huile Dinor (supermarché) et huiles d'argan (beauté) :
+ * le cerveau dit dans quel rayon le client cherche, la recherche y reste.
+ */
+export const RAYONS = ['repas', 'supermarche', 'marche', 'beaute', 'electronique', 'vetements', 'gaz', 'pharmacie'] as const;
+export type Rayon = typeof RAYONS[number];
+export const SLUG_DU_RAYON: Record<Rayon, string> = {
+  repas: 'restaurants-m3', supermarche: 'grocery-m4', marche: 'kasuwa-m10', beaute: 'beaute-soins',
+  electronique: 'electronique', vetements: 'vetements', gaz: 'gaz-m12', pharmacie: 'parapharmacies-m5',
+};
+
+/**
  * La consigne. Exportée : le banc (scripts/banc-ia) mesure EXACTEMENT celle-ci.
  *
  * Les exemples ne reprennent pas les phrases du banc : ils enseignent la
@@ -70,7 +82,9 @@ export const CONSIGNE_CERVEAU = [
   '« Appelle-moi un taxi pour la gare » → social',
   '',
   '« sur » : false si la phrase peut raisonnablement vouloir dire autre chose, surtout si l’une des lectures est une action (livreur, colis, annuler, habitude).',
-  'Réponds uniquement en JSON : {"intention": "<clé>", "sur": true|false}.',
+  '« produit » : ce que le client cherche, en 1 à 5 mots, tel qu’on le taperait dans le catalogue — le produit ou le plat (« merguez », « pommade Nivea », « riz parfumé »), ou la boutique nommée avec ce qui la précise (« O’Takoss Centre Aéré »). Sans les mots de politesse ni de demande (« je veux », « bien », « autre chose »). Si le message répond au dernier message de Tovo, complète avec lui (après « Dans quel quartier cherchez-vous du poulet ? », « Bobiel » → « poulet »). Vide s’il ne cherche rien.',
+  '« rayon » : où chercher ce produit dans Tovo — repas (plats préparés, restaurants), supermarche (épicerie, boissons, produits ménagers, huile de cuisine, lait, riz en sac), marche (produits frais du marché), beaute (soins, cosmétiques, parfums), electronique (téléphones, accessoires, électroménager), vetements (habits, chaussures, montres, bijoux), gaz, pharmacie (parapharmacie, médicaments sans ordonnance) ; « aucun » si rien ne convient ou si c’est une boutique nommée. Choisis selon ce que le client VEUT : « un litre d’huile » → supermarche (pas beaute), « deux litres de lait » → supermarche.',
+  'Réponds uniquement en JSON : {"intention": "<clé>", "sur": true|false, "produit": "<mots>", "rayon": "<rayon>"}.',
 ].join('\n');
 
 export interface ContexteCerveau {
@@ -86,6 +100,14 @@ export interface ContexteCerveau {
 export interface DecisionCerveau {
   intention: Intention | null;
   sur: boolean;
+  /**
+   * Ce que le client cherche, extrait par le cerveau (02/10) : « merguez »
+   * dans « On y va sur autre chose. Je veux manger du bon merguez ». Remplace
+   * le découpage à mots du code, qui gardait « autre chose bon merguez ».
+   */
+  produit?: string;
+  /** Où chercher ce produit dans le catalogue (« supermarche » pour l'huile de cuisine). */
+  rayon?: Rayon;
   /** Le modèle qui a répondu le premier, ou null. */
   modele: string | null;
   ms: number;
@@ -94,24 +116,30 @@ export interface DecisionCerveau {
   erreurs: string[];
 }
 
-export type Essai = (message: string, signal: AbortSignal) => Promise<{ intention: Intention; sur: boolean }>;
+export type Essai = (message: string, signal: AbortSignal) => Promise<{ intention: Intention; sur: boolean; produit?: string; rayon?: Rayon }>;
 
 const SCHEMA = {
   type: 'OBJECT',
   properties: {
     intention: { type: 'STRING', enum: Object.keys(INTENTIONS) },
     sur: { type: 'BOOLEAN' },
+    produit: { type: 'STRING' },
+    rayon: { type: 'STRING', enum: ['aucun', ...RAYONS] },
   },
   required: ['intention', 'sur'],
 };
 
-export function lireDecision(texte: string): { intention: Intention; sur: boolean } | null {
+export function lireDecision(texte: string): { intention: Intention; sur: boolean; produit?: string; rayon?: Rayon } | null {
   const brut = texte.match(/\{[\s\S]*\}/)?.[0];
   if (!brut) return null;
   try {
-    const v = JSON.parse(brut) as { intention?: string; sur?: unknown };
+    const v = JSON.parse(brut) as { intention?: string; sur?: unknown; produit?: unknown; rayon?: unknown };
     if (!v.intention || !(v.intention in INTENTIONS)) return null;
-    return { intention: v.intention as Intention, sur: v.sur !== false };
+    const produit = typeof v.produit === 'string' ? v.produit.trim().slice(0, 80) : '';
+    const rayon = (RAYONS as readonly string[]).includes(String(v.rayon)) ? v.rayon as Rayon : undefined;
+    // « sur » absent (le secours OpenAI n'a pas de schéma imposé) : PAS sûr.
+    // Une action coûteuse passe alors par les tuiles, jamais directement.
+    return { intention: v.intention as Intention, sur: v.sur === true, ...(produit ? { produit } : {}), ...(rayon ? { rayon } : {}) };
   } catch {
     return null;
   }

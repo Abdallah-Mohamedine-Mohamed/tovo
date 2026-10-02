@@ -11,14 +11,17 @@ import {
   demandeOuverte,
   messageConversationnel,
   normaliserIntention,
+  nomBoutiqueApresMarqueur,
   referenceAuxResultats,
   requeteProduitUtilisateur,
 } from './intents.js';
 import { resumeAffichage } from './memoire.js';
 import type { Intention } from './jev.js';
+import type { Rayon } from './decideur.js';
+import { idDuRayon } from '../services/catalogue.js';
 import { avecOuvertureReelle } from '../services/ouverture.js';
 import { Faits, FluxVerifie, verifierTexte, type Verification } from './verificateur.js';
-import { rediger } from './redacteur.js';
+import { rediger, redigerEtJuger, sansPromesseVide } from './redacteur.js';
 
 /**
  * Boucle d'orchestration.
@@ -80,6 +83,13 @@ export interface OrchestrateInput {
    */
   intention?: Intention | 'modele' | undefined;
   /**
+   * Ce que le client cherche, extrait par le cerveau (« merguez »). Préféré au
+   * découpage à mots du message, qui ne comprend pas la phrase.
+   */
+  requete?: string | undefined;
+  /** Le rayon où chercher, selon le cerveau : la recherche y reste. */
+  rayon?: Rayon | undefined;
+  /**
    * Recherche lexicale déjà faite par la route, en parallèle de Jev, sur le
    * MÊME message : on ne la refait pas.
    */
@@ -135,6 +145,24 @@ async function boutiquesOuvertes(db: SupabaseClient): Promise<{ components: Comp
   };
 }
 
+/**
+ * Les outils d'ACTION que l'assistant ne reçoit que si le cerveau a compris
+ * cette action (02/10, principe « un seul interprète », docs/PARCOURS-
+ * CLIENTS.md). Le cerveau disait « recherche » pour « un colis de riz de
+ * 25 kg » ; l'assistant, relisant la phrase brute, voyait « colis » et
+ * ouvrait la carte de course (3 fois sur 4 sous charge). Sans décision du
+ * cerveau (panne, tuile « Autre chose », bouton), l'assistant garde tout.
+ */
+const OUTILS_D_ACTION: Record<string, ReadonlyArray<Intention | 'modele'>> = {
+  preparer_course: ['livreur', 'colis', 'modele'],
+  annuler_commande: ['annuler', 'aide', 'modele'],
+  recommander_commande: ['habitude', 'designe', 'modele'],
+};
+export function outilsPermis(intention: Intention | 'modele' | undefined): typeof TOOL_DEFINITIONS {
+  if (!intention) return TOOL_DEFINITIONS;
+  return TOOL_DEFINITIONS.filter((t) => !OUTILS_D_ACTION[t.name] || OUTILS_D_ACTION[t.name]!.includes(intention));
+}
+
 export function rechercheProduitRapide(message: string, query: string): boolean {
   const mots = query.split(/\s+/).filter(Boolean);
   const questionCourte = /^(avez vous|as tu|il y a|y a t il|un|une|du|de la|des)\b/
@@ -156,18 +184,31 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // « Comme d'habitude » : aucun produit dans la phrase, seul le modèle sait
   // relire l'historique des commandes. Toujours au modèle, affichage ou pas.
   const commandePassee = !input.audio && demandeDeCommandePassee(input.message);
-  const requeteInitiale = input.audio ? '' : requeteProduitUtilisateur(input.message);
+  // « De la viande chez Tchos » : la boutique nommée décide. Le produit et le
+  // rayon du cerveau (« viande Tchos », repas) ramenaient Maison Grill.
+  const boutiqueNommee = !input.audio && Boolean(nomBoutiqueApresMarqueur(input.message));
+  const requeteInitiale = input.audio ? ''
+    : requeteProduitUtilisateur((boutiqueNommee ? undefined : input.requete) ?? input.message);
   // Recherche ou boutique : le catalogue a son mot à dire. Toute autre route
   // connue va droit au modèle.
   const catalogueAutorise = !input.intention || input.intention === 'recherche' || input.intention === 'boutique';
+  // Le rayon compris par le cerveau : la recherche y reste (« huile » →
+  // supermarché, jamais les huiles d'argan de la beauté).
+  const rayonId = input.rayon && !input.audio && !boutiqueNommee ? await idDuRayon(input.db, input.rayon) : undefined;
+  // Le cerveau a compris une recherche et dit quoi chercher : le filtre à
+  // mots ne la refuse plus. « un colis de riz » contient « colis », et
+  // partait à l'assistant alors que le cerveau disait « riz » (02/10).
+  const rechercheDuCerveau = (input.intention === 'recherche' || input.intention === 'boutique') && Boolean(input.requete);
+  const rapide = (requete: string) => requete.length > 0
+    && (rechercheDuCerveau || rechercheProduitRapide(input.message, requete));
   const rechercheInitiale = input.pageInitiale
     ? Promise.resolve(input.pageInitiale)
     : !input.audio && !reference && !commandePassee && catalogueAutorise
-    && rechercheProduitRapide(input.message, requeteInitiale)
+    && rapide(requeteInitiale)
     // Premier passage lexical uniquement : il doit rester plus rapide qu'un
     // appel modèle. Les fautes et rapprochements sémantiques restent pris en
     // charge par le chemin complet juste après.
-    ? cataloguePage(input.db, { q: requeteInitiale, limit: 8 }, false)
+    ? cataloguePage(input.db, { q: requeteInitiale, limit: 8, category_id: rayonId }, false)
     : Promise.resolve(null);
   const [previous, pageInitiale] = await Promise.all([historique, rechercheInitiale]);
 
@@ -191,6 +232,20 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   const enMots = (prevue: string, faits: unknown, composants: Component[]) => (input.audio
     ? Promise.resolve(prevue)
     : rediger({ message: input.messagePublic ?? input.message, prevue, faits, composants, avant: dernierDeTovo }));
+  // Des produits trouvés : le rédacteur dit aussi s'ils répondent vraiment à
+  // la demande (« deux litres de lait » ramenait des savons au lait). Sinon,
+  // les commerces hors Tovo qui en ont probablement.
+  const produitsOuAilleurs = async (reponse: { content: string; summary: Record<string, unknown>; components: Component[] }) => {
+    const produits = reponse.components.some((c) => c.type === 'product_carousel' || c.type === 'product_list');
+    if (!produits || input.audio) return { reponse, phrase: await enMots(reponse.content, reponse.summary, reponse.components) };
+    const j = await redigerEtJuger({ message: input.messagePublic ?? input.message, prevue: reponse.content,
+      faits: reponse.summary, composants: reponse.components, avant: dernierDeTovo });
+    if (j.pertinent === false) {
+      const ailleurs = await horsTovo(input.db, input.message, input.requete ?? requeteInitiale, input.position);
+      if (ailleurs) return { reponse: ailleurs, phrase: await enMots(ailleurs.content, ailleurs.summary, ailleurs.components) };
+    }
+    return { reponse, phrase: j.texte };
+  };
 
   const photoRecente = previous.history.slice(-4).some((turn) =>
     turn.role === 'user' && /photo envoyee/i.test(normaliserIntention(turn.content)));
@@ -224,9 +279,8 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // suggestion, et la carte de la boutique n'était jamais proposée.
   if (pageInitiale && pageInitiale.match_type !== 'similar'
     && (pageInitiale.total > 0 || pageInitiale.category_id)) {
-    const direct = searchAnswer(pageInitiale, { q: requeteInitiale, limit: 8 });
+    const { reponse: direct, phrase } = await produitsOuAilleurs(searchAnswer(pageInitiale, { q: requeteInitiale, limit: 8 }));
     input.onEvent?.({ type: 'results', components: direct.components });
-    const phrase = await enMots(direct.content, direct.summary, direct.components);
     input.onEvent?.({ type: 'text', text: phrase });
     const messageId = await persister(input, phrase, direct.components);
     return { ...envelope(phrase, direct.components), messageId, rejected: [],
@@ -239,14 +293,20 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     ? undefined
     : await resolveCatalogueIntent(input.db, input.message, previous.pending);
   let direct = intent ? await merchantIntentAnswer(input.db, intent) : null;
-  const requeteClient = requeteProduitUtilisateur(intent?.query ?? input.message);
-  const keyword = rechercheProduitRapide(input.message, requeteClient);
+  // Ce que le cerveau a compris (« merguez »), sauf quand une boutique est
+  // nommée : la requête est alors ce qui reste une fois son nom retiré.
+  const requeteClient = input.requete && intent && intent.merchants.length === 0 && !intent.missing
+    ? requeteProduitUtilisateur(input.requete)
+    : requeteProduitUtilisateur(intent?.query ?? input.message);
+  const keyword = rapide(requeteClient);
   const selectedBranch = Boolean(previous.pending
     && intent?.merchants.length === 1
     && intent.query === previous.pending.query);
   if (!direct && intent && (keyword || selectedBranch) && !input.audio) {
     const filter = { q: requeteClient || intent.query, limit: 8,
-      merchant_ids: intent.merchants.length ? intent.merchants.map((merchant) => merchant.id) : undefined };
+      merchant_ids: intent.merchants.length ? intent.merchants.map((merchant) => merchant.id) : undefined,
+      // Dans une boutique nommée, toute sa carte ; sinon le rayon compris.
+      category_id: intent.merchants.length ? undefined : rayonId };
     // Une phrase courte n'est pas forcément un produit. « Tu es bête »
     // partait directement dans la recherche sémantique et remontait des
     // carottes. Le chemin instantané n'est permis que pour une correspondance
@@ -291,8 +351,10 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     };
   }
   if (direct) {
+    const choisi = await produitsOuAilleurs(direct);
+    direct = choisi.reponse;
+    const phrase = choisi.phrase;
     input.onEvent?.({ type: 'results', components: direct.components });
-    const phrase = await enMots(direct.content, direct.summary, direct.components);
     input.onEvent?.({ type: 'text', text: phrase });
     const messageId = await persister(input, phrase, direct.components);
     return { ...envelope(phrase, direct.components), messageId, rejected: [],
@@ -309,6 +371,8 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     db: input.db,
     userId: input.userId,
     currentMessage: input.audio ? undefined : input.message,
+    ...(input.requete ? { requete: input.requete } : {}),
+    ...(rayonId ? { rayonId } : {}),
     catalogueIntent: intent,
     position: input.position,
   };
@@ -337,8 +401,12 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // Ce qui est vrai pendant ce tour : la phrase du client, ce qui était déjà
   // à l'écran, puis tout ce que les outils renverront (verificateur.ts).
   const faits = new Faits();
-  faits.ajouter(input.message);
-  for (const tour of previous.history) faits.ajouter(tour.content);
+  // Les mots du client : des noms, jamais des montants ni des durées.
+  faits.ajouterParole(input.message);
+  for (const tour of previous.history) {
+    if (tour.role === 'user') faits.ajouterParole(tour.content);
+    else faits.ajouter(tour.content);
+  }
   const inventions: Verification['retirees'] = [];
   let texteFinal = '';
   let entree = 0;
@@ -359,7 +427,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
       system: SYSTEM_PROMPT,
       history,
       // Au dernier cycle, plus d'outils : le modèle doit conclure.
-      tools: dernierCycle ? [] : TOOL_DEFINITIONS,
+      tools: dernierCycle ? [] : outilsPermis(input.intention),
       ...(input.onEvent ? {
         cachePrompt: !dernierCycle,
         onText: (text: string) => flux.pousser(text),
@@ -454,6 +522,8 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   }
 
   const { components, rejected } = validateComponents(composantsDuTour, idsAutorises);
+  // Le texte n'annonce jamais une carte qui ne s'affiche pas.
+  if (texteFinal) texteFinal = sansPromesseVide(texteFinal, components);
 
   // Le texte enregistré et renvoyé passe le même contrôle que celui qui
   // s'est affiché : aucune phrase n'affirme un fait absent de la base.

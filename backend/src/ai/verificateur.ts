@@ -42,6 +42,17 @@ export class Faits {
     }
   }
 
+  /**
+   * Ce que le CLIENT a dit : ses mots servent à reconnaître un nom (« **merguez** »),
+   * jamais à confirmer un montant ou une durée. « Il arrive dans 10 minutes ? »
+   * laissait Tovo répondre « votre livreur arrive dans 10 minutes » : le
+   * nombre venait de la question, pas de la base (évaluation externe, 02/10).
+   */
+  ajouterParole(texte: string | null | undefined): void {
+    const propre = texte ? normaliserIntention(texte) : '';
+    if (propre) this.textes.push(propre);
+  }
+
   connaitNombre(n: number): boolean {
     return this.nombres.has(n);
   }

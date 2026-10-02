@@ -55,6 +55,10 @@ export interface ToolContext {
   db: SupabaseClient;
   userId: string;
   currentMessage?: string | undefined;
+  /** Ce que le client cherche, extrait par le cerveau (« merguez ») : préféré au découpage à mots. */
+  requete?: string | undefined;
+  /** La catégorie racine du rayon compris par le cerveau : la recherche y reste. */
+  rayonId?: string | undefined;
   catalogueIntent?: CatalogueIntent | undefined;
   position?: { lat: number; lng: number } | undefined;
 }
@@ -218,7 +222,7 @@ async function catalogueDuContexte(ctx: ToolContext, interpretedMessage?: string
   if (!ctx.currentMessage && interpretedMessage) {
     ctx.catalogueIntent = await resolveCatalogueIntent(ctx.db, interpretedMessage);
   } else if (!ctx.catalogueIntent) {
-    ctx.catalogueIntent = await resolveCatalogueIntent(ctx.db, ctx.currentMessage ?? '');
+    ctx.catalogueIntent = await resolveCatalogueIntent(ctx.db, ctx.requete ?? ctx.currentMessage ?? '');
   }
   return ctx.catalogueIntent;
 }
@@ -343,10 +347,10 @@ const rechercherProduits: Executor = async (args, ctx) => {
   // écrit « pommade », une requête inventée comme « lait corps crème beurre
   // karité » ne doit jamais remplacer sa demande et ouvrir 46 faux résultats.
   const requete = requeteProduitUtilisateur(
-    ctx.currentMessage ? intent.query : requeteModele,
+    ctx.currentMessage || ctx.requete ? intent.query : requeteModele,
   );
   if (!requete) return vide;
-  let categorieId = texte(args, 'categorie_id') || undefined;
+  let categorieId = texte(args, 'categorie_id') || (intent.merchants.length ? undefined : ctx.rayonId);
   const domaineRepas = texte(args, 'domaine') === 'repas' || demandeDeRepas(ctx.currentMessage ?? '');
   if (!categorieId && !intent.merchants.length && domaineRepas) {
     categorieId = await categorieRestaurants(ctx) ?? undefined;
@@ -1129,21 +1133,22 @@ const historiqueCommandes: Executor = async (args, ctx) => {
           .map((a) => `${a.quantity} × ${a.product_name}`),
       })),
     },
-    components: [
-      quickReplies(
-        commandes.slice(0, 3).map((o) => {
-          const a = (o.order_items ?? []) as Array<{ product_name: string; quantity: number }>;
-          // Le premier article nomme la commande. Un bouton doit dire ce
-          // qu'il fait, pas seulement combien il coûte.
-          const titre = a.length === 0
-            ? `${o.total} F`
-            : a.length === 1
-              ? a[0]!.product_name
-              : `${a[0]!.product_name} +${a.length - 1}`;
-          return { label: `Reprendre : ${titre}`, value: `recommander:${o.id}` };
-        }),
-      ),
-    ],
+    // Seulement les commandes qu'on peut remettre au panier (avec des
+    // articles), et une fois chacune : « Reprendre : 1000 F » deux fois, c'était
+    // deux courses de livreur sans article, impossibles à reprendre (02/10).
+    components: (() => {
+      const vus = new Set<string>();
+      const tuiles = commandes.flatMap((o) => {
+        const a = (o.order_items ?? []) as Array<{ product_name: string; quantity: number }>;
+        if (a.length === 0) return [];
+        // Le premier article nomme la commande : un bouton dit ce qu'il fait.
+        const titre = a.length === 1 ? a[0]!.product_name : `${a[0]!.product_name} +${a.length - 1}`;
+        if (vus.has(titre)) return [];
+        vus.add(titre);
+        return [{ label: `Reprendre : ${titre}`, value: `recommander:${o.id}` }];
+      }).slice(0, 3);
+      return tuiles.length > 0 ? [quickReplies(tuiles)] : [];
+    })(),
   };
 };
 
@@ -1416,7 +1421,9 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
   {
     name: 'historique_commandes',
     description:
-      "Liste les commandes déjà livrées, pour permettre d'en recommander une.",
+      "Liste les commandes déjà livrées, pour permettre d'en recommander une. SEULEMENT si le client parle de " +
+      "refaire, reprendre ou retrouver une commande passée (« comme d'habitude », « la même chose que la dernière fois ») : " +
+      "ou quand il te salue sans rien demander d'autre. Jamais pour un retard, une plainte ou une question.",
     parameters: {
       type: 'object',
       properties: { limite: S.number('Nombre de commandes, 5 par défaut') },

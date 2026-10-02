@@ -140,21 +140,36 @@ export function commercesPourProduit(
   // Toumo ») passent devant, où qu'ils soient dans la ville.
   const reputes = chargerCommerces().filter((c) =>
     (c.specialites ?? []).some((s) => mots.has(normaliserIntention(s)) || mots.has(`${normaliserIntention(s)}s`)));
-  const types = typesPourProduit(texte);
-  const candidats = chargerCommerces().filter((c) => types.includes(c.type) && !reputes.includes(c));
-  const proches = position
-    ? candidats
-      .map((c) => ({ c, d: metres(position, c) }))
-      .filter(({ d }) => d <= 8000)
-      .sort((a, b) => a.d - b.d)
-      .map(({ c }) => c)
-    : candidats.sort((a, b) => b.fiabilite - a.fiabilite);
+  // Les types sont rangés du plus probable au moins probable (PRODUITS) : le
+  // premier qui a un commerce à portée l'emporte, les suivants ne servent que
+  // s'il n'y en a aucun. Mélangés et triés par distance, un supermarché à
+  // 530 m passait devant la boulangerie à 800 m pour un gâteau (02/10).
+  const parType = (type: TypeCommerce) => {
+    const candidats = chargerCommerces().filter((c) => c.type === type && !reputes.includes(c));
+    return position
+      ? candidats
+        .map((c) => ({ c, d: metres(position, c) }))
+        .filter(({ d }) => d <= 8000)
+        .sort((a, b) => a.d - b.d)
+        .map(({ c }) => c)
+      : candidats.sort((a, b) => b.fiabilite - a.fiabilite);
+  };
   // `exclure` (« est-il en fait sur Tovo ? ») coûte cher : seulement sur les
   // premiers, jusqu'à en avoir assez.
-  const retenus: Commerce[] = [];
-  for (const c of [...reputes, ...proches]) {
+  const garder = (liste: Commerce[], retenus: Commerce[]) => {
+    for (const c of liste) {
+      if (retenus.length >= combien) break;
+      if (!exclure(c)) retenus.push(c);
+    }
+    return retenus;
+  };
+  const retenus = garder(reputes, []);
+  for (const type of typesPourProduit(texte)) {
     if (retenus.length >= combien) break;
-    if (!exclure(c)) retenus.push(c);
+    const avant = retenus.length;
+    garder(parType(type), retenus);
+    // Ce type a des commerces à portée : on s'en tient à lui.
+    if (retenus.length > avant) break;
   }
   return retenus;
 }

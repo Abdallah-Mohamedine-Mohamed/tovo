@@ -76,3 +76,15 @@ describe('le flux vérifié : phrase par phrase', () => {
     expect(flux.retirees.map((r) => r.inventees[0]!.valeur)).toEqual(['9 000 F']);
   });
 });
+
+describe('les mots du client (évaluation externe, 02/10)', () => {
+  it('reconnaissent un nom, jamais un nombre ni une durée', () => {
+    const faits = new Faits();
+    faits.ajouterParole('Il arrive dans 10 minutes ? Et le **poulet braisé** coûte 5000 F ?');
+    // La durée et le prix ne viennent que de la question : refusés.
+    expect(verifierTexte('Votre livreur arrive dans 10 minutes.', faits).texte).toBe('');
+    expect(verifierTexte('Il coûte 5 000 F.', faits).texte).toBe('');
+    // Le nom, lui, est bien celui que le client a dit.
+    expect(verifierTexte('Je cherche du **poulet braisé** pour vous.', faits).texte).toContain('poulet braisé');
+  });
+});

@@ -83,21 +83,22 @@ describe('« je veux un livreur » : la phrase', () => {
   });
 });
 
-describe('POST /chat — un livreur sans formulaire', () => {
-  it('passe la commande depuis la position, sans modèle, et annonce l’appel', async () => {
+describe('POST /chat — « je veux un livreur » (décision D1 : la course part au toucher)', () => {
+  it('montre la carte pré-remplie, prix compris, et ne commande RIEN', async () => {
     const db = fausseBase();
     const app = await appAvec(db);
     const res = await app.inject({ method: 'POST', url: '/chat', payload: {
       client_message_id: MESSAGE, text: 'Je veux un livreur', context: NIAMEY,
     } });
     expect(res.statusCode).toBe(200);
-    expect(res.json().content).toContain('Un livreur vous appelle dans les **7 minutes**');
-    expect(res.json().components[0].type).toBe('order_tracking');
-    expect(db.rpc).toHaveBeenCalledWith('place_courier_order', expect.objectContaining({
-      p_client_order_id: MESSAGE, p_pickup_lat: NIAMEY.lat, p_pickup_lng: NIAMEY.lng,
-      p_dropoff_lat: null, p_dropoff_lng: null,
-    }));
-    expect(queueDispatch).toHaveBeenCalledWith(COMMANDE);
+    const carte = res.json().components[0];
+    expect(carte.type).toBe('courier_form');
+    expect(carte.data.pickup).toMatchObject({ lat: NIAMEY.lat, lng: NIAMEY.lng });
+    expect(carte.data.estimate).toEqual({ price: 1000, flat: true });
+    // Jamais une carte qui commande d'elle-même.
+    expect(carte.data.auto).toBeUndefined();
+    expect(db.rpc).not.toHaveBeenCalledWith('place_courier_order', expect.anything());
+    expect(queueDispatch).not.toHaveBeenCalled();
     expect(generate).not.toHaveBeenCalled();
     await app.close();
   });
@@ -122,9 +123,8 @@ describe('POST /chat — un livreur sans formulaire', () => {
     expect(res.json().components[0].type).toBe('courier_form');
     // La carte prend la position d'elle-même : plus de « Touchez Ma position ».
     expect(res.json().content).not.toContain('Ma position');
-    // Le client a déjà tout dit : la carte commandera d'elle-même dès qu'elle
-    // aura la position, sans lui faire toucher un bouton de plus.
-    expect(res.json().components[0].data.auto).toBe(true);
+    // D1 : même sans position, la course attend le toucher du client.
+    expect(res.json().components[0].data.auto).toBeUndefined();
     expect(db.rpc).not.toHaveBeenCalledWith('place_courier_order', expect.anything());
     await app.close();
   });

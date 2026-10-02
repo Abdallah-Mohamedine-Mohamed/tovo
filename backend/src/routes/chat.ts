@@ -19,11 +19,11 @@ import { env } from '../config/env.js';
 import { comparerRoutesMai, transcrire } from '../services/transcription.js';
 import { chatStream } from '../lib/chatStream.js';
 import { consommer, messageLimite } from '../services/rateLimit.js';
-import { commanderUnLivreur } from '../services/livreur.js';
+import { courseDejaEnRoute } from '../services/livreur.js';
 import { ombreJev, type Intention } from '../ai/jev.js';
 import { ouvrirSessionVoix, vocabulaire } from '../services/voixDirecte.js';
 import { decider, indication, intentionChoisie, routeDuCerveau, type Route } from '../ai/aiguillage.js';
-import { cerveauActif, comprendre } from '../ai/decideur.js';
+import { cerveauActif, comprendre, type Rayon } from '../ai/decideur.js';
 import { exemplesPour } from '../ai/banc/exemples.js';
 import { aiguiller, cascadeActive } from '../ai/cascade.js';
 import { rechercheProduitRapide } from '../ai/orchestrator.js';
@@ -557,6 +557,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       ?? (body.data.interaction ? libelleLisible(body.data.interaction.action, body.data.interaction.payload) : null)
       ?? message;
     let intention: Intention | 'modele' | undefined = choisie?.intention;
+    // Ce que le client cherche, selon le cerveau (« merguez »).
+    let requeteCerveau: string | undefined;
+    let rayonCerveau: Rayon | undefined;
     // Le rédacteur (ai/redacteur.ts) : chaque réponse directe à un message du
     // client est mise en mots par une IA, à partir de ce qu'il a VRAIMENT dit.
     // Les cartes partent d'abord ; la phrase suit.
@@ -578,6 +581,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       if (cerveau) {
         const d = await decisionCerveau;
         route = d ? routeDuCerveau(d, body.data.text) : { type: 'habituel', decision: null };
+        requeteCerveau = d?.produit || undefined;
+        rayonCerveau = d?.rayon;
         request.log.info({
           ref: body.data.client_message_id,
           intention: d?.intention ?? null,
@@ -608,7 +613,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       if (route.type === 'intention') intention = route.intention;
       // Une recherche : celle faite en parallèle du cerveau (suggestions
       // proches comprises) sert telle quelle, sans la refaire.
-      if (intention === 'recherche' && prealable) pageInitiale = prealable;
+      if (intention === 'recherche' && prealable && !rayonCerveau
+        && (!requeteCerveau || requeteProduitUtilisateur(requeteCerveau) === requeteProduitUtilisateur(body.data.text ?? ''))) {
+        pageInitiale = prealable;
+      }
 
       if (route.type === 'clarifier') {
         // Proposer ce qu'on a compris plutôt que deviner : une action mal
@@ -639,38 +647,27 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // livreur » ne doit jamais commander de livreur parce qu'il contient le mot.
     const motsPermis = !cerveau;
 
-    // « Je veux un livreur » : la commande part, sans carte ni question. La
-    // position vient du téléphone, le numéro du compte ; le livreur appelle
-    // pour le reste. Sans position connue, on retombe sur la carte, qui
-    // sait la demander.
-    if (texteClient && body.data.context
-      && (parJev ? intention === 'livreur' : motsPermis && demandeUnLivreur(texteClient))) {
-      const resultat = await commanderUnLivreur(db, {
-        clientOrderId: body.data.client_message_id,
-        position: body.data.context,
-        journal: (cause, orderId) => request.log.error({ cause, orderId }, 'dispatch du livreur impossible'),
-      });
-
-      emit({ type: 'conversation', conversation_id: conversationId });
-      emit({ type: 'results', components: resultat.components });
-      resultat.content = await enMots(resultat.content, null, resultat.components);
-      emit({ type: 'text', text: resultat.content });
-
-      await db.from('messages').insert({
-        conversation_id: conversationId,
-        role: 'user',
-        content: contenuClient,
-        client_message_id: body.data.client_message_id,
-      });
-      await db.from('messages').insert({
-        conversation_id: conversationId,
-        role: 'assistant',
-        content: resultat.content,
-        components: resultat.components,
-      });
-
-      request.log.info({ conversationId }, 'livreur commandé sans formulaire');
-      return output.finish({ conversation_id: conversationId, ...resultat });
+    // « Je veux un livreur » (décision D1 du 02/10, docs/PARCOURS-CLIENTS.md) :
+    // la course ne part JAMAIS sur une phrase. Une erreur de compréhension ne
+    // doit pas faire déplacer un livreur, et le client voit le prix avant. La
+    // carte pré-remplie s'affiche plus bas ; il touche « Commander le livreur ».
+    // Seule exception gardée : une course déjà en route est montrée, au lieu
+    // d'en préparer une seconde.
+    if (texteClient && (parJev ? intention === 'livreur' : motsPermis && demandeUnLivreur(texteClient))) {
+      const deja = await courseDejaEnRoute(db);
+      if (deja) {
+        emit({ type: 'conversation', conversation_id: conversationId });
+        emit({ type: 'results', components: deja.components });
+        deja.content = await enMots(deja.content, null, deja.components);
+        emit({ type: 'text', text: deja.content });
+        await db.from('messages').insert({
+          conversation_id: conversationId, role: 'user', content: contenuClient, client_message_id: body.data.client_message_id,
+        });
+        await db.from('messages').insert({
+          conversation_id: conversationId, role: 'assistant', content: deja.content, components: deja.components,
+        });
+        return output.finish({ conversation_id: conversationId, ...deja });
+      }
     }
 
     // Un envoi de colis n'a rien à interpréter : il ouvre toujours la même
@@ -699,19 +696,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           ...(body.data.context ? { position: body.data.context } : {}),
         },
       );
-      // « Je veux un livreur », sans plus : le client a déjà tout dit. Il
-      // manquait seulement sa position (sinon la commande serait partie
-      // plus haut, sans carte). La carte la prend et commande d'elle-même :
-      // lui faire toucher « Commander » ensuite serait redemander ce qu'il
-      // vient de dire. Un colis à envoyer ou à aller chercher garde le
-      // bouton : là, il y a des détails à ajouter.
-      const livreurSeul = !recuperation && !demandeUnColis(texteClient)
-        && (parJev ? intention === 'livreur' : motsPermis && demandeUnLivreur(texteClient));
-      if (livreurSeul) {
-        for (const composant of resultat.components) {
-          if (composant.type === 'courier_form') composant.data = { ...composant.data, auto: true };
-        }
-      }
+      // Plus de carte qui commande d'elle-même (« auto ») : décision D1, la
+      // course part au toucher de « Commander le livreur », prix affiché.
       // La carte prend la position d'elle-même : plus de « Touchez Ma
       // position », qui restait affiché même une fois le livreur demandé.
       const prevue = recuperation
@@ -892,6 +878,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         conversationId,
         message: messageModele,
         ...(intention ? { intention } : {}),
+        ...(requeteCerveau ? { requete: requeteCerveau } : {}),
+        ...(rayonCerveau ? { rayon: rayonCerveau } : {}),
         ...(pageInitiale ? { pageInitiale } : {}),
         ...(messagePublic ? { messagePublic } : {}),
         clientMessageId: body.data.client_message_id,

@@ -36,7 +36,22 @@ const CONSIGNE = [
   '- Si le message du client n’a rien à voir avec les cartes trouvées (une remarque, une plainte, une blague), réponds d’abord à ce qu’il a dit.',
   '- Pas de liste, pas de titre ; **gras** seulement pour un nom de produit, de boutique ou de commerce présent dans les faits.',
   '- Pas de question si la réponse prévue n’en pose pas.',
+  '- S’il n’y a AUCUNE carte, ne dis jamais « voici », « ci-dessous », « découvrez » : rien ne s’affiche sous ta phrase.',
+  '- Sur Tovo lui-même (recrutement, contacts, horaires, adresses, procédures), ne dis que ce qui est dans les faits.',
 ].join('\n');
+
+/**
+ * Une phrase qui annonce des cartes (« Voici les autres options ») alors qu'il
+ * n'y en a aucune : retirée, quel que soit l'auteur (rédacteur ou assistant).
+ * Mesuré le 02/10 : un défaut fréquent des deux.
+ */
+export function sansPromesseVide(texte: string, composants: Component[]): string {
+  if (composants.length > 0) return texte;
+  const annonce = /\b(voici|voila|ci-dessous|ci dessous|découvrez|decouvrez|parcourez|consultez ces|vous pouvez (?:parcourir|explorer|découvrir|consulter))\b/i;
+  const phrases = texte.match(/[^.!?\n]+[.!?]*\s*/g) ?? [texte];
+  const resultat = phrases.filter((p) => !annonce.test(p)).join('').trim();
+  return resultat || texte;
+}
 
 /** Ce que les cartes montrent, en bref : les noms suffisent au rédacteur. */
 function resumeCartes(composants: Component[]): unknown[] {
@@ -69,12 +84,36 @@ export interface ARediger {
  * d'invention, la phrase prévue.
  */
 export async function rediger(r: ARediger, delaiMs = 2500): Promise<string> {
+  return (await redigerEtJuger(r, delaiMs, false)).texte;
+}
+
+/**
+ * La phrase, ET le jugement du rédacteur sur les produits trouvés : répondent-
+ * ils vraiment à ce que le client veut ? (02/10) La recherche trouve le MOT,
+ * pas le sens : « deux litres de lait » ramenait des savons au lait. Le
+ * rédacteur, lui, le voyait (« je n'ai pas trouvé de lait alimentaire, mais
+ * 49 produits cosmétiques ») : on lui demande de le dire, dans le même appel.
+ * `pertinent` vaut null s'il n'a pas pu juger (panne, délai).
+ */
+export async function redigerEtJuger(
+  r: ARediger,
+  delaiMs = 2500,
+  juger = true,
+): Promise<{ texte: string; pertinent: boolean | null }> {
   const prevue = r.prevue.trim();
-  if (env.REDACTEUR === '0' || !env.GEMINI_API_KEY || !r.message.trim()) return prevue;
+  const brut = await appeler(r, delaiMs, juger);
+  if (!brut) return { texte: prevue, pertinent: null };
+  return { texte: brut.texte, pertinent: brut.pertinent };
+}
+
+async function appeler(r: ARediger, delaiMs: number, juger: boolean): Promise<{ texte: string; pertinent: boolean | null } | null> {
+  const prevue = r.prevue.trim();
+  if (env.REDACTEUR === '0' || !env.GEMINI_API_KEY || !r.message.trim()) return null;
   const faits = new Faits();
   faits.ajouter(r.faits);
   faits.ajouter(prevue);
-  faits.ajouter(r.message);
+  // Le client : ses mots pour les noms, jamais pour un nombre (verificateur.ts).
+  faits.ajouterParole(r.message);
   for (const c of r.composants ?? []) faits.ajouter(c.data);
 
   const entree = JSON.stringify({
@@ -85,6 +124,12 @@ export async function rediger(r: ARediger, delaiMs = 2500): Promise<string> {
     cartes_affichees: resumeCartes(r.composants ?? []),
   }).slice(0, 6000);
 
+  // Avec jugement : un JSON { texte, pertinent }. « pertinent » : les produits
+  // affichés sont-ils bien ce que le client veut (du lait à boire, pas un savon
+  // au lait) ?
+  const consigne = juger
+    ? `${CONSIGNE}\n\nRéponds en JSON : {"pertinent": true|false, "texte": "<ta réponse>"}. « pertinent » : false si les produits des cartes ne correspondent pas à ce que le client veut vraiment (il demande du lait à boire et les cartes montrent des savons au lait, de l’huile de cuisine et ce sont des huiles pour le corps). Si pertinent est false, « texte » peut rester vide.`
+    : CONSIGNE;
   try {
     const reponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${env.REDACTEUR_MODELE}:generateContent`,
@@ -93,21 +138,37 @@ export async function rediger(r: ARediger, delaiMs = 2500): Promise<string> {
         ...viaLigneGoogle,
         headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: CONSIGNE }] },
+          systemInstruction: { parts: [{ text: consigne }] },
           contents: [{ role: 'user', parts: [{ text: entree }] }],
-          generationConfig: { temperature: 0.4, maxOutputTokens: 300, thinkingConfig: { thinkingBudget: 0 } },
+          generationConfig: {
+            temperature: 0.4, maxOutputTokens: 400, thinkingConfig: { thinkingBudget: 0 },
+            ...(juger ? {
+              responseMimeType: 'application/json',
+              responseSchema: { type: 'OBJECT', properties: { pertinent: { type: 'BOOLEAN' }, texte: { type: 'STRING' } }, required: ['pertinent', 'texte'] },
+            } : {}),
+          },
         }),
         signal: AbortSignal.timeout(delaiMs),
       },
     );
-    if (!reponse.ok) return prevue;
+    if (!reponse.ok) return null;
     const corps = (await reponse.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }> };
-    const texte = (corps.candidates?.[0]?.content?.parts ?? []).filter((p) => !p.thought).map((p) => p.text ?? '').join('').trim();
-    if (!texte) return prevue;
+    const brut = (corps.candidates?.[0]?.content?.parts ?? []).filter((p) => !p.thought).map((p) => p.text ?? '').join('').trim();
+    let texte = brut;
+    let pertinent: boolean | null = null;
+    if (juger) {
+      try {
+        const v = JSON.parse(brut) as { pertinent?: unknown; texte?: unknown };
+        texte = typeof v.texte === 'string' ? v.texte.trim() : '';
+        pertinent = typeof v.pertinent === 'boolean' ? v.pertinent : null;
+      } catch {
+        return null;
+      }
+    }
     const verifie = verifierTexte(texte, faits);
     // Une phrase inventée retirée : si rien ne reste, la phrase prévue.
-    return verifie.texte || prevue;
+    return { texte: sansPromesseVide(verifie.texte || prevue, r.composants ?? []), pertinent };
   } catch {
-    return prevue;
+    return null;
   }
 }

@@ -76,7 +76,9 @@ describe('le cerveau', () => {
 
   it('lit la réponse du modèle, et rejette une intention inventée', () => {
     expect(lireDecision('{"intention":"colis","sur":false}')).toEqual({ intention: 'colis', sur: false });
-    expect(lireDecision('```json\n{"intention":"suivi"}\n```')).toEqual({ intention: 'suivi', sur: true });
+    // « sur » absent : pas sûr — une action coûteuse passera par les tuiles.
+    expect(lireDecision('```json\n{"intention":"suivi"}\n```')).toEqual({ intention: 'suivi', sur: false });
+    expect(lireDecision('{"intention":"livreur"}')).toEqual({ intention: 'livreur', sur: false });
     expect(lireDecision('{"intention":"pizza"}')).toBeNull();
     expect(lireDecision('Here is the JSON requested:')).toBeNull();
   });

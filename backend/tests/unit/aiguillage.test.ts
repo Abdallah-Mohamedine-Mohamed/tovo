@@ -152,14 +152,14 @@ const envoyer = (app: Awaited<ReturnType<typeof appAvec>>, payload: Record<strin
   app.inject({ method: 'POST', url: '/chat', payload: { client_message_id: crypto.randomUUID(), context: NIAMEY, ...payload } });
 
 describe('POST /chat — aiguillage réel', () => {
-  it('Jev comprend ce que les mots ratent : « une moto pour une course » commande un livreur', async () => {
+  it('Jev comprend ce que les mots ratent : « une moto pour une course » → la carte de course (D1 : rien sans toucher)', async () => {
     jev.decision = d('livreur', 0.94);
     jev.actif = true;
     const db = fausseBase();
     const app = await appAvec(db);
     const res = await envoyer(app, { text: 'il me faut une moto pour une course' });
-    expect(res.json().content).toContain('7 minutes');
-    expect(db.rpc).toHaveBeenCalledWith('place_courier_order', expect.anything());
+    expect(res.json().components[0].type).toBe('courier_form');
+    expect(db.rpc).not.toHaveBeenCalledWith('place_courier_order', expect.anything());
     expect(generate).not.toHaveBeenCalled();
     await app.close();
   });
@@ -176,13 +176,14 @@ describe('POST /chat — aiguillage réel', () => {
     await app.close();
   });
 
-  it('le client touche « Commander un livreur » : la commande part, sa bulle affiche le libellé', async () => {
+  it('le client touche « Commander un livreur » : la carte de course, sa bulle affiche le libellé', async () => {
     const db = fausseBase();
     const app = await appAvec(db);
     const res = await envoyer(app, {
       interaction: { action: 'quick_reply', payload: { label: 'Commander un livreur', value: 'intention:livreur::le livreur' } },
     });
-    expect(res.json().content).toContain('7 minutes');
+    expect(res.json().components[0].type).toBe('courier_form');
+    expect(db.rpc).not.toHaveBeenCalledWith('place_courier_order', expect.anything());
     expect(db.inserts[0]).toMatchObject({ role: 'user', content: 'Commander un livreur' });
     await app.close();
   });
@@ -217,7 +218,8 @@ describe('POST /chat — aiguillage réel', () => {
     const db = fausseBase();
     const app = await appAvec(db);
     const res = await envoyer(app, { text: 'Je veux un livreur' });
-    expect(res.json().content).toContain('7 minutes');
+    expect(res.json().components[0].type).toBe('courier_form');
+    expect(db.rpc).not.toHaveBeenCalledWith('place_courier_order', expect.anything());
     await app.close();
   });
 });
@@ -226,13 +228,14 @@ describe('POST /chat — le cerveau', () => {
   const decision = (intention: import('../../src/ai/jev.js').Intention, sur = true) =>
     ({ intention, sur, modele: 'gemini-3.1-flash-lite', ms: 850, relance: false, erreurs: [] });
 
-  it('sûr d’une course : le livreur est commandé, sans modèle conversationnel', async () => {
+  it('sûr d’une course : la carte de course, sans modèle conversationnel (D1 : rien sans toucher)', async () => {
     cerveau.actif = true;
     cerveau.decision = decision('livreur');
     const db = fausseBase();
     const app = await appAvec(db);
     const res = await envoyer(app, { text: 'Il me faut une moto tout de suite' });
-    expect(res.json().content).toContain('7 minutes');
+    expect(res.json().components[0].type).toBe('courier_form');
+    expect(db.rpc).not.toHaveBeenCalledWith('place_courier_order', expect.anything());
     expect(generate).not.toHaveBeenCalled();
     await app.close();
   });
