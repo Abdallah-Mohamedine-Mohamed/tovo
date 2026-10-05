@@ -102,6 +102,38 @@ const GENERIQUES = new Set(['super', 'market', 'supermarche', 'supermarket', 're
 const coeur = (n: string) => n.split(' ').filter((m) => m.length > 1 && !GENERIQUES.has(m));
 
 /**
+ * LES SPÉCIALISTES d'un produit (article 8 de la constitution, 05/10) : les
+ * commerces dont le NOM porte le produit demandé (« Nouhou Merguez », « Pizza
+ * Kana », « Vente de riz »), plus ceux dont la spécialité est notée à la main
+ * dans l'annuaire. Personne n'a à cartographier les vendeurs réputés : leur
+ * enseigne le dit. Mots entiers seulement (« riz » ne trouve pas « Horizon »).
+ * Les plus proches d'abord, 20 km au plus.
+ */
+export function specialistesDe(
+  produit: string,
+  position: { lat: number; lng: number } | null | undefined,
+  exclure: (c: Commerce) => boolean = () => false,
+  combien = 2,
+): Commerce[] {
+  const singulier = (m: string) => m.replace(/(?<=..)[sx]$/, '');
+  const mots = coeur(normaliserIntention(produit)).filter((m) => m.length >= 3).map(singulier);
+  if (mots.length === 0) return [];
+  const specialiste = (c: Commerce) => {
+    const noms = [c.nom_normalise, ...(c.alias ?? []).map((a) => normaliserIntention(a))];
+    const parLeNom = noms.some((nom) => mots.every((m) => coeur(nom).map(singulier).includes(m)));
+    const parLaSpecialite = (c.specialites ?? []).some((s) => mots.includes(singulier(normaliserIntention(s))));
+    return parLeNom || parLaSpecialite;
+  };
+  return chargerCommerces()
+    .filter((c) => specialiste(c) && !exclure(c))
+    .map((c) => ({ c, d: position ? metres(position, c) : 0 }))
+    .filter(({ d }) => d <= 20_000)
+    .sort((a, b) => (position ? a.d - b.d : b.c.fiabilite - a.c.fiabilite))
+    .slice(0, combien)
+    .map(({ c }) => c);
+}
+
+/**
  * Les commerces de l'annuaire qui portent ce nom (« haddad khalil »), le
  * plus fiable d'abord. Tous les mots du nom demandé doivent y être : « tchos »
  * ne doit pas ramener « Tchoco Bar ».

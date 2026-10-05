@@ -13,7 +13,11 @@ import { supabaseClient } from './supabaseClient';
  * dans un bundle web. Ces écritures passent donc par le backend.
  */
 
-const base = import.meta.env.VITE_API_BASE_URL as string | undefined;
+// En développement, le relais de Vite (vite.config.ts) : le backend n'a pas
+// de CORS, un appel direct depuis localhost est bloqué par le navigateur.
+const base = import.meta.env.VITE_API_BASE_URL
+  ? (import.meta.env.DEV ? '/backend' : (import.meta.env.VITE_API_BASE_URL as string))
+  : undefined;
 
 export class BackendIndisponible extends Error {
   constructor() {

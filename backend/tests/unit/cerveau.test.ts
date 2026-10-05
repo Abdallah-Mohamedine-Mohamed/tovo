@@ -114,3 +114,13 @@ describe('la route décidée par le cerveau', () => {
     expect(routeDuCerveau(decision(null, false), 'bonjour')).toMatchObject({ type: 'habituel' });
   });
 });
+
+describe('article 5 : une précision n’est gardée que si le client l’a dite', () => {
+  it('un numéro inventé est retiré, un lieu dit est gardé', async () => {
+    const { detailsDits } = await import('../../src/ai/decideur.js');
+    const message = 'Il me faut un coursier pour amener des clés à mon frère à Yantala';
+    expect(detailsDits({ telephone: '0000000000', arrivee: 'Yantala' }, message, '')).toEqual({ arrivee: 'Yantala' });
+    expect(detailsDits({ telephone: '90 12 34 56' }, 'chez Moussa au 90 12 34 56', '')).toEqual({ telephone: '90 12 34 56' });
+    expect(detailsDits({ arrivee: 'Gamkalley' }, 'je veux un livreur', '')).toBeUndefined();
+  });
+});

@@ -4,7 +4,7 @@ import { SYSTEM_PROMPT, contexteUtilisateur } from './systemPrompt.js';
 import { EXECUTORS, TOOL_DEFINITIONS, type ToolContext } from './tools.js';
 import { collectIds, sanitizeToolResult, validateComponents } from './validate.js';
 import { envelope, merchantCard, type ChatEnvelope, type Component } from '../components/builders.js';
-import { alternativesHorsTovo, cataloguePage, horsTovo, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type CataloguePage, type CatalogueAnswer, type PendingMerchantChoice } from '../services/catalogue.js';
+import { ailleursEnPlus, alternativesHorsTovo, cataloguePage, horsTovo, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type CataloguePage, type CatalogueAnswer, type PendingMerchantChoice } from '../services/catalogue.js';
 import { ajouterALaNote } from '../services/noteCommande.js';
 import {
   demandeBoutiqueOuverte,
@@ -215,7 +215,11 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     // charge par le chemin complet juste après.
     ? cataloguePage(input.db, { q: requeteInitiale, limit: 8, category_id: rayonId }, false)
     : Promise.resolve(null);
-  const [previous, pageInitiale] = await Promise.all([historique, rechercheInitiale]);
+  const [previous, pageTrouvee] = await Promise.all([historique, rechercheInitiale]);
+  // Article 2 : un choix attend une réponse (« Centre Aéré ou Nouveau Marché
+  // ? ») — il passe AVANT toute recherche. « centre aéré » trouvait sinon des
+  // produits ou des commerces au lieu de désigner l'agence proposée (05/10).
+  const pageInitiale = previous.pending && !input.pageInitiale ? null : pageTrouvee;
 
   // Une référence ne vaut que s'il y a quelque chose à désigner. Sinon, le
   // message suit le chemin normal (« le moins cher » tout court reste une
@@ -243,6 +247,8 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   const produitsOuAilleurs = async (reponse: { content: string; summary: Record<string, unknown>; components: Component[] }) => {
     const produits = reponse.components.some((c) => c.type === 'product_carousel' || c.type === 'product_list');
     if (!produits || input.audio) return { reponse, phrase: await enMots(reponse.content, reponse.summary, reponse.components) };
+    // Article 8 : ce qui existe ailleurs fait partie de la réponse, sous Tovo.
+    reponse = await avecAilleurs(reponse);
     const j = await redigerEtJuger({ message: input.messagePublic ?? input.message, prevue: reponse.content,
       faits: reponse.summary, composants: reponse.components, avant: dernierDeTovo });
     // Une partie seulement répond (des merguez mêlées de tacos) : on ne garde
@@ -264,6 +270,23 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     return { reponse, phrase: j.texte };
   };
 
+  /**
+   * Article 8 : sous les produits Tovo, les commerces hors Tovo utiles
+   * (ailleursEnPlus) — le client ne sait pas qu'il pourrait les demander.
+   */
+  async function avecAilleurs(reponse: CatalogueAnswer): Promise<CatalogueAnswer> {
+    if (reponse.components.some((c) => c.type === 'commerces_hors_tovo')) return reponse;
+    const total = typeof reponse.summary.total === 'number' ? reponse.summary.total as number
+      : reponse.components.reduce((n, c) => n + (Array.isArray(c.data.items) ? (c.data.items as unknown[]).length : 0), 0);
+    const ailleurs = await ailleursEnPlus(input.db, input.requete ?? requeteInitiale, input.position, total);
+    if (!ailleurs) return reponse;
+    return {
+      content: `${reponse.content} ${ailleurs.content}`,
+      summary: { ...reponse.summary, ...ailleurs.summary },
+      components: [...reponse.components, ...ailleurs.components],
+    };
+  }
+
   // Une réponse directe : les cartes, puis la phrase du rédacteur.
   const repondre = async (reponse: CatalogueAnswer) => {
     input.onEvent?.({ type: 'results', components: reponse.components });
@@ -273,6 +296,21 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     return { ...envelope(phrase, reponse.components), messageId, rejected: [],
       usage: { input: 0, output: 0, cached: 0, cycles: 0 } };
   };
+
+  // ARTICLE 2 — un choix attend une réponse : il se résout EN PREMIER, avant
+  // la suite, la précision ou toute recherche, quelle que soit l'intention
+  // lue. « centre aéré » après « Centre Aéré ou Nouveau Marché ? » était lu
+  // une fois sur quatre comme « suite » et partait vers des commerces hors
+  // Tovo (05/10). Si la phrase ne désigne aucune des adresses proposées, le
+  // chemin habituel reprend.
+  if (previous.pending && !input.audio) {
+    const choix = await resolveCatalogueIntent(input.db, input.message, previous.pending);
+    if (choix.merchants.length === 1 && previous.pending.merchant_ids.includes(choix.merchants[0]!.id)
+        && choix.query === previous.pending.query) {
+      const reponse = await merchantIntentAnswer(input.db, choix);
+      if (reponse) return repondre(reponse);
+    }
+  }
 
   // ARTICLE 9 — ce que le client précise est GARDÉ : la note de commande,
   // que la boutique lira et que le client modifie au panier. Si rien d'autre
@@ -606,6 +644,19 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
         resumeOutil = ailleurs?.summary ?? { aucun_resultat_pertinent: true };
         faits.ajouter(resumeOutil);
         for (const composant of composantsDuTour) collectIds(composant.data, idsAutorises);
+      }
+    }
+    if (approchant || reponseOutil) {
+      const restants = composantsDuTour.filter((c) => c.type === 'product_carousel' || c.type === 'product_list');
+      if (restants.length > 0) {
+        const complet = await avecAilleurs({ content: reponseOutil ?? '', summary: (resumeOutil ?? {}) as Record<string, unknown>, components: [...composantsDuTour] });
+        if (complet.components.length > composantsDuTour.length) {
+          composantsDuTour.length = 0;
+          composantsDuTour.push(...complet.components);
+          reponseOutil = complet.content;
+          resumeOutil = complet.summary;
+          faits.ajouter(complet.summary);
+        }
       }
     }
     const verified = validateComponents(composantsDuTour, idsAutorises);

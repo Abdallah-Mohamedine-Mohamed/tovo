@@ -575,8 +575,10 @@ class _OrderTrackingState extends State<OrderTracking>
               onPressed: () => widget.onInteraction(
                 TovoInteraction('cancel_order', {'order_id': _orderId}),
               ),
+              // En rouge : une action qui défait la commande se reconnaît
+              // d'un coup d'œil (demande du fondateur, 05/10).
               style: TextButton.styleFrom(
-                foregroundColor: TovoTheme.inkDoux,
+                foregroundColor: TovoTheme.danger,
                 padding: EdgeInsets.zero,
               ),
               child: const Text('Annuler la commande'),

@@ -30,7 +30,8 @@ const { INTENTIONS, classerIntention } = await import('../../src/ai/jev.js');
 const { aiguiller } = await import('../../src/ai/cascade.js');
 const { chargerClassifieur, classerLocalement } = await import('../../src/ai/classifieur.js');
 const { demandeUnColis, demandeUnLivreur } = await import('../../src/ai/intents.js');
-const { comprendre, essaiGemini, COUTEUSES: COUTEUSES_CERVEAU } = await import('../../src/ai/decideur.js');
+const { comprendre, essaiGemini, lireDecision, CONSIGNE_CERVEAU, COUTEUSES: COUTEUSES_CERVEAU } = await import('../../src/ai/decideur.js');
+type Essai = import('../../src/ai/decideur.js').Essai;
 type Reflexion = import('../../src/ai/decideur.js').Reflexion;
 const { trieurEntraine } = await import('../../src/ai/trieurEntraine.js');
 
@@ -169,6 +170,45 @@ async function cerveau(message: string, cas?: Cas, seul?: [string, Reflexion]) {
 }
 
 /**
+ * Le MÊME cerveau (consigne et constitution, contexte, lecture, tuiles), mais
+ * un modèle servi par OpenRouter : « cerveau-or:deepseek/deepseek-v4.1-flash ».
+ * Seul le modèle change — la comparaison avec « cerveau » est juste (03/10).
+ */
+function essaiOpenRouter(modele: string): Essai {
+  return async (message, signal) => {
+    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${env.OPENROUTER_API_KEY}` },
+      body: JSON.stringify({
+        model: modele,
+        messages: [{ role: 'system', content: CONSIGNE_CERVEAU }, { role: 'user', content: message }],
+        temperature: 0,
+        max_tokens: 300,
+        response_format: { type: 'json_object' },
+        // DeepSeek V4.x : sans réflexion, comme Flash-Lite (le plus rapide).
+        ...(/deepseek/.test(modele) ? { reasoning: { enabled: false } } : {}),
+        // L'hébergeur le plus rapide à chaque fois : OpenRouter en change sinon.
+        provider: { sort: 'latency' },
+      }),
+      signal,
+    });
+    const corps = (await r.json()) as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string }; usage?: Record<string, number> };
+    if (!r.ok) throw new Error(`${modele} ${r.status} ${corps.error?.message?.slice(0, 120) ?? ''}`);
+    const d = lireDecision(corps.choices?.[0]?.message?.content ?? '');
+    if (!d) throw new Error(`${modele} : réponse illisible`);
+    return d;
+  };
+}
+
+async function cerveauOpenRouter(message: string, modele: string, cas?: Cas) {
+  const d = await comprendre(message, { avant: cas?.avant ?? null },
+    { essais: [[modele, essaiOpenRouter(modele)]], delaiMaxMs: 20_000, relanceMs: 20_000 });
+  if (!d.intention) return { predit: null, erreur: d.erreurs.join(' ; ') || 'aucune décision' };
+  const predit: Prediction = !d.sur && COUTEUSES_CERVEAU.has(d.intention) ? 'tuiles' : d.intention;
+  return { predit, via: modele };
+}
+
+/**
  * Hybride : le classifieur local (~20 ms) tranche seul quand il est sûr ET
  * que la route ne coûte rien ; tout le reste passe par le cerveau.
  */
@@ -189,6 +229,7 @@ function candidat(nom: string): Candidat | undefined {
   const [fournisseur, ...reste] = nom.split(':');
   // « cerveau:<modèle>:<réflexion> » : la consigne du cerveau, UN modèle, sans relance.
   if (fournisseur === 'cerveau') return (m, cas) => cerveau(m, cas, [reste[0]!, (reste[1] ?? 'low') as Reflexion]);
+  if (fournisseur === 'cerveau-or') return (m, cas) => cerveauOpenRouter(m, reste.join(':'), cas);
   if (fournisseur === 'gemini') {
     const niveau = reste[1] ?? 'low';
     return (m) => gemini(m, reste[0], niveau);

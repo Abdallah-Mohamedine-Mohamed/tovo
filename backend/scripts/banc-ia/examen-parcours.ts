@@ -365,9 +365,10 @@ const SCENARIOS: Scenario[] = [
   { id: 'M11', parcours: 'C', titre: '« d’autres vendeurs » (capture du 02/10)', etapes: [
     { dire: 'Je veux manger des bons merguez.', verifier: [] },
     { dire: 'Il n’y a pas d’autres vendeurs de merguez ?', verifier: [
-      ['des choix qu’il n’avait pas encore vus', (r, c) => {
+      ['des choix qu’il n’avait pas encore vus, ou « rien d’autre »', (r, c) => {
         const avant = new Set([...produits(c.reponses[0]!).map((i) => String(i.id)), ...commerces(c.reponses[0]!).map(nom)]);
-        return [...produits(r).map((i) => String(i.id)), ...commerces(r).map(nom)].some((x) => !avant.has(x));
+        const nouveaux = [...produits(r).map((i) => String(i.id)), ...commerces(r).map(nom)].some((x) => !avant.has(x));
+        return nouveaux || (r.composants.length === 0 && /rien d.autre|pas d.autres?|aucun autre/i.test(r.texte));
       }],
       ['les vendeurs hors Tovo aussi, dans la conversation (le grilleur réputé pour ses merguez)', (r, c) =>
         [...commerces(c.reponses[0]!), ...commerces(r)].some((i) => /nouhou/i.test(nom(i)))],
@@ -407,6 +408,27 @@ const SCENARIOS: Scenario[] = [
     // Des choix, ou la carte de course (rien ne part sans toucher depuis D1 :
     // la carte ne coûte rien à écarter, article 11).
     aucuneCommande, ['des choix proposés, ou une carte sans engagement', (r) => aLaCarte('quick_replies')(r) || aLaCarte('courier_form')(r)],
+  ] }] },
+
+  // P — PREMIER CONTACT (05/10) : une seule phrase, celle d'un client qui
+  // découvre Tovo, sans question qui trahisse ce que l'examinateur sait
+  // (« d'autres vendeurs ? »). Article 8 : ce qui existe ailleurs fait partie
+  // de la réponse, sans qu'on ait à le demander.
+  { id: 'P1', parcours: 'C', titre: 'merguez : Tovo ET le spécialiste, d’emblée', etapes: [{ dire: 'merguez', verifier: [
+    ['des merguez de Tovo', (r) => produits(r).some((i) => /merguez/.test(sansAccents(nom(i))))],
+    ['et le spécialiste hors Tovo, sans le demander', (r) => commerces(r).some((i) => /merguez/i.test(nom(i)))],
+    pasDAvancePromise, aucuneCommande,
+  ] }] },
+  { id: 'P2', parcours: 'C', titre: 'pizza : beaucoup sur Tovo, seulement des spécialistes en plus', etapes: [{ dire: 'pizza', verifier: [
+    ['des pizzas de Tovo', produitsSurtout(/pizza|^p\. /)],
+    ['hors Tovo : seulement des spécialistes (leur nom porte le produit)', (r) => commerces(r).every((i) => /pizz/i.test(nom(i)))],
+  ] }] },
+  // Corrigé le 05/10 : j'avais supposé que Tovo n'avait pas de miel ; il en a
+  // six. Le scénario vérifie donc ce qui doit se passer quand Tovo en a.
+  { id: 'P3', parcours: 'A', titre: 'un produit que Tovo a (miel)', etapes: [{ dire: 'Je voudrais du miel', verifier: [
+    ['du miel de Tovo', produitsSurtout(/miel/, 0.8)],
+    ['jamais de produits sans rapport', aucunProduit(/^(?!.*miel).*$/)],
+    pasDAvancePromise,
   ] }] },
 
   // G — Conversation : rien à afficher.

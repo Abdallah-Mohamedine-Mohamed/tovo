@@ -5,7 +5,7 @@ import { embed, embeddingsEnabled } from './embeddings.js';
 import { commandesRecentes, marquerLePlusCommande, parPopularite } from './popularite.js';
 import { offreVille } from './livreur.js';
 import { serviceClient } from './supabase.js';
-import { carteCommerces, commercesNommes, commercesPourProduit, libelleDes, type Commerce } from './commerces.js';
+import { carteCommerces, commercesNommes, commercesPourProduit, libelleDes, specialistesDe, type Commerce } from './commerces.js';
 import { chercherSurGoogle, lieuGoogle, NOTE_GOOGLE } from './googlePlaces.js';
 import { heuresDeGarde, reponseGarde } from './pharmaciesGarde.js';
 import { paiementMobileActif } from '../config/env.js';
@@ -693,6 +693,45 @@ function avecProduit(carte: Component, produit: string): Component {
  *  3. un produit : les commerces du bon type les plus proches.
  * La phrase du code n'est qu'une base : le rédacteur la réécrit.
  */
+/**
+ * ARTICLE 8 de la constitution (05/10) : ce qui existe ailleurs fait partie de
+ * la réponse, SOUS ce que Tovo propose. Le client qui tape « merguez » ne sait
+ * pas qu'il pourrait demander « d'autres vendeurs » : on le lui montre.
+ *  - les spécialistes (leur nom porte le produit) : toujours ;
+ *  - si Tovo a peu de résultats (3 au plus) : les commerces du bon type ;
+ *  - si Tovo en a beaucoup : rien d'autre (on ne noie pas les partenaires).
+ * null si rien d'utile.
+ */
+export const PEU_DE_RESULTATS = 3;
+export async function ailleursEnPlus(
+  db: SupabaseClient,
+  produit: string,
+  position: { lat: number; lng: number } | null | undefined,
+  resultatsTovo: number,
+): Promise<CatalogueAnswer | null> {
+  const quoi = produit.trim();
+  if (!quoi) return null;
+  const surTovo = await estSurTovo(db);
+  const specialistes = specialistesDe(quoi, position, surTovo, 2);
+  const duBonType = resultatsTovo <= PEU_DE_RESULTATS
+    ? commercesPourProduit(quoi, position, (c) => surTovo(c) || specialistes.some((s) => s.id === c.id), 3)
+    : [];
+  const commerces = [...specialistes, ...duBonType].slice(0, 3);
+  if (commerces.length === 0) return null;
+  return {
+    content: 'Hors de Tovo, ces commerces en ont probablement ; un livreur peut y aller, il vous appelle pour convenir de l’achat.',
+    summary: {
+      aussi_hors_tovo: commerces.map((c) => ({
+        nom: c.nom, type: c.type, specialiste: specialistes.includes(c),
+        distance: position ? `${Math.round(Math.hypot((position.lat - c.lat) * 111_000, (position.lng - c.lng) * 108_000) / 100) / 10} km` : null,
+      })),
+      consigne: 'Sous les produits Tovo, la carte montre AUSSI des commerces hors Tovo qui en ont probablement (un spécialiste si son nom porte le produit). '
+        + 'Dis-le en une courte phrase après avoir présenté ce que Tovo propose. Un livreur peut y aller : il appelle le client pour convenir de l’achat ; jamais d’avance promise.',
+    },
+    components: [avecProduit(carteCommerces(commerces, `Acheter : ${quoi}`, HORS_TOVO_OUI, position), quoi)],
+  };
+}
+
 export async function horsTovo(
   db: SupabaseClient,
   message: string,

@@ -177,6 +177,29 @@ export function lireDecision(texte: string): Lecture | null {
   }
 }
 
+/**
+ * ARTICLE 5 garanti : une précision n'est gardée que si le client l'a DITE
+ * (dans son message, ou dans ce à quoi il répond). Un numéro doit s'y
+ * trouver chiffre pour chiffre ; un lieu ou une préférence, par au moins un
+ * de ses mots. Vu le 05/10 : le cerveau inventait « 0000000000 » comme
+ * téléphone, une fois sur trois.
+ */
+export function detailsDits(details: Details | undefined, message: string, avant: string): Details | undefined {
+  if (!details) return undefined;
+  const dit = `${message} ${avant}`;
+  const chiffres = dit.replace(/\D/g, '');
+  const mots = new Set(dit.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(/[^a-z0-9]+/).filter((m) => m.length >= 3));
+  const motsDe = (t: string) => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(/[^a-z0-9]+/).filter((m) => m.length >= 3);
+  const garde: Details = {};
+  for (const [cle, valeur] of Object.entries(details) as Array<[keyof Details, string]>) {
+    const vrai = cle === 'telephone'
+      ? valeur.replace(/\D/g, '').length >= 8 && chiffres.includes(valeur.replace(/\D/g, '').replace(/^227/, ''))
+      : motsDe(valeur).some((m) => mots.has(m));
+    if (vrai) garde[cle] = valeur;
+  }
+  return Object.keys(garde).length ? garde : undefined;
+}
+
 /** Les précisions, nettoyées : seulement des chaînes non vides et courtes. */
 function lireDetails(brut: unknown): Details | undefined {
   if (!brut || typeof brut !== 'object') return undefined;
@@ -346,7 +369,12 @@ export async function comprendre(
       // Le suivant part à son tour si celui-ci traîne.
       minuterie = setTimeout(lancerSuivant, relanceMs);
       essai(texte, controleur.signal).then(
-        (d) => terminer({ ...d, modele, ms: performance.now() - debut, relance: lances > 1, erreurs }),
+        (d) => {
+          // Article 5 : une précision n'est gardée que si le client l'a DITE.
+          const details = detailsDits(d.details, message, contexte.avant ?? '');
+          const { details: _brut, ...reste } = d;
+          terminer({ ...reste, ...(details ? { details } : {}), modele, ms: performance.now() - debut, relance: lances > 1, erreurs });
+        },
         (cause: unknown) => {
           enCours--;
           if (fini) return;
