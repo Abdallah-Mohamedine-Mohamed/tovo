@@ -84,6 +84,16 @@ export function chargerCommerces(chemin = join(process.cwd(), 'data', 'commerces
   } catch {
     cache = [];
   }
+  // Les types vérifiés d'après le nom (scripts/commerces/verifier-types.ts,
+  // 05/10) : « Elegance meuble » n'est pas un supermarché. À part de l'annuaire
+  // pour survivre à sa reconstruction.
+  try {
+    const { corrections } = JSON.parse(readFileSync(join(process.cwd(), 'data', 'commerces-types.json'), 'utf8')) as
+      { corrections: Record<string, { type: TypeCommerce }> };
+    cache = cache.map((c) => (corrections[c.id] ? { ...c, type: corrections[c.id]!.type } : c));
+  } catch {
+    // Pas de corrections : l'annuaire tel quel.
+  }
   return cache;
 }
 
@@ -100,6 +110,70 @@ const metres = (a: { lat: number; lng: number }, b: { lat: number; lng: number }
 const GENERIQUES = new Set(['super', 'market', 'supermarche', 'supermarket', 'restaurant', 'boutique', 'magasin',
   'ets', 'etablissement', 'etablissements', 'sarl', 'sa', 'niamey', 'niger', 'le', 'la', 'les', 'de', 'du', 'des', 'chez']);
 const coeur = (n: string) => n.split(' ').filter((m) => m.length > 1 && !GENERIQUES.has(m));
+
+/**
+ * Les mots qui disent CE QU'EST un commerce sans dire LEQUEL : un nom qui ne
+ * partage que ceux-là avec un autre n'est pas le même commerce (« French
+ * Tacos » n'est pas O'Takoss, « Nass Telecom 227 » n'est pas « 227 Two Two
+ * Seven »).
+ */
+// Les mots qui disent le MÉTIER : deux noms aux métiers différents
+// (« Pharmacie du Ténéré », « Ténéré Shop ») ne sont pas le même commerce.
+const METIERS: Record<string, string> = {
+  pharmacie: 'pharmacie', parapharmacie: 'pharmacie', para: 'pharmacie', restaurant: 'restaurant', resto: 'restaurant',
+  cafe: 'restaurant', food: 'restaurant', foods: 'restaurant', grill: 'restaurant', marche: 'marche', market: 'commerce',
+  supermarche: 'commerce', shop: 'commerce', store: 'commerce', boutique: 'commerce', alimentation: 'commerce',
+  telecom: 'telephone', telecoms: 'telephone', fashion: 'mode', boulangerie: 'boulangerie', patisserie: 'boulangerie',
+  boucherie: 'boucherie',
+};
+// Les quartiers et repères : « Baaklini Château 1 » est une agence de Baaklini.
+const LIEUX = new Set(['plateau', 'chateau', 'yantala', 'francophonie', 'centre', 'aere', 'nouveau', 'koubia', 'kouara',
+  'kalley', 'harobanda', 'gamkalley', 'lazaret', 'bobiel', 'wadata', 'poudriere', 'talladje', 'banifandou', '2000',
+  'commune', 'cite', 'route', 'boulevard', 'rond', 'point', 'goudel', 'saga', 'liberte', 'deyzeibon', 'koira', 'kano',
+  'tegui', 'dar', 'salam', 'maourey', 'zongo', 'recasement', 'terminus', 'aeroport', 'garage', 'yantala']);
+const DESCRIPTIFS = new Set([...GENERIQUES, ...Object.keys(METIERS), ...LIEUX, 'bar', 'fast', 'tacos', 'taco', 'pizza',
+  'pizzeria', 'chawarma', 'shawarma', 'burger', 'burgers', 'nem', 'nems', 'petit', 'grand', 'complexe', 'complex',
+  'center', 'and', 'et', 'au', 'aux', 'du', '227', 'niger', 'generale', 'general', 'steak', 'house', 'maison', 'global',
+  'business', 'trading', 'services', 'service']);
+const distinctifs = (nom: string) => normaliserIntention(nom.replace(/\([^)]*\)?/g, ' '))
+  .split(' ').filter((m) => m.length > 1 && !DESCRIPTIFS.has(m) && !/^\d+$/.test(m));
+const metiers = (nom: string) => new Set(normaliserIntention(nom).split(' ').map((m) => METIERS[m]).filter(Boolean));
+function motsProches(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length < 5 || b.length < 5 || Math.abs(a.length - b.length) > 2) return false;
+  // Distance d'édition simple : une faute (deux pour un mot de 7 lettres ou plus).
+  const ligne = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = ligne[0]!;
+    ligne[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const haut = ligne[j]!;
+      ligne[j] = Math.min(ligne[j]! + 1, ligne[j - 1]! + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = haut;
+    }
+  }
+  // Au plus une erreur pour quatre lettres : « Karassou » = « Karasu », mais
+  // pas « Kassai » = « Kasuwa » ni « Albarka » = « Albek ».
+  return ligne[b.length]! <= Math.floor(Math.max(a.length, b.length) / 4);
+}
+/**
+ * Deux noms désignent-ils le même commerce ? Oui si leurs mots DISTINCTIFS
+ * (ni métier, ni quartier, ni mot générique) se correspondent dans les DEUX
+ * sens, une faute tolérée : « Baklini » = « BAAKLINI ( Centre Aéré ) »,
+ * « Royal Grill » = « Royal Grill Steak House ». Mais pas « Nouhou Merguez »
+ * et « Nouhou Market » (un mot de plus), ni « Pharmacie du Ténéré » et
+ * « Ténéré Shop » (deux métiers). Un nom sans mot distinctif ne correspond à rien.
+ */
+export function memeCommerce(nomA: string, nomB: string): boolean {
+  const a = distinctifs(nomA);
+  const b = distinctifs(nomB);
+  if (a.length === 0 || b.length === 0) return false;
+  const ma = metiers(nomA);
+  const mb = metiers(nomB);
+  if (ma.size > 0 && mb.size > 0 && ![...ma].some((m) => mb.has(m))) return false;
+  const inclus = (x: string[], y: string[]) => x.every((m) => y.some((n) => motsProches(m, n)));
+  return inclus(a, b) && inclus(b, a);
+}
 
 /**
  * Les commerces de l'annuaire d'un TYPE (« les supermarchés »), les plus
@@ -193,6 +267,8 @@ export function commercesPourProduit(
   exclure: (c: Commerce) => boolean = () => false,
   combien = 3,
   elargir = false,
+  /** « Plus loin » : seulement au-delà de cette distance (article 7). */
+  auDelaDe = 0,
 ): Commerce[] {
   const n = normaliserIntention(texte);
   const mots = new Set(n.split(' '));
@@ -209,7 +285,7 @@ export function commercesPourProduit(
     return position
       ? candidats
         .map((c) => ({ c, d: metres(position, c) }))
-        .filter(({ d }) => d <= (elargir ? 20_000 : 8000))
+        .filter(({ d }) => d <= (elargir ? 20_000 : 8000) && d > auDelaDe)
         .sort((a, b) => a.d - b.d)
         .map(({ c }) => c)
       : candidats.sort((a, b) => b.fiabilite - a.fiabilite);

@@ -24,7 +24,7 @@ export class Faits {
    * « gardee » (une précision enregistrée, un signalement transmis),
    * « commande » (une commande ou une course existe).
    */
-  private readonly actions = new Set<'gardee' | 'commande' | 'annulee'>();
+  private readonly actions = new Set<'gardee' | 'commande' | 'annulee' | 'proche' | 'ailleurs'>();
   /** Les numéros de téléphone que les données OU le client ont donnés (article 13). */
   private readonly telephones = new Set<string>();
 
@@ -51,11 +51,15 @@ export class Faits {
       if (o.enregistree === true || o.signale === true) this.actions.add('gardee');
       if (typeof o.order_id === 'string' || o.livreur_assigne === true) this.actions.add('commande');
       if (o.annulee === true || o.status === 'cancelled') this.actions.add('annulee');
+      // Un lieu montré à moins de 2 km : « près de vous » devient vrai.
+      if (typeof o.distance_m === 'number' && o.distance_m < 2000) this.actions.add('proche');
+      // Des commerces hors Tovo réellement montrés : on peut y envoyer le client.
+      if (o.commerces_hors_tovo || o.aussi_hors_tovo || o.boutique_hors_tovo || o.livreur) this.actions.add('ailleurs');
       for (const v of Object.values(o)) this.ajouter(v, profondeur + 1);
     }
   }
 
-  confirme(action: 'gardee' | 'commande' | 'annulee'): boolean {
+  confirme(action: 'gardee' | 'commande' | 'annulee' | 'proche' | 'ailleurs'): boolean {
     return this.actions.has(action);
   }
 
@@ -143,6 +147,19 @@ function telephonesDans(texte: string): string[] {
 }
 
 const DIT_ANNULE = /\b(?:c.est (?:bien )?annul[ée]|j.ai (?:bien )?annul[ée]|(?:est|a été) annul[ée]e?)/i;
+/**
+ * ARTICLE 5 : « près de vous », « à proximité » ne se disent que si un lieu
+ * montré est vraiment à moins de 2 km (vu le 05/10 : « Nouhou Merguez, situé à
+ * proximité » à 3,1 km).
+ */
+/**
+ * ARTICLE 8 garanti : on n'envoie le client vers un TYPE de commerce (« les
+ * librairies de Niamey », « une pharmacie ») que si des commerces lui sont
+ * montrés. Vu le 05/10 : « consultez les librairies spécialisées de Niamey »,
+ * deviné, sans aucune donnée.
+ */
+const ENVOIE_AILLEURS = /(?:je vous (?:invite|conseille|recommande)|vous (?:pouvez|pourriez) (?:essayer|consulter|vous rendre|aller|demander)|vous (?:en )?trouverez(?: probablement| sans doute| s[uû]rement)?|rendez-vous|essayez)[^.!?]*\b(?:librairies?|boutiques?|magasins?|pharmacies?|supermarch[ée]s?|march[ée]s?|commerces?|vendeurs?|[ée]piceries?|boulangeries?|quincailleries?)\b/i;
+const DIT_PROCHE = /(?:^|[\s,;(«'’])(?:pr[eè]s de (?:chez )?vous|[aà] proximit[ée]|tout pr[eè]s|non loin de (?:chez )?vous|pas loin de (?:chez )?vous|juste [aà] c[oô]t[ée])/i;
 const DIT_EN_ROUTE = /\b(?:(?:est|sont) en route|se rend\b|se rendra\b|se dirige|vous rejoint|est parti|arrive (?:chez|à) vous|vient chez vous)/i;
 
 /** Les affirmations d'une phrase qui ne viennent pas des faits. */
@@ -156,6 +173,8 @@ export function affirmationsInventees(phrase: string, faits: Faits): Affirmation
   }
   if (DIT_GARDE.test(phrase) && !faits.confirme('gardee')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_GARDE)![0] });
   if (DIT_EN_ROUTE.test(phrase) && !faits.confirme('commande')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_EN_ROUTE)![0] });
+  if (DIT_PROCHE.test(phrase) && !faits.confirme('proche')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_PROCHE)![0] });
+  if (ENVOIE_AILLEURS.test(phrase) && !faits.confirme('ailleurs')) inventees.push({ genre: 'action', valeur: phrase.match(ENVOIE_AILLEURS)![0] });
   if (DIT_ANNULE.test(phrase) && !faits.confirme('annulee')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_ANNULE)![0] });
   if (CONSEIL_MEDICAL.test(phrase)) inventees.push({ genre: 'sante', valeur: CONSEIL_MEDICAL.match(phrase)?.[0] ?? phrase });
   if (TUTOIEMENT.test(phrase)) inventees.push({ genre: 'ton', valeur: phrase.match(TUTOIEMENT)![0].trim() });

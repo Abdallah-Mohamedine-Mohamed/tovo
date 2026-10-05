@@ -31,7 +31,10 @@ export async function lireNote(db: SupabaseClient): Promise<string | null> {
  * ce cas, on ne prétend pas l'avoir notée.
  */
 export async function ajouterALaNote(db: SupabaseClient, userId: string, precision: string): Promise<string | null> {
-  const ajout = precision.replace(/\s+/g, ' ').trim();
+  // La boutique lit la précision, pas la politesse (« s'il vous plaît », « merci »).
+  const ajout = precision
+    .replace(/\b(?:s['’]il (?:vous|te) pla[iî]t|svp|stp|merci(?: beaucoup)?|please)\b/gi, '')
+    .replace(/\s+/g, ' ').replace(/^[\s,.;!-]+|[\s,.;!-]+$/g, '').trim();
   if (!ajout) return null;
   const actuelle = await lireNote(db);
   const deja = actuelle?.toLowerCase().includes(ajout.toLowerCase());

@@ -5,7 +5,7 @@ import { embed, embeddingsEnabled } from './embeddings.js';
 import { commandesRecentes, marquerLePlusCommande, parPopularite } from './popularite.js';
 import { offreVille } from './livreur.js';
 import { serviceClient } from './supabase.js';
-import { carteCommerces, commercesDuType, commercesNommes, commercesPourProduit, libelleDes, specialistesDe, type Commerce, type TypeCommerce } from './commerces.js';
+import { carteCommerces, commercesDuType, commercesNommes, memeCommerce, commercesPourProduit, libelleDes, specialistesDe, type Commerce, type TypeCommerce } from './commerces.js';
 import { avecOuvertureReelle } from './ouverture.js';
 import { chercherSurGoogle, lieuGoogle, NOTE_GOOGLE } from './googlePlaces.js';
 import { heuresDeGarde, reponseGarde } from './pharmaciesGarde.js';
@@ -567,7 +567,10 @@ async function estSurTovo(db: SupabaseClient): Promise<(c: Commerce) => boolean>
   return (c) => {
     let sur = resultats.get(c.id);
     if (sur === undefined) {
-      sur = boutiquesCorrespondantes(c.nom, variantes).length > 0;
+      // Les mots distinctifs, pas la ressemblance tolérante faite pour les fautes
+      // de frappe du client : celle-ci cachait « French Tacos » ou « New York
+      // Restaurant », pris pour O'Takoss et AFC (05/10).
+      sur = variantes.some((v) => memeCommerce(c.nom, v.name));
       resultats.set(c.id, sur);
     }
     return sur;
@@ -629,11 +632,11 @@ export async function alternativesHorsTovo(
   position?: { lat: number; lng: number } | null,
   produit?: string,
   /** Article 7 : « d'autres », « plus loin » — hors ce qui a déjà été montré, tous types, plus loin. */
-  suite?: { dejaVus: ReadonlySet<string> },
+  suite?: { dejaVus: ReadonlySet<string>; auDelaDe?: number },
 ): Promise<CatalogueAnswer | null> {
   const surTovo = await estSurTovo(db);
   const commerces = suite
-    ? commercesPourProduit(texte, position, (x) => suite.dejaVus.has(x.nom) || surTovo(x), 3, true)
+    ? commercesPourProduit(texte, position, (x) => suite.dejaVus.has(x.nom) || surTovo(x), 3, true, suite.auDelaDe ?? 0)
     : commercesPourProduit(texte, position, surTovo);
   if (commerces.length === 0) return null;
   const quoi = (produit ?? '').trim();

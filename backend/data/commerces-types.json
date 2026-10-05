@@ -1,0 +1,171 @@
+{
+ "verifie_le": "2026-10-05",
+ "source": "scripts/commerces/verifier-types.ts (Gemini 3.1 Pro, d’après le nom)",
+ "corrections": {
+  "ovt:491af2e1-0875-481d-ac9d-544c2d6f9c29": {
+   "type": "electronique",
+   "avant": "quincaillerie",
+   "nom": "ZEF Technologie"
+  },
+  "ovt:8127ce3d-c2e1-4f1a-8ac3-218ac46f8332": {
+   "type": "marche",
+   "avant": "boutique",
+   "nom": "Gadafawa Market"
+  },
+  "ovt:aa81848c-1913-47f1-9102-ea0f36ca86b3": {
+   "type": "grillades",
+   "avant": "restaurant",
+   "nom": "Royal Grill"
+  },
+  "ovt:ce64aae4-b611-4157-982b-de42f2c28540": {
+   "type": "marche",
+   "avant": "vetements",
+   "nom": "Marché Najudd Global"
+  },
+  "ovt:664899c7-375f-4524-b5ed-28ab68340275": {
+   "type": "beaute",
+   "avant": "vetements",
+   "nom": "Hams Parfums"
+  },
+  "ovt:1b03070d-b3ba-472a-98a3-568fa99f9c0d": {
+   "type": "vetements",
+   "avant": "beaute",
+   "nom": "Haute Qualité et couture"
+  },
+  "ovt:a4bd4263-febe-4ecf-b828-c9366bb05166": {
+   "type": "boutique",
+   "avant": "quincaillerie",
+   "nom": "Ets TRG Meubles"
+  },
+  "ovt:c17ed474-8dfa-4d09-afdd-5a69e1ece1bf": {
+   "type": "electronique",
+   "avant": "quincaillerie",
+   "nom": "Fleming Electronic"
+  },
+  "ovt:0f22247b-3c5f-4f29-8016-9b367258637e": {
+   "type": "marche",
+   "avant": "boutique",
+   "nom": "Niamey Grand marchè"
+  },
+  "ovt:39901a9f-e70a-4346-a6bc-d56df21e9917": {
+   "type": "boutique",
+   "avant": "restaurant",
+   "nom": "Eunice shop"
+  },
+  "ovt:52e892c2-afac-44dc-b8b1-dd0d1bea01ef": {
+   "type": "electronique",
+   "avant": "quincaillerie",
+   "nom": "A.D.S Pc Center"
+  },
+  "ovt:d7ee4d1b-5de2-40a4-bd90-fd75a6ecfb1b": {
+   "type": "marche",
+   "avant": "boutique",
+   "nom": "Grand Bazar"
+  },
+  "ovt:9e2a91b2-f13a-4881-b167-48ae327877d7": {
+   "type": "electronique",
+   "avant": "vetements",
+   "nom": "Wember Telecoms"
+  },
+  "ovt:a6f66254-1b3d-49ed-92f3-b1e0c415fe60": {
+   "type": "boutique",
+   "avant": "supermarche",
+   "nom": "Intima Boutique Niamey"
+  },
+  "ovt:fcad9f16-c33e-478a-843c-90553343cbc8": {
+   "type": "electronique",
+   "avant": "quincaillerie",
+   "nom": "Asta Informatique"
+  },
+  "ovt:22b484d2-f981-4848-83ac-2d19a92ad85b": {
+   "type": "boulangerie",
+   "avant": "restaurant",
+   "nom": "Boulangerie Patisserie Youssoura"
+  },
+  "ovt:1f5f94de-1bed-4a12-a5e9-a1cc58731a8e": {
+   "type": "electronique",
+   "avant": "boutique",
+   "nom": "koanda_telecom"
+  },
+  "osm:osm:node/4270993989": {
+   "type": "boutique",
+   "avant": "supermarche",
+   "nom": "Centre de Commerce et de Loisirs Zabarkan"
+  },
+  "osm:osm:node/4881607621": {
+   "type": "marche",
+   "avant": "supermarche",
+   "nom": "Petit Marché Niamey 2000"
+  },
+  "osm:osm:node/5124192639": {
+   "type": "grillades",
+   "avant": "restaurant",
+   "nom": "mechoui"
+  },
+  "osm:osm:node/5461956526": {
+   "type": "marche",
+   "avant": "supermarche",
+   "nom": "Grand Marché"
+  },
+  "osm:osm:node/5468342422": {
+   "type": "boutique",
+   "avant": "supermarche",
+   "nom": "Anisa Business Centre"
+  },
+  "osm:osm:node/5679382091": {
+   "type": "boutique",
+   "avant": "supermarche",
+   "nom": "Vente de RIZ"
+  },
+  "osm:osm:node/6707983988": {
+   "type": "boutique",
+   "avant": "supermarche",
+   "nom": "Quartier 6 Porte 13"
+  },
+  "osm:osm:node/6795762786": {
+   "type": "grillades",
+   "avant": "supermarche",
+   "nom": "Klichi yaou garba"
+  },
+  "osm:osm:node/8250999334": {
+   "type": "marche",
+   "avant": "supermarche",
+   "nom": "Marché Nouhou"
+  },
+  "osm:osm:node/10738980711": {
+   "type": "boucherie",
+   "avant": "supermarche",
+   "nom": "Boucherie plateau Mauris delasse"
+  },
+  "osm:osm:node/10738980740": {
+   "type": "boutique",
+   "avant": "supermarche",
+   "nom": "Elegance meuble"
+  },
+  "osm:osm:node/12259297532": {
+   "type": "grillades",
+   "avant": "restaurant",
+   "nom": "Frittes brochettes"
+  },
+  "osm:osm:node/12989840713": {
+   "type": "boutique",
+   "avant": "marche",
+   "nom": "Amir Shop"
+  },
+  "osm:osm:node/13352685960": {
+   "type": "boutique",
+   "avant": "marche",
+   "nom": "Agrigarbalshop"
+  },
+  "osm:osm:way/287948240": {
+   "type": "grillades",
+   "avant": "restaurant",
+   "nom": "Mechoi Soni Ali Ber"
+  },
+  "osm:osm:way/921251995": {
+   "type": "supermarche",
+   "avant": "restaurant",
+   "nom": "Alimentation Chez Maiga"
+  }
+ }
+}

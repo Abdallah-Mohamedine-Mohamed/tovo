@@ -142,3 +142,25 @@ describe('article 12 : un conseil n’est médical que s’il porte sur un médi
     expect(verifierTexte('Un sac de riz de 500 g ou un Coca de 330 ml.', new Faits()).texte).toContain('500 g');
   });
 });
+
+describe('article 5 : « près de vous » seulement sous 2 km', () => {
+  it('à 3 km, la phrase est retirée ; à 800 m, elle est gardée', () => {
+    const loin = new Faits();
+    loin.ajouter({ commerces: [{ nom: 'Nouhou Merguez', distance_m: 3138 }] });
+    expect(verifierTexte('Nouhou Merguez est situé à proximité.', loin).texte).toBe('');
+    const proche = new Faits();
+    proche.ajouter({ commerces: [{ nom: 'Papayo', distance_m: 810 }] });
+    expect(verifierTexte('Papayo est tout près de vous.', proche).texte).toContain('Papayo');
+  });
+});
+
+describe('article 8 : n’envoyer vers un type de commerce que s’il est montré', () => {
+  it('sans commerce montré, « consultez les librairies » est retiré ; avec, il reste', () => {
+    expect(verifierTexte('Je vous invite à consulter les librairies spécialisées de Niamey.', new Faits()).texte).toBe('');
+    const montres = new Faits();
+    montres.ajouter({ commerces_hors_tovo: [{ nom: 'Pharmacie Deyzeibon', distance_m: 380 }] });
+    expect(verifierTexte('Vous trouverez probablement ce médicament dans ces pharmacies.', montres).texte).toContain('pharmacies');
+    // Une phrase ordinaire n'est pas touchée.
+    expect(verifierTexte('Je n’ai pas de livres dans le catalogue pour le moment.', new Faits()).texte).toContain('livres');
+  });
+});

@@ -63,3 +63,15 @@ Deux règles d'écriture :
 - **Une boutique nommée est cherchée comme boutique, jamais comme produit au nom proche** (article 1) : « Otakoss » ne doit pas donner des tacos d'autres enseignes.
 - **Un produit dont le nom COMMENCE par ce qui est cherché y répond**, et le juge ne peut pas l'écarter (article 6) : « Riz basmati » est du riz, « Savon au lait » est un savon.
 - **Le vocabulaire local est construit à partir du catalogue** (`data/vocabulaire-local.json`, `scripts/voix/vocabulaire-local.ts`). Ces plats, et leurs déformations par la transcription (placali, entendu « plat cali »), sont donnés à la transcription et au cerveau. Le produit est toujours écrit en français.
+
+## Consolidation du 05/10 (soir) : 57/57 sur quatre passages, banc à 96 %
+
+- **Les détecteurs lisent les mots du client, jamais la note d'aiguillage** ajoutée pour l'assistant. La note de « designe » cite « le deuxième, celui-là » : elle faisait passer « sans oignons » et « centre aéré » pour des désignations.
+- **Tout champ utile du cerveau est obligatoire, vide s'il n'y a rien** (précision, départ, arrivée, téléphone, type de commerce). Facultatifs, ces champs étaient omis une fois sur deux, et même 4 fois sur 4 pour « clés à mon frère à Yantala ».
+- **Deux noms désignent le même commerce seulement si leurs mots distinctifs correspondent dans les deux sens** (`memeCommerce`). Les métiers et les quartiers ne comptent pas, et la tolérance est d'une faute pour quatre lettres. « French Tacos », « Nouhou Merguez » et « Pharmacie du Ténéré » ne sont plus cachés au client.
+- **Les types de l'annuaire sont vérifiés d'après le nom** (`data/commerces-types.json`, 33 corrections), en respectant les usages de Niamey : « Alimentation » = épicerie, « Dépôt » = pharmacie.
+- **Le vérificateur garantit en plus :**
+  - « près de vous » seulement sous 2 km ;
+  - « plus loin » montre seulement des commerces plus éloignés que ceux déjà vus ;
+  - aucun renvoi vers un type de commerce (« les librairies de Niamey ») si aucun commerce n'est montré.
+- **Après le tri des produits**, la phrase et les commerces hors Tovo sont recalculés sur ce qui reste.

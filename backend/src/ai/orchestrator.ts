@@ -187,15 +187,19 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // « Le deuxième », « ajoute-le » : le client désigne ce qu'il a déjà vu. Ces
   // phrases ne contiennent aucun produit ; les passer aux voies rapides les
   // transformait en recherche du mot « ajoute », qui répondait « introuvable ».
-  const reference = !input.audio && referenceAuxResultats(input.message);
+  // Les détecteurs lisent les mots du CLIENT, jamais la note d'aiguillage
+  // ajoutée pour l'assistant : celle de « designe » cite « le deuxième,
+  // celui-là… », et « sans oignons » passait pour une désignation (05/10).
+  const parole = input.messagePublic ?? input.message;
+  const reference = !input.audio && referenceAuxResultats(parole);
   // « Comme d'habitude » : aucun produit dans la phrase, seul le modèle sait
   // relire l'historique des commandes. Toujours au modèle, affichage ou pas.
-  const commandePassee = !input.audio && demandeDeCommandePassee(input.message);
+  const commandePassee = !input.audio && demandeDeCommandePassee(parole);
   // « De la viande chez Tchos » : la boutique nommée décide. Le produit et le
   // rayon du cerveau (« viande Tchos », repas) ramenaient Maison Grill.
-  const boutiqueNommee = !input.audio && Boolean(nomBoutiqueApresMarqueur(input.message));
+  const boutiqueNommee = !input.audio && Boolean(nomBoutiqueApresMarqueur(parole));
   const requeteInitiale = input.audio ? ''
-    : requeteProduitUtilisateur((boutiqueNommee ? undefined : input.requete) ?? input.message);
+    : requeteProduitUtilisateur((boutiqueNommee ? undefined : input.requete) ?? parole);
   // Recherche ou boutique : le catalogue a son mot à dire. Toute autre route
   // connue va droit au modèle.
   const catalogueAutorise = !input.intention || input.intention === 'recherche' || input.intention === 'boutique';
@@ -210,7 +214,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // produits au nom proche — « takoss » sonne comme « tacos », et des tacos
   // d'autres enseignes s'affichaient à la place du choix d'agence (05/10).
   const rapide = (requete: string) => requete.length > 0 && input.intention !== 'boutique'
-    && (rechercheDuCerveau || rechercheProduitRapide(input.message, requete));
+    && (rechercheDuCerveau || rechercheProduitRapide(parole, requete));
   const rechercheInitiale = input.pageInitiale
     ? Promise.resolve(input.pageInitiale)
     : !input.audio && !reference && !commandePassee && catalogueAutorise
@@ -260,11 +264,15 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     // Une partie seulement répond (des merguez mêlées de tacos) : on ne garde
     // qu'elle, et la phrase est réécrite sur ce qui reste.
     if (j.pertinent === true && j.garder) {
-      const filtree = seulementPertinents(reponse, j.garder);
-      if (filtree !== reponse) return { reponse: filtree, phrase: await enMots(filtree.content, filtree.summary, filtree.components) };
+      const triee = seulementPertinents(reponse, j.garder);
+      if (triee !== reponse) {
+        // Sur ce qui reste, ce qui existe ailleurs (moins de résultats, plus d'aide).
+        const filtree = await avecAilleurs(triee);
+        return { reponse: filtree, phrase: await enMots(filtree.content, filtree.summary, filtree.components) };
+      }
     }
     if (j.pertinent === false) {
-      const ailleurs = await horsTovo(input.db, input.message, input.requete ?? requeteInitiale, input.position);
+      const ailleurs = await horsTovo(input.db, parole, input.requete ?? requeteInitiale, input.position);
       // Article 6 : jamais de produits sans rapport, même faute de mieux.
       const repli = ailleurs ?? {
         content: 'Tovo n’en propose pas pour le moment.',
@@ -286,7 +294,9 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     reponse: CatalogueAnswer, j: J,
   ): J {
     const mots = normaliserIntention(input.requete ?? requeteInitiale).split(' ').filter((m) => m.length >= 3);
-    if (mots.length === 0) return j;
+    // Sans jugement (panne, délai), rien n'est trié : la règle corrige le juge,
+    // elle ne le remplace pas.
+    if (mots.length === 0 || j.pertinent === null) return j;
     // Le nom doit COMMENCER par ce qui est cherché : « Riz basmati » est du riz,
     // « Savon au lait » est un savon (il gardait sinon les savons pour « lait »).
     const singulier = (m: string) => m.replace(/s$/, '');
@@ -335,7 +345,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // Tovo (05/10). Si la phrase ne désigne aucune des adresses proposées, le
   // chemin habituel reprend.
   if (previous.pending && !input.audio) {
-    const choix = await resolveCatalogueIntent(input.db, input.message, previous.pending);
+    const choix = await resolveCatalogueIntent(input.db, parole, previous.pending);
     if (choix.merchants.length === 1 && previous.pending.merchant_ids.includes(choix.merchants[0]!.id)
         && choix.query === previous.pending.query) {
       const reponse = await merchantIntentAnswer(input.db, choix);
@@ -382,7 +392,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
         : null;
       return repondre({
         content: note
-          ? `C’est gardé pour votre commande : « ${input.precision} ». La boutique le verra avec la commande, et vous pouvez le modifier au panier.`
+          ? `C’est gardé pour votre commande : « ${note} ». La boutique le verra avec la commande, et vous pouvez le modifier au panier.`
           : 'Je n’arrive pas à garder cette précision pour le moment. Vous pourrez l’écrire dans la note au moment de commander.',
         summary: { precision: input.precision, enregistree: Boolean(note), note_de_commande: note },
         components: panier?.components ?? [],
@@ -414,7 +424,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   const photoRecente = previous.history.slice(-4).some((turn) =>
     turn.role === 'user' && /photo envoyee/i.test(normaliserIntention(turn.content)));
   const correctionPhoto = !versModele && photoRecente
-    && /^(?:mais )?(?:c est|ce sont) (?:un |une |des )?/i.test(normaliserIntention(input.message));
+    && /^(?:mais )?(?:c est|ce sont) (?:un |une |des )?/i.test(normaliserIntention(parole));
   if (correctionPhoto && requeteInitiale) {
     const page = pageInitiale ?? await cataloguePage(input.db, { q: requeteInitiale, limit: 8 }, false);
     const mots = requeteInitiale.split(' ');
@@ -460,14 +470,14 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     // Aéré ») : c'est elle qu'on cherche, pas les mots bruts — sauf si la
     // phrase nomme la boutique elle-même (« chez Tchos » garde son marqueur).
     : await resolveCatalogueIntent(input.db,
-      input.intention === 'boutique' && input.requete && !boutiqueNommee ? input.requete : input.message,
+      input.intention === 'boutique' && input.requete && !boutiqueNommee ? input.requete : parole,
       previous.pending);
   let direct = intent ? await merchantIntentAnswer(input.db, intent) : null;
   // Ce que le cerveau a compris (« merguez »), sauf quand une boutique est
   // nommée : la requête est alors ce qui reste une fois son nom retiré.
   const requeteClient = input.requete && intent && intent.merchants.length === 0 && !intent.missing
     ? requeteProduitUtilisateur(input.requete)
-    : requeteProduitUtilisateur(intent?.query ?? input.message);
+    : requeteProduitUtilisateur(intent?.query ?? parole);
   const keyword = rapide(requeteClient);
   const selectedBranch = Boolean(previous.pending
     && intent?.merchants.length === 1
@@ -490,7 +500,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     // Des ressemblances seulement (« pomme » pour « pommade ») : un commerce
     // qui vend vraiment le produit demandé passe devant.
     if ((page.total === 0 || page.match_type === 'similar') && !page.category_id && intent.merchants.length === 0) {
-      direct = await horsTovo(input.db, input.message, requeteClient || intent.query, input.position,
+      direct = await horsTovo(input.db, parole, requeteClient || intent.query, input.position,
         { boutique: input.intention === 'boutique' });
     }
     if (!direct && (page.total > 0 || page.category_id || selectedBranch || keyword)) {
@@ -502,12 +512,12 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // au modèle, qui répondait… par la liste des catégories.
   if (!direct && intent && !input.audio
       && intent.merchants.length === 0 && !intent.missing
-      && demandeBoutiqueOuverte(input.message)) {
+      && demandeBoutiqueOuverte(parole)) {
     const ouvertes = input.position
       ? await EXECUTORS.boutiques_proches!({}, {
         db: input.db,
         userId: input.userId,
-        currentMessage: input.message,
+        currentMessage: parole,
         catalogueIntent: intent,
         position: input.position,
       })
@@ -540,7 +550,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   const ctx: ToolContext = {
     db: input.db,
     userId: input.userId,
-    currentMessage: input.audio ? undefined : input.message,
+    currentMessage: input.audio ? undefined : parole,
     ...(input.requete ? { requete: input.requete } : {}),
     ...(rayonId ? { rayonId } : {}),
     catalogueIntent: intent,
@@ -572,7 +582,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // à l'écran, puis tout ce que les outils renverront (verificateur.ts).
   const faits = new Faits();
   // Les mots du client : des noms, jamais des montants ni des durées.
-  faits.ajouterParole(input.message);
+  faits.ajouterParole(parole);
   for (const tour of previous.history) {
     if (tour.role === 'user') faits.ajouterParole(tour.content);
     else faits.ajouter(tour.content);
@@ -695,7 +705,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
         composantsDuTour.push(...filtres);
       }
       if (j.pertinent === false) {
-        const ailleurs = await horsTovo(input.db, input.message, input.requete ?? requeteInitiale, input.position);
+        const ailleurs = await horsTovo(input.db, parole, input.requete ?? requeteInitiale, input.position);
         composantsDuTour.length = 0;
         composantsDuTour.push(...(ailleurs?.components ?? []));
         reponseOutil = ailleurs?.content ?? 'Tovo n’en propose pas pour le moment.';
@@ -789,11 +799,18 @@ function seulementPertinents(reponse: CatalogueAnswer, garder: ReadonlySet<strin
     return gardes.length ? [{ ...c, data: { ...data, items: gardes } }] : [];
   });
   if (!retire) return reponse;
-  // Le total de la recherche ne vaut plus : seulement ce qui est montré.
-  const { total: _total, produits: _produits, ...summary } = reponse.summary as Record<string, unknown>;
-  const montres = components.flatMap((c) => (Array.isArray(c.data.items) ? c.data.items as Array<{ name?: string }> : []));
-  return { ...reponse, components,
-    summary: { ...summary, produits_qui_repondent: montres.map((i) => i.name), nombre: montres.length } };
+  // Le total de la recherche ne vaut plus, ni la phrase qui le citait (« 5
+  // références » pour un seul produit montré, 05/10) : seulement ce qui reste.
+  // Les commerces hors Tovo sont retirés aussi : ils seront recalculés sur ce
+  // qui reste (avecAilleurs) — peu de résultats en appellent davantage.
+  const { total: _total, produits: _produits, aussi_hors_tovo: _ailleurs, ...summary } = reponse.summary as Record<string, unknown>;
+  const gardees = components.filter((c) => c.type !== 'commerces_hors_tovo');
+  const montres = gardees.flatMap((c) => (Array.isArray(c.data.items) ? c.data.items as Array<{ name?: string }> : []));
+  return {
+    content: montres.length === 1 ? 'Voici ce qui correspond à votre demande.' : `Voici les ${montres.length} produits qui correspondent à votre demande.`,
+    components: gardees,
+    summary: { ...summary, produits_qui_repondent: montres.map((i) => i.name), nombre: montres.length },
+  };
 }
 
 /**
@@ -825,7 +842,13 @@ async function laSuite(input: OrchestrateInput, vu: Component[], requeteInitiale
 
   const dejaVus = new Set(vu.filter((c) => c.type === 'commerces_hors_tovo')
     .flatMap((c) => (Array.isArray(c.data.items) ? c.data.items as Array<{ nom?: string }> : []).map((i) => String(i.nom ?? ''))));
-  const ailleurs = await alternativesHorsTovo(input.db, requete, input.position, requete, { dejaVus });
+  // « Plus loin » : au-delà du plus éloigné déjà montré (sinon on proposait
+  // un commerce à 530 m après un autre à 1,1 km, 05/10).
+  const distancesVues = vu.filter((c) => c.type === 'commerces_hors_tovo')
+    .flatMap((c) => (Array.isArray(c.data.items) ? c.data.items as Array<{ distance_m?: number | null }> : []))
+    .map((i) => i.distance_m).filter((d): d is number => typeof d === 'number');
+  const auDelaDe = distancesVues.length ? Math.max(...distancesVues) : 0;
+  const ailleurs = await alternativesHorsTovo(input.db, requete, input.position, requete, { dejaVus, auDelaDe });
 
   if (!autresProduits && !ailleurs) {
     return {

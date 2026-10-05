@@ -108,8 +108,9 @@ export const CONSIGNE_CERVEAU = [
   '« rayon » : où chercher ce produit dans Tovo — repas (plats préparés, restaurants), supermarche (épicerie, boissons, produits ménagers, huile de cuisine, lait, riz en sac), marche (produits frais du marché), beaute (soins, cosmétiques, parfums), electronique (téléphones, accessoires, électroménager), vetements (habits, chaussures, montres, bijoux), gaz, pharmacie (parapharmacie, médicaments sans ordonnance) ; « aucun » si rien ne convient ou si c’est une boutique nommée. Choisis selon ce que le client VEUT : « un litre d’huile » → supermarche (pas beaute), « deux litres de lait » → supermarche.',
   '« commerce » : le TYPE de commerce que le client cherche, s’il demande des commerces d’un genre plutôt qu’un produit ou une boutique nommée (« un supermarché pas loin », « les pharmacies du coin », « tous les supermarchés de Niamey ») ; « aucun » sinon. Il peut aussi dire ce qu’il veut y trouver (« produit »).',
   '« suite » : true si le client veut d’AUTRES résultats que ceux déjà montrés pour la même chose (d’autres, encore, plus, plus loin, ailleurs, d’autres vendeurs) — article 7. « produit » reste alors ce qu’il cherchait.',
-  '« details » : ce que le client a précisé et qu’une carte doit reprendre (article 9), seulement ce qu’il a DIT, mot pour mot : « depart » (où le livreur prend quelque chose, si ce n’est pas chez le client), « arrivee » (où il doit l’apporter), « telephone » (un numéro dit), « precision » (jamais le choix d’un article à l’écran comme « le premier » ; toute préférence dite sur ce qu’il choisit ou commande — un ingrédient en plus ou en moins, une cuisson, une manière de livrer — même dite seule, en réponse à ce qui est à l’écran). Omet ce qui n’est pas dit.',
-  'Réponds uniquement en JSON : {"intention": "<clé>", "sur": true|false, "produit": "<mots>", "rayon": "<rayon>", "commerce": "<type>", "suite": true|false, "details": {…}}.',
+  '« depart », « arrivee », « telephone » : ce que le client a précisé pour une course (article 9), mot pour mot, chaîne vide sinon : « depart » = où le livreur prend quelque chose, si ce n’est pas chez le client ; « arrivee » = où il doit l’apporter (« à mon frère à Yantala » → « Yantala ») ; « telephone » = un numéro dit.',
+  '« precision » : la préférence que le client vient de dire sur ce qu’il choisit ou commande (« sans oignons », « bien cuit », « sonnez en arrivant »), mot pour mot ; chaîne vide s’il n’en dit pas. Jamais le choix d’un article (« le premier »).',
+  'Réponds uniquement en JSON : {"intention": "<clé>", "sur": true|false, "produit": "<mots>", "rayon": "<rayon>", "commerce": "<type>", "precision": "<texte ou vide>", "depart": "<lieu ou vide>", "arrivee": "<lieu ou vide>", "telephone": "<numéro ou vide>", "suite": true|false}.',
 ].join('\n');
 
 export interface ContexteCerveau {
@@ -165,6 +166,14 @@ const SCHEMA = {
     produit: { type: 'STRING' },
     rayon: { type: 'STRING', enum: ['aucun', ...RAYONS] },
     commerce: { type: 'STRING', enum: ['aucun', ...COMMERCES] },
+    // Au premier niveau et obligatoire (vide s'il n'y en a pas) : rangée dans
+    // « details », facultatif, elle était omise deux fois sur trois (05/10).
+    precision: { type: 'STRING' },
+    // Idem pour la course : dans un sous-objet facultatif, la destination
+    // était omise (« clés à mon frère à Yantala » : 4 fois sur 4, 05/10).
+    depart: { type: 'STRING' },
+    arrivee: { type: 'STRING' },
+    telephone: { type: 'STRING' },
     suite: { type: 'BOOLEAN' },
     details: {
       type: 'OBJECT',
@@ -174,20 +183,25 @@ const SCHEMA = {
     },
   },
   // « commerce » obligatoire : facultatif, Flash-Lite l'omettait (05/10).
-  required: ['intention', 'sur', 'commerce'],
+  required: ['intention', 'sur', 'commerce', 'precision', 'depart', 'arrivee', 'telephone'],
 };
 
 export function lireDecision(texte: string): Lecture | null {
   const brut = texte.match(/\{[\s\S]*\}/)?.[0];
   if (!brut) return null;
   try {
-    const v = JSON.parse(brut) as { intention?: string; sur?: unknown; produit?: unknown; rayon?: unknown; commerce?: unknown; suite?: unknown; details?: unknown };
+    const v = JSON.parse(brut) as { intention?: string; sur?: unknown; produit?: unknown; rayon?: unknown; commerce?: unknown; precision?: unknown; depart?: unknown; arrivee?: unknown; telephone?: unknown; suite?: unknown; details?: unknown };
     if (!v.intention || !(v.intention in INTENTIONS)) return null;
     const produit = typeof v.produit === 'string' ? v.produit.trim().slice(0, 80) : '';
     const rayon = (RAYONS as readonly string[]).includes(String(v.rayon)) ? v.rayon as Rayon : undefined;
     // « sur » absent (le secours OpenAI n'a pas de schéma imposé) : PAS sûr.
     // Une action coûteuse passe alors par les tuiles, jamais directement.
-    const details = lireDetails(v.details);
+    // Les précisions au premier niveau (obligatoires, vides s'il n'y a rien),
+    // et l'ancien sous-objet « details » si un modèle le donne encore.
+    const haut = Object.fromEntries((['precision', 'depart', 'arrivee', 'telephone'] as const)
+      .map((cle) => [cle, typeof v[cle] === 'string' ? (v[cle] as string).trim() : ''])
+      .filter(([, valeur]) => valeur));
+    const details = lireDetails({ ...((v.details && typeof v.details === 'object') ? v.details as object : {}), ...haut });
     // « supermarché » ou « supermarche », « Pharmacies » : accents, casse et pluriel tolérés.
     const brutCommerce = String(v.commerce ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/s$/, '');
     const commerce = (COMMERCES as readonly string[]).includes(brutCommerce) ? brutCommerce as TypeCommerceCherche : undefined;
