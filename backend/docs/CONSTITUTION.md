@@ -51,3 +51,15 @@ Deux règles d'écriture :
 - **Après chaque passage, on relit les réponses une par une.** Le 02/10, un 44/44 cachait six fausses réussites.
 - **`npm run banc:ia -- cerveau`** après toute modification de la consigne du cerveau.
 - **Ajouter un article** : seulement pour un principe qu'aucun article ne couvre déjà, jamais pour un cas. Et dire dans cette page où le code le garantit.
+
+## Ajouts du 05/10 (soir) : garanties générales, pas des cas
+
+- **Un type de commerce** (« un supermarché pas loin », « tous les supermarchés de Niamey ») : `commercesDuTypeDemande`. D'abord les boutiques Tovo de ce type (les ouvertes en premier), puis l'annuaire. La liste garde en mémoire tout ce qui a déjà été montré : « plus loin » et « tous » montrent la suite (articles 7 et 8).
+- **Un champ du cerveau n'est gardé que si le client l'a dit** (article 5) :
+  - un numéro doit figurer chiffre pour chiffre dans le message ;
+  - un lieu ou une précision doit y figurer par l'un de ses mots ;
+  - un type de commerce doit y être nommé (« pizza » n'est pas « restaurant »).
+- **Un choix en attente passe avant tout le reste** (article 2) : avant la suite, la précision ou toute recherche.
+- **Une boutique nommée est cherchée comme boutique, jamais comme produit au nom proche** (article 1) : « Otakoss » ne doit pas donner des tacos d'autres enseignes.
+- **Un produit dont le nom COMMENCE par ce qui est cherché y répond**, et le juge ne peut pas l'écarter (article 6) : « Riz basmati » est du riz, « Savon au lait » est un savon.
+- **Le vocabulaire local est construit à partir du catalogue** (`data/vocabulaire-local.json`, `scripts/voix/vocabulaire-local.ts`). Ces plats, et leurs déformations par la transcription (placali, entendu « plat cali »), sont donnés à la transcription et au cerveau. Le produit est toujours écrit en français.

@@ -4,7 +4,7 @@ import { SYSTEM_PROMPT, contexteUtilisateur } from './systemPrompt.js';
 import { EXECUTORS, TOOL_DEFINITIONS, type ToolContext } from './tools.js';
 import { collectIds, sanitizeToolResult, validateComponents } from './validate.js';
 import { envelope, merchantCard, type ChatEnvelope, type Component } from '../components/builders.js';
-import { ailleursEnPlus, alternativesHorsTovo, cataloguePage, horsTovo, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type CataloguePage, type CatalogueAnswer, type PendingMerchantChoice } from '../services/catalogue.js';
+import { ailleursEnPlus, alternativesHorsTovo, commercesDuTypeDemande, cataloguePage, horsTovo, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type CataloguePage, type CatalogueAnswer, type PendingMerchantChoice } from '../services/catalogue.js';
 import { ajouterALaNote } from '../services/noteCommande.js';
 import {
   demandeBoutiqueOuverte,
@@ -18,7 +18,7 @@ import {
 } from './intents.js';
 import { resumeAffichage } from './memoire.js';
 import type { Intention } from './jev.js';
-import type { Rayon } from './decideur.js';
+import type { Rayon, TypeCommerceCherche } from './decideur.js';
 import { idDuRayon } from '../services/catalogue.js';
 import { avecOuvertureReelle } from '../services/ouverture.js';
 import { Faits, FluxVerifie, verifierTexte, type Verification } from './verificateur.js';
@@ -92,6 +92,8 @@ export interface OrchestrateInput {
   rayon?: Rayon | undefined;
   /** Article 7 : le client veut d'autres résultats que ceux déjà montrés. */
   suite?: boolean | undefined;
+  /** Le type de commerce cherché (« un supermarché pas loin »). */
+  commerce?: TypeCommerceCherche | undefined;
   /** Article 9 : une précision à garder pour la commande (« sans oignons »). */
   precision?: string | undefined;
   /**
@@ -203,8 +205,11 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // Le cerveau a compris une recherche et dit quoi chercher : le filtre à
   // mots ne la refuse plus. « un colis de riz » contient « colis », et
   // partait à l'assistant alors que le cerveau disait « riz » (02/10).
-  const rechercheDuCerveau = (input.intention === 'recherche' || input.intention === 'boutique') && Boolean(input.requete);
-  const rapide = (requete: string) => requete.length > 0
+  const rechercheDuCerveau = input.intention === 'recherche' && Boolean(input.requete);
+  // Une BOUTIQUE nommée (« Otakoss ») : on cherche la boutique, jamais des
+  // produits au nom proche — « takoss » sonne comme « tacos », et des tacos
+  // d'autres enseignes s'affichaient à la place du choix d'agence (05/10).
+  const rapide = (requete: string) => requete.length > 0 && input.intention !== 'boutique'
     && (rechercheDuCerveau || rechercheProduitRapide(input.message, requete));
   const rechercheInitiale = input.pageInitiale
     ? Promise.resolve(input.pageInitiale)
@@ -249,8 +254,9 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     if (!produits || input.audio) return { reponse, phrase: await enMots(reponse.content, reponse.summary, reponse.components) };
     // Article 8 : ce qui existe ailleurs fait partie de la réponse, sous Tovo.
     reponse = await avecAilleurs(reponse);
-    const j = await redigerEtJuger({ message: input.messagePublic ?? input.message, prevue: reponse.content,
+    const jugement = await redigerEtJuger({ message: input.messagePublic ?? input.message, prevue: reponse.content,
       faits: reponse.summary, composants: reponse.components, avant: dernierDeTovo });
+    const j = avecLesProduitsDuNom(reponse, jugement);
     // Une partie seulement répond (des merguez mêlées de tacos) : on ne garde
     // qu'elle, et la phrase est réécrite sur ce qui reste.
     if (j.pertinent === true && j.garder) {
@@ -269,6 +275,31 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     }
     return { reponse, phrase: j.texte };
   };
+
+  /**
+   * Article 6, dans les deux sens : un produit dont le NOM contient ce que le
+   * client cherche (« Riz basmati » pour « riz ») y répond — le juge ne peut
+   * pas l'écarter. Il rejetait parfois six riz, et Tovo disait « pas de riz »
+   * (05/10). Le juge garde la main sur tout le reste.
+   */
+  function avecLesProduitsDuNom<J extends { pertinent: boolean | null; garder: ReadonlySet<string> | null }>(
+    reponse: CatalogueAnswer, j: J,
+  ): J {
+    const mots = normaliserIntention(input.requete ?? requeteInitiale).split(' ').filter((m) => m.length >= 3);
+    if (mots.length === 0) return j;
+    // Le nom doit COMMENCER par ce qui est cherché : « Riz basmati » est du riz,
+    // « Savon au lait » est un savon (il gardait sinon les savons pour « lait »).
+    const singulier = (m: string) => m.replace(/s$/, '');
+    const premierMot = (nom: string) => normaliserIntention(nom).split(' ')
+      .find((m) => m.length > 1 && !['le', 'la', 'les', 'du', 'de', 'des', 'un', 'une'].includes(m)) ?? '';
+    const parLeNom = reponse.components
+      .filter((c) => c.type === 'product_carousel' || c.type === 'product_list')
+      .flatMap((c) => (Array.isArray(c.data.items) ? c.data.items as Array<{ id?: string; name?: string }> : []))
+      .filter((i) => singulier(premierMot(String(i.name ?? ''))) === singulier(mots[0]!))
+      .map((i) => String(i.id));
+    if (parLeNom.length === 0) return j;
+    return { ...j, pertinent: true, garder: new Set([...(j.garder ?? []), ...parLeNom]) };
+  }
 
   /**
    * Article 8 : sous les produits Tovo, les commerces hors Tovo utiles
@@ -312,11 +343,38 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     }
   }
 
+  // UN TYPE DE COMMERCE (« un supermarché pas loin », « tous les supermarchés
+  // de Niamey ») : Tovo d'abord, puis l'annuaire (articles 7 et 8). Une suite
+  // (« plus loin », « d'autres ») reprend le type affiché, sans ce qui a déjà
+  // été montré.
+  {
+    const memoire = previous.dernierAffichage.find((c) => c.data.commerce_type)?.data as
+      { commerce_type?: TypeCommerceCherche; deja_vus_boutiques?: string[]; deja_vus_commerces?: string[] } | undefined;
+    const typeAffiche = memoire?.commerce_type;
+    const type = input.commerce ?? (input.suite ? typeAffiche : undefined);
+    if (type && !input.audio && !boutiqueNommee) {
+      // Ce qui a déjà été montré pour ce type, depuis le début de la recherche.
+      const continuer = Boolean(input.suite || (input.commerce && input.commerce === typeAffiche));
+      const dejaVus = {
+        boutiques: new Set(continuer ? memoire?.deja_vus_boutiques ?? [] : []),
+        commerces: new Set(continuer ? memoire?.deja_vus_commerces ?? [] : []),
+      };
+      const liste = await commercesDuTypeDemande(input.db, type, input.position, dejaVus);
+      if (liste) return repondre(liste);
+      if (dejaVus.boutiques.size + dejaVus.commerces.size > 0) {
+        return repondre({ content: 'Je vous ai montré tous ceux que je connais dans les environs.', summary: { type_de_commerce: type, tout_montre: true }, components: [] });
+      }
+    }
+  }
+
   // ARTICLE 9 — ce que le client précise est GARDÉ : la note de commande,
   // que la boutique lira et que le client modifie au panier. Si rien d'autre
   // n'est demandé (pas de recherche), la réponse s'arrête là. Article 4 : on
   // ne dit « c'est noté » que si l'écriture a réussi.
-  if (input.precision && !input.audio) {
+  // Désigner un article affiché (« ajoute la première ») n'est pas une
+  // précision : le cerveau le classait parfois ainsi, et rien n'était ajouté
+  // (05/10). La désignation suit son chemin habituel.
+  if (input.precision && !input.audio && !reference) {
     const note = await ajouterALaNote(input.db, input.userId, input.precision);
     if (!catalogueAutorise || input.intention === 'designe') {
       const panier = note

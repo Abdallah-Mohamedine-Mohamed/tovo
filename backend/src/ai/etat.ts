@@ -48,7 +48,7 @@ export function decrireEcran(composants: unknown): string[] {
         lignes.push('Une carte de course est ouverte : elle n’est PAS commandée, rien n’est en route.');
         break;
       case 'commerces_hors_tovo':
-        lignes.push(`Des commerces hors de Tovo : ${noms(d.items).join(' ; ')}.`);
+        lignes.push(`Des commerces hors de Tovo${d.commerce_type ? ` (des ${String(d.commerce_type)})` : ''} : ${noms(d.items).join(' ; ')}.`);
         break;
       case 'quick_replies':
         lignes.push(`Des choix proposés : ${noms(d.items).join(' ; ')}.`);

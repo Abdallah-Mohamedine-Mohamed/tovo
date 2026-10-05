@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { MOTS_LOCAUX as MOTS_DU_CATALOGUE } from '../ai/vocabulaireLocal.js';
 import { env } from '../config/env.js';
 
 /**
@@ -25,9 +26,11 @@ export const URL_VOIX =
  * « O'Takoss », « bissap », « Yantala » sortaient justes au prototype grâce
  * à cette liste.
  */
+// Les plats et aliments locaux viennent du vocabulaire construit à partir du
+// catalogue (ai/vocabulaireLocal.ts, 05/10 : placali manquait) ; ici, les
+// quartiers et le nom de l'application.
 const MOTS_LOCAUX = [
-  'attiéké', 'doukounou', 'kilichi', 'dambou', 'fura', 'massa', 'tuo', 'garba', 'alloco', 'bissap',
-  'dèguè', 'gingembre', 'chawarma', 'tchapalo', 'wassa-wassa', 'foura', 'brochettes', 'Tovo',
+  ...MOTS_DU_CATALOGUE.map((m) => m.mot), 'gingembre', 'brochettes', 'Tovo',
   'Yantala', 'Plateau', 'Harobanda', 'Francophonie', 'Koira Kano', 'Lazaret', 'Niamey 2000', 'Talladjé',
 ];
 

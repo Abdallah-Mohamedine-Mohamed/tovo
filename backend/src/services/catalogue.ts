@@ -5,11 +5,12 @@ import { embed, embeddingsEnabled } from './embeddings.js';
 import { commandesRecentes, marquerLePlusCommande, parPopularite } from './popularite.js';
 import { offreVille } from './livreur.js';
 import { serviceClient } from './supabase.js';
-import { carteCommerces, commercesNommes, commercesPourProduit, libelleDes, specialistesDe, type Commerce } from './commerces.js';
+import { carteCommerces, commercesDuType, commercesNommes, commercesPourProduit, libelleDes, specialistesDe, type Commerce, type TypeCommerce } from './commerces.js';
+import { avecOuvertureReelle } from './ouverture.js';
 import { chercherSurGoogle, lieuGoogle, NOTE_GOOGLE } from './googlePlaces.js';
 import { heuresDeGarde, reponseGarde } from './pharmaciesGarde.js';
 import { paiementMobileActif } from '../config/env.js';
-import { SLUG_DU_RAYON, type Rayon } from '../ai/decideur.js';
+import { RAYON_DU_COMMERCE, SLUG_DU_RAYON, type Rayon, type TypeCommerceCherche } from '../ai/decideur.js';
 
 export interface CataloguePage {
   items: ProductRow[];
@@ -730,6 +731,90 @@ export async function ailleursEnPlus(
     },
     components: [avecProduit(carteCommerces(commerces, `Acheter : ${quoi}`, HORS_TOVO_OUI, position), quoi)],
   };
+}
+
+/**
+ * UN TYPE DE COMMERCE (« un supermarché pas loin », « tous les supermarchés
+ * de Niamey », 05/10). Tovo ne savait chercher qu'un produit ou une boutique
+ * nommée : il répondait « je n'ai pas d'autres supermarchés » alors qu'il en a
+ * six, et l'annuaire cinquante et un. Désormais (articles 7 et 8) :
+ *  - d'abord les boutiques TOVO de ce type, les ouvertes en premier ;
+ *  - puis, en dessous, celles de l'annuaire public, les plus proches ;
+ *  - « plus loin », « tous », « d'autres » : ce qui n'a pas encore été vu.
+ * null si aucun des deux n'en connaît (le chemin habituel reprend).
+ */
+export async function commercesDuTypeDemande(
+  db: SupabaseClient,
+  type: TypeCommerceCherche,
+  position: { lat: number; lng: number } | null | undefined,
+  dejaVus: { boutiques: ReadonlySet<string>; commerces: ReadonlySet<string> },
+): Promise<CatalogueAnswer | null> {
+  const suite = dejaVus.boutiques.size + dejaVus.commerces.size > 0;
+  // Les boutiques Tovo de ce rayon, s'il en a un.
+  const rayon = RAYON_DU_COMMERCE[type];
+  const categorie = rayon ? await idDuRayon(db, rayon) : undefined;
+  let boutiques: Array<Record<string, unknown> & { id: string; is_open: boolean }> = [];
+  if (categorie && position) {
+    const { data } = await db.rpc('nearby_merchants', {
+      origin_lat: position.lat, origin_lng: position.lng, radius_m: 30_000,
+      filter_category: categorie, match_count: 50,
+    });
+    const rangs = ((data ?? []) as Array<Record<string, unknown>>)
+      .map((b) => ({ ...b, id: b.id as string, is_open: b.is_open === true }) as Record<string, unknown> & { id: string; is_open: boolean })
+      .filter((b) => !dejaVus.boutiques.has(b.id));
+    boutiques = (await avecOuvertureReelle(db, rangs))
+      // Les ouvertes d'abord, puis les plus proches.
+      .sort((a, b) => Number(b.is_open) - Number(a.is_open) || Number(a.distance_m ?? 0) - Number(b.distance_m ?? 0))
+      .slice(0, 6);
+  }
+  // Puis l'annuaire : ni sur Tovo, ni déjà montrés.
+  const surTovo = await estSurTovo(db);
+  const commerces = commercesDuType(type as TypeCommerce, position,
+    (c) => surTovo(c) || dejaVus.commerces.has(c.nom), 5, suite ? 30_000 : 20_000);
+  if (boutiques.length === 0 && commerces.length === 0) return null;
+
+  const ouvertes = boutiques.filter((b) => b.is_open).length;
+  // Ce qui a été montré, depuis le début de la recherche : « plus loin »,
+  // « tous » repartent de là, pas du seul dernier écran (05/10).
+  const vus = {
+    commerce_type: type,
+    deja_vus_boutiques: [...dejaVus.boutiques, ...boutiques.map((b) => b.id)],
+    deja_vus_commerces: [...dejaVus.commerces, ...commerces.map((c) => c.nom)],
+  };
+  return {
+    content: [
+      boutiques.length ? `Sur Tovo : ${boutiques.length} ${type === 'supermarche' ? 'supermarché(s)' : 'boutique(s)'}, ${ouvertes} ouverte(s) en ce moment.` : '',
+      commerces.length ? 'Hors de Tovo, d’autres près de vous ; un livreur peut y aller, il vous appelle pour convenir de l’achat.' : '',
+    ].filter(Boolean).join(' '),
+    summary: {
+      type_de_commerce: type,
+      ...(suite ? { suite_de_la_liste: true } : {}),
+      boutiques_tovo: boutiques.map((b) => ({ nom: b.name, ouverte: b.is_open, distance_m: b.distance_m })),
+      commerces_hors_tovo: commerces.map((c) => ({ nom: c.nom, quartier: c.quartier })),
+      consigne: 'Le client cherche des commerces de ce type. Présente d’abord ceux de Tovo (dis combien sont ouverts), puis ceux hors Tovo. '
+        + 'Ne dis jamais qu’il n’y en a pas d’autres : la liste montre ce qui est connu.',
+    },
+    components: avecMemoire([
+      ...boutiques.map((m) => merchantCard({
+        id: m.id, name: m.name as string, description: (m.description as string | null) ?? null,
+        logo_url: (m.logo_url as string | null) ?? null, address_hint: (m.address_hint as string) ?? '',
+        is_open: m.is_open, rating: (m.rating as number) ?? 5, prep_time_min: (m.prep_time_min as number) ?? 20,
+        distance_m: (m.distance_m as number | null) ?? null,
+      } as MerchantRow)),
+      ...(commerces.length ? [carteCommerces(commerces, 'Faire les achats du client', HORS_TOVO_OUI, position)] : []),
+    ], vus),
+  };
+}
+
+/**
+ * La mémoire de la liste (type cherché, ce qui a été montré) est portée par
+ * la dernière carte : celle des commerces hors Tovo, sinon la dernière
+ * boutique. Le message suivant la relit (orchestrator.ts).
+ */
+function avecMemoire(cartes: Component[], memoire: Record<string, unknown>): Component[] {
+  const derniere = cartes.at(-1);
+  if (!derniere) return cartes;
+  return [...cartes.slice(0, -1), { ...derniere, data: { ...derniere.data, ...memoire } }];
 }
 
 export async function horsTovo(

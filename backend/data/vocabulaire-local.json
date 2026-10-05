@@ -1,0 +1,259 @@
+{
+ "construit_le": "2026-10-05",
+ "source": "1922 produits du catalogue, triés par Gemini 3.1 Pro (scripts/voix/vocabulaire-local.ts)",
+ "mots": [
+  {
+   "mot": "ablo",
+   "variantes": [
+    "a blo",
+    "hablo"
+   ]
+  },
+  {
+   "mot": "akassa",
+   "variantes": [
+    "acassa",
+    "a cassa"
+   ]
+  },
+  {
+   "mot": "alloco",
+   "variantes": [
+    "aloco",
+    "aloko",
+    "à loco"
+   ]
+  },
+  {
+   "mot": "attiéké",
+   "variantes": [
+    "atchéké",
+    "atiéké",
+    "a tiéké"
+   ]
+  },
+  {
+   "mot": "bissap",
+   "variantes": [
+    "bisap",
+    "bi sap",
+    "hissap"
+   ]
+  },
+  {
+   "mot": "chawarma",
+   "variantes": [
+    "shawarma",
+    "chat warma",
+    "chawarmas"
+   ]
+  },
+  {
+   "mot": "choukouya",
+   "variantes": [
+    "choukouia",
+    "chou couya"
+   ]
+  },
+  {
+   "mot": "dambou",
+   "variantes": [
+    "dans bout",
+    "danbou"
+   ]
+  },
+  {
+   "mot": "djinkoumé",
+   "variantes": [
+    "djin koumé"
+   ]
+  },
+  {
+   "mot": "eba",
+   "variantes": [
+    "héba",
+    "et ba"
+   ]
+  },
+  {
+   "mot": "fankassou",
+   "variantes": [
+    "fankasou",
+    "fan kassou"
+   ]
+  },
+  {
+   "mot": "fonio",
+   "variantes": [
+    "fogno",
+    "fognio",
+    "faux nio"
+   ]
+  },
+  {
+   "mot": "foutou",
+   "variantes": [
+    "fou tou",
+    "futu"
+   ]
+  },
+  {
+   "mot": "fura",
+   "variantes": [
+    "fourra",
+    "foura",
+    "fou ra"
+   ]
+  },
+  {
+   "mot": "garba",
+   "variantes": [
+    "gare ba",
+    "garbah"
+   ]
+  },
+  {
+   "mot": "gari",
+   "variantes": [
+    "gary",
+    "garie",
+    "gars rit"
+   ]
+  },
+  {
+   "mot": "kafta",
+   "variantes": [
+    "cafta",
+    "kaf ta"
+   ]
+  },
+  {
+   "mot": "kédjénou",
+   "variantes": [
+    "kéjénou",
+    "quai djenou"
+   ]
+  },
+  {
+   "mot": "kilichi",
+   "variantes": [
+    "qui litchi",
+    "kilitchi",
+    "kilichie"
+   ]
+  },
+  {
+   "mot": "kopto",
+   "variantes": [
+    "copto"
+   ]
+  },
+  {
+   "mot": "madfoon",
+   "variantes": [
+    "madfaun",
+    "madfoun",
+    "mad faun"
+   ]
+  },
+  {
+   "mot": "mafé",
+   "variantes": [
+    "maffé",
+    "ma fait",
+    "mafai"
+   ]
+  },
+  {
+   "mot": "mandi",
+   "variantes": [
+    "mendy",
+    "man di"
+   ]
+  },
+  {
+   "mot": "massa",
+   "variantes": [
+    "masa",
+    "ma ça",
+    "massas"
+   ]
+  },
+  {
+   "mot": "placali",
+   "variantes": [
+    "plat cali",
+    "placalie",
+    "placa li"
+   ]
+  },
+  {
+   "mot": "samboussa",
+   "variantes": [
+    "samossa",
+    "samoussa",
+    "sans boussa"
+   ]
+  },
+  {
+   "mot": "soumbala",
+   "variantes": [
+    "sous mbala"
+   ]
+  },
+  {
+   "mot": "souroundou",
+   "variantes": [
+    "sous roudou",
+    "surundu"
+   ]
+  },
+  {
+   "mot": "suya",
+   "variantes": [
+    "souya",
+    "souillard"
+   ]
+  },
+  {
+   "mot": "tchep",
+   "variantes": [
+    "tiep",
+    "thieb",
+    "tieb",
+    "thiéboudienne"
+   ]
+  },
+  {
+   "mot": "toukounya",
+   "variantes": [
+    "toukounia",
+    "tukunya",
+    "tout counia"
+   ]
+  },
+  {
+   "mot": "tuo",
+   "variantes": [
+    "touo",
+    "tout haut"
+   ]
+  },
+  {
+   "mot": "waké",
+   "variantes": [
+    "waake",
+    "ouaké",
+    "wacké"
+   ]
+  },
+  {
+   "mot": "yassa",
+   "variantes": [
+    "iassa",
+    "yasa",
+    "yassah"
+   ]
+  }
+ ]
+}

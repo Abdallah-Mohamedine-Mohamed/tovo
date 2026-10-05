@@ -431,6 +431,36 @@ const SCENARIOS: Scenario[] = [
     pasDAvancePromise,
   ] }] },
 
+  // T — UN TYPE DE COMMERCE (captures du 05/10) : Tovo d'abord, puis
+  // l'annuaire ; « plus loin », « tous » montrent ce qui n'a pas été vu ;
+  // jamais « je n'en ai pas d'autres » quand la liste en connaît.
+  { id: 'T1', parcours: 'C', titre: 'un supermarché pas loin', etapes: [{ dire: 'Je cherche un supermarché pas loin d’ici', verifier: [
+    ['les supermarchés de Tovo', (r) => r.composants.some((c) => c.type === 'merchant_card')],
+    ['et ceux hors Tovo', (r) => commerces(r).length > 0],
+    ['jamais « pas d’autres »', (r) => !/pas d.autres?|aucun autre|rien d.autre/i.test(r.texte)],
+    aucuneCommande,
+  ] }] },
+  { id: 'T2', parcours: 'C', titre: 'supermarchés, puis « plus loin », puis « tous »', etapes: [
+    { dire: 'Je cherche un supermarché pas loin d’ici', verifier: [] },
+    { dire: 'il faut aller un peu plus loin', verifier: [
+      ['d’autres, jamais les mêmes', (r, c) => {
+        const avant = new Set([...commerces(c.reponses[0]!).map(nom), ...c.reponses[0]!.composants.filter((x) => x.type === 'merchant_card').map((x) => String(x.data.id))]);
+        const ici = [...commerces(r).map(nom), ...r.composants.filter((x) => x.type === 'merchant_card').map((x) => String(x.data.id))];
+        return ici.length > 0 && ici.every((x) => !avant.has(x));
+      }],
+    ] },
+    { dire: 'Quels sont tous les supermarchés disponibles à Niamey ?', verifier: [
+      ['encore d’autres, ou « je vous ai tout montré »', (r, c) => {
+        const avant = new Set(c.reponses.slice(0, 2).flatMap((x) => commerces(x).map(nom)));
+        return commerces(r).some((i) => !avant.has(nom(i))) || /tout montr/i.test(r.texte);
+      }],
+      ['jamais « pas d’autres »', (r) => !/pas d.autres?|aucun autre/i.test(r.texte) || commerces(r).length === 0],
+    ] },
+  ] },
+  { id: 'T3', parcours: 'C', titre: 'les pharmacies du coin', etapes: [{ dire: 'les pharmacies du coin', verifier: [
+    ['des pharmacies', (r) => commerces(r).length > 0 && commerces(r).every((i) => /pharmac|de garde/i.test(`${String(i.type ?? '')} ${nom(i)}`))],
+  ] }] },
+
   // G — Conversation : rien à afficher.
   { id: 'G1', parcours: 'G', titre: 'remarque', etapes: [{ dire: 'Tu es sourd ?', verifier: [
     ['aucun produit', (r) => produits(r).length === 0], ['une phrase', (r) => r.texte.trim().length > 0],

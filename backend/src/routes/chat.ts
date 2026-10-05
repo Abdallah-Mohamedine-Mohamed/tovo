@@ -23,7 +23,7 @@ import { courseDejaEnRoute } from '../services/livreur.js';
 import { ombreJev, type Intention } from '../ai/jev.js';
 import { ouvrirSessionVoix, vocabulaire } from '../services/voixDirecte.js';
 import { decider, indication, intentionChoisie, routeDuCerveau, type Route } from '../ai/aiguillage.js';
-import { cerveauActif, comprendre, type Details, type Rayon } from '../ai/decideur.js';
+import { cerveauActif, comprendre, type Details, type Rayon, type TypeCommerceCherche } from '../ai/decideur.js';
 import { commandeEnCours, etatDuParcours } from '../ai/etat.js';
 import { exemplesPour } from '../ai/banc/exemples.js';
 import { aiguiller, cascadeActive } from '../ai/cascade.js';
@@ -563,6 +563,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     let requeteCerveau: string | undefined;
     let rayonCerveau: Rayon | undefined;
     let suiteCerveau = false;
+    let commerceCerveau: TypeCommerceCherche | undefined;
     let detailsCerveau: Details | undefined;
     // Le rédacteur (ai/redacteur.ts) : chaque réponse directe à un message du
     // client est mise en mots par une IA, à partir de ce qu'il a VRAIMENT dit.
@@ -593,6 +594,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         requeteCerveau = d?.produit || undefined;
         rayonCerveau = d?.rayon;
         suiteCerveau = d?.suite === true;
+        commerceCerveau = d?.commerce;
         detailsCerveau = d?.details;
         request.log.info({
           ref: body.data.client_message_id,
@@ -624,7 +626,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       if (route.type === 'intention') intention = route.intention;
       // Une recherche : celle faite en parallèle du cerveau (suggestions
       // proches comprises) sert telle quelle, sans la refaire.
-      if (intention === 'recherche' && prealable && !rayonCerveau && !suiteCerveau && !detailsCerveau?.precision
+      if (intention === 'recherche' && prealable && !rayonCerveau && !suiteCerveau && !commerceCerveau && !detailsCerveau?.precision
         && (!requeteCerveau || requeteProduitUtilisateur(requeteCerveau) === requeteProduitUtilisateur(body.data.text ?? ''))) {
         pageInitiale = prealable;
       }
@@ -893,6 +895,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         ...(requeteCerveau ? { requete: requeteCerveau } : {}),
         ...(rayonCerveau ? { rayon: rayonCerveau } : {}),
         ...(suiteCerveau ? { suite: true } : {}),
+        ...(commerceCerveau ? { commerce: commerceCerveau } : {}),
         ...(detailsCerveau?.precision ? { precision: detailsCerveau.precision } : {}),
         ...(pageInitiale ? { pageInitiale } : {}),
         ...(messagePublic ? { messagePublic } : {}),

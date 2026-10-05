@@ -102,6 +102,29 @@ const GENERIQUES = new Set(['super', 'market', 'supermarche', 'supermarket', 're
 const coeur = (n: string) => n.split(' ').filter((m) => m.length > 1 && !GENERIQUES.has(m));
 
 /**
+ * Les commerces de l'annuaire d'un TYPE (« les supermarchés »), les plus
+ * proches d'abord, sauf ceux à exclure (sur Tovo, ou déjà montrés).
+ */
+export function commercesDuType(
+  type: TypeCommerce,
+  position: { lat: number; lng: number } | null | undefined,
+  exclure: (c: Commerce) => boolean,
+  combien: number,
+  rayonMax = 20_000,
+): Commerce[] {
+  const retenus: Commerce[] = [];
+  const candidats = chargerCommerces().filter((c) => c.type === type)
+    .map((c) => ({ c, d: position ? metres(position, c) : 0 }))
+    .filter(({ d }) => d <= rayonMax)
+    .sort((a, b) => (position ? a.d - b.d : b.c.fiabilite - a.c.fiabilite));
+  for (const { c } of candidats) {
+    if (retenus.length >= combien) break;
+    if (!exclure(c)) retenus.push(c);
+  }
+  return retenus;
+}
+
+/**
  * LES SPÉCIALISTES d'un produit (article 8 de la constitution, 05/10) : les
  * commerces dont le NOM porte le produit demandé (« Nouhou Merguez », « Pizza
  * Kana », « Vente de riz »), plus ceux dont la spécialité est notée à la main
