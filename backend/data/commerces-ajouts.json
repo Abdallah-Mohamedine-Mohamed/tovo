@@ -3,15 +3,18 @@
   "commerces": [
     {
       "id": "tovo:merguez-toumo",
-      "nom": "Nouhou Merguez",
+      "nom": "Merguez de Cité Fayçal",
       "alias": [
+        "Nouhou Merguez",
         "Vendeur de merguez de la place Toumo",
         "Vendeur de merguez de Cité Fayçal",
         "Vendeur de merguez",
         "Nouhou"
       ],
       "type": "grillades",
-      "specialites": ["merguez"],
+      "specialites": [
+        "merguez"
+      ],
       "adresse": "Bd de l'Indépendance, près de la pharmacie Cité Fayçal",
       "quartier": "Cité Fayçal",
       "telephone": null,

@@ -1,7 +1,7 @@
 import { env } from '../config/env.js';
 import { quickReplies, type Component } from '../components/builders.js';
 import { classerIntention, type DecisionJev, type Intention, INTENTIONS } from './jev.js';
-import { normaliserIntention } from './intents.js';
+import { demandeGeneraleDeRepas, normaliserIntention } from './intents.js';
 import { COUTEUSES, type DecisionCerveau } from './decideur.js';
 
 /**
@@ -152,6 +152,14 @@ export function routeDuCerveau(
   // course la proposait, 02/10).
   if (contexte.commande === false && SUR_UNE_COMMANDE.has(d.intention)) {
     return { type: 'intention', intention: 'social', decision };
+  }
+  // Article 6 : une envie est une demande SANS produit précis. Si le cerveau
+  // en a extrait un (« Boutique de prêt à porter pour femmes » → « vêtements
+  // pour femmes »), c'est une recherche : l'« envie » partait au modèle, qui
+  // montrait la grille des catégories ou le gaz et la parapharmacie (06/10).
+  // « Je veux manger » garde sa porte Restaurants.
+  if (d.intention === 'envie' && d.produit?.trim() && !demandeGeneraleDeRepas(message)) {
+    return { type: 'intention', intention: 'recherche', decision: { ...decision, choix: 'recherche' } };
   }
   if (d.sur || !COUTEUSES.has(d.intention)) return { type: 'intention', intention: d.intention, decision };
   const texte = message.trim().slice(0, 300);

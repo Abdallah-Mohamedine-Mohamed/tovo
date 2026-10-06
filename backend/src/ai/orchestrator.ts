@@ -272,7 +272,8 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
       }
     }
     if (j.pertinent === false) {
-      const ailleurs = await horsTovo(input.db, parole, input.requete ?? requeteInitiale, input.position);
+      const ailleurs = await horsTovo(input.db, parole, input.requete ?? requeteInitiale, input.position,
+        input.rayon ? { rayon: input.rayon } : {});
       // Article 6 : jamais de produits sans rapport, même faute de mieux.
       const repli = ailleurs ?? {
         content: 'Tovo n’en propose pas pour le moment.',
@@ -501,7 +502,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     // qui vend vraiment le produit demandé passe devant.
     if ((page.total === 0 || page.match_type === 'similar') && !page.category_id && intent.merchants.length === 0) {
       direct = await horsTovo(input.db, parole, requeteClient || intent.query, input.position,
-        { boutique: input.intention === 'boutique' });
+        { boutique: input.intention === 'boutique', ...(input.rayon ? { rayon: input.rayon } : {}) });
     }
     if (!direct && (page.total > 0 || page.category_id || selectedBranch || keyword)) {
       direct = searchAnswer(page, filter);
@@ -705,7 +706,8 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
         composantsDuTour.push(...filtres);
       }
       if (j.pertinent === false) {
-        const ailleurs = await horsTovo(input.db, parole, input.requete ?? requeteInitiale, input.position);
+        const ailleurs = await horsTovo(input.db, parole, input.requete ?? requeteInitiale, input.position,
+        input.rayon ? { rayon: input.rayon } : {});
         composantsDuTour.length = 0;
         composantsDuTour.push(...(ailleurs?.components ?? []));
         reponseOutil = ailleurs?.content ?? 'Tovo n’en propose pas pour le moment.';

@@ -626,6 +626,13 @@ const metresEntre = (a: { lat: number; lng: number }, b: { lat: number; lng: num
  * @param texte   la demande (et la requête de l'assistant) : sert à choisir le type de commerce
  * @param produit ce que l'assistant a compris (« merguez »), pour la consigne du livreur
  */
+/** Les types de commerce d'un rayon Tovo (l'inverse de RAYON_DU_COMMERCE). */
+export function typesDuRayon(rayon: Rayon | undefined): TypeCommerce[] {
+  if (!rayon) return [];
+  return (Object.entries(RAYON_DU_COMMERCE) as Array<[TypeCommerce, Rayon]>)
+    .filter(([, r]) => r === rayon).map(([type]) => type);
+}
+
 export async function alternativesHorsTovo(
   db: SupabaseClient,
   texte: string,
@@ -633,11 +640,14 @@ export async function alternativesHorsTovo(
   produit?: string,
   /** Article 7 : « d'autres », « plus loin » — hors ce qui a déjà été montré, tous types, plus loin. */
   suite?: { dejaVus: ReadonlySet<string>; auDelaDe?: number },
+  /** Le rayon compris par le cerveau : ses types de commerce, si les mots ne suffisent pas. */
+  rayon?: Rayon,
 ): Promise<CatalogueAnswer | null> {
   const surTovo = await estSurTovo(db);
+  const secours = typesDuRayon(rayon);
   const commerces = suite
-    ? commercesPourProduit(texte, position, (x) => suite.dejaVus.has(x.nom) || surTovo(x), 3, true, suite.auDelaDe ?? 0)
-    : commercesPourProduit(texte, position, surTovo);
+    ? commercesPourProduit(texte, position, (x) => suite.dejaVus.has(x.nom) || surTovo(x), 3, true, suite.auDelaDe ?? 0, secours)
+    : commercesPourProduit(texte, position, surTovo, 3, false, 0, secours);
   if (commerces.length === 0) return null;
   const quoi = (produit ?? '').trim();
   // La nuit ou le dimanche, un médicament : seules les pharmacies de garde
@@ -825,7 +835,7 @@ export async function horsTovo(
   message: string,
   requete: string,
   position: { lat: number; lng: number } | null | undefined,
-  options: { boutique?: boolean } = {},
+  options: { boutique?: boolean; rayon?: Rayon } = {},
 ): Promise<CatalogueAnswer | null> {
   const nom = requete.trim();
   if (nom) {
@@ -851,7 +861,7 @@ export async function horsTovo(
       noterBoutiqueDemandee(nom, '', 'inconnue');
     }
   }
-  return alternativesHorsTovo(db, `${message} ${nom}`.trim(), position, nom || undefined);
+  return alternativesHorsTovo(db, `${message} ${nom}`.trim(), position, nom || undefined, undefined, options.rayon);
 }
 
 async function enseigneHorsTovo(db: SupabaseClient, intent: CatalogueIntent & { missing: string }): Promise<CatalogueAnswer> {

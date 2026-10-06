@@ -240,7 +240,7 @@ const NOMS_DU_COMMERCE: Record<TypeCommerceCherche, RegExp> = {
   grillades: /\b(grill|dibiterie|rotisserie)/,
   beaute: /\b(beaute|cosmetique|salon de)/,
   electronique: /\b(electronique|magasin de telephone|boutique de telephone)/,
-  vetements: /\b(vetement|habit|friperie|boutique de mode|tailleur)/,
+  vetements: /\b(vetement|habit|friperie|boutique de mode|tailleur|pret a porter|couture)/,
   quincaillerie: /\b(quincaill)/,
 };
 export function commerceNomme(type: TypeCommerceCherche, message: string): boolean {

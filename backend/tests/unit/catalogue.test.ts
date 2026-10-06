@@ -559,6 +559,14 @@ describe('Tovo dit où trouver ce qu’il n’a pas (annuaire public, 01/10)', (
       .toBe(`${HORS_TOVO_OUI}Acheter : pommade nivea chez Haddad Khalil Super Market (Rue du Commerce, Plateau)|+22720736160`);
   });
 
+  it('les mots ne disent rien, le rayon du cerveau oui : ses commerces (article 1)', async () => {
+    // « prêt à porter » n'est dans aucune liste de mots ; sans rayon, rien.
+    expect(await alternativesHorsTovo(adapter, 'Boutique de prêt à porter', position, 'prêt à porter')).toBeNull();
+    const r = await alternativesHorsTovo(adapter, 'Des articles pour la maison', position, 'articles', undefined, 'supermarche');
+    expect((r?.components[0]?.data.items as Array<{ nom: string }>).map((i) => i.nom))
+      .toEqual(['Haddad Khalil Super Market', 'Supermarché Azar']);
+  });
+
   it('« Envoyer un livreur » : la carte livreur, avec le numéro du commerce comme contact', async () => {
     const r = await reponseHorsTovo(adapter, `${HORS_TOVO_OUI}Acheter du riz chez Azar|+22770777770`);
     expect(r.components[0]?.data).toMatchObject({

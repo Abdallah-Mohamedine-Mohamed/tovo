@@ -371,7 +371,7 @@ const SCENARIOS: Scenario[] = [
         return nouveaux || (r.composants.length === 0 && /rien d.autre|pas d.autres?|aucun autre/i.test(r.texte));
       }],
       ['les vendeurs hors Tovo aussi, dans la conversation (le grilleur réputé pour ses merguez)', (r, c) =>
-        [...commerces(c.reponses[0]!), ...commerces(r)].some((i) => /nouhou/i.test(nom(i)))],
+        [...commerces(c.reponses[0]!), ...commerces(r)].some((i) => /merguez de cite faycal/i.test(sansAccents(nom(i))))],
       // Et les merguez de TOVO, quelque part dans la conversation (jamais « nous n'en avons pas »).
       ['les merguez de Tovo aussi, dans la conversation', (r, c) =>
         [...produits(c.reponses[0]!), ...produits(r)].some((i) => /merguez/.test(sansAccents(nom(i))))],

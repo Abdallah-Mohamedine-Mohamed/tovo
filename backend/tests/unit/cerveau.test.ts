@@ -110,6 +110,16 @@ describe('la route décidée par le cerveau', () => {
       .toMatchObject({ type: 'intention', intention: 'recherche' });
   });
 
+  it('article 6 : une « envie » avec un produit est une recherche', () => {
+    const envie = (produit: string) => ({ ...decision('envie', true), produit });
+    expect(routeDuCerveau(envie('vêtements pour femmes'), 'Boutique de prêt à porter pour femmes'))
+      .toMatchObject({ type: 'intention', intention: 'recherche' });
+    expect(routeDuCerveau(envie(''), 'J’ai envie de quelque chose de bon'))
+      .toMatchObject({ type: 'intention', intention: 'envie' });
+    expect(routeDuCerveau(envie('repas'), 'Je veux manger'))
+      .toMatchObject({ type: 'intention', intention: 'envie' });
+  });
+
   it('pas de décision : le chemin habituel', () => {
     expect(routeDuCerveau(decision(null, false), 'bonjour')).toMatchObject({ type: 'habituel' });
   });

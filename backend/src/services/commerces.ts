@@ -269,6 +269,11 @@ export function commercesPourProduit(
   elargir = false,
   /** « Plus loin » : seulement au-delà de cette distance (article 7). */
   auDelaDe = 0,
+  /**
+   * Les types du rayon compris par le cerveau, quand les mots seuls ne disent
+   * rien (« prêt-à-porter » → vêtements). Article 1 : un seul interprète.
+   */
+  secours: TypeCommerce[] = [],
 ): Commerce[] {
   const n = normaliserIntention(texte);
   const mots = new Set(n.split(' '));
@@ -300,7 +305,8 @@ export function commercesPourProduit(
     return retenus;
   };
   const retenus = garder(reputes, []);
-  for (const type of typesPourProduit(texte)) {
+  const types = typesPourProduit(texte);
+  for (const type of types.length > 0 ? types : secours) {
     if (retenus.length >= combien) break;
     const avant = retenus.length;
     garder(parType(type), retenus);
