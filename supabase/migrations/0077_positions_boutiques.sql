@@ -10,4 +10,4 @@ language sql stable security invoker set search_path = public as $$
   where m.id = any(ids) and m.is_approved = true and m.location is not null
 $$;
 
-grant execute on function public.merchants_positions(uuid[]) to anon, authenticated, service_role;
+grant execute on function public.merchants_positions(uuid[]) to  anon, authenticated, service_role;
