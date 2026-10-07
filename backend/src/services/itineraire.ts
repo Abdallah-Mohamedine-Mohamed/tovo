@@ -28,7 +28,14 @@ export type Itineraire = {
   polyline: string;
   distanceM: number;
   dureeS: number;
+  /**
+   * Les consignes de navigation, étape par étape, en français (« Tourner à
+   * gauche sur… ») : le guidage vocal de « Y aller » (07/10).
+   */
+  etapes: Etape[];
 };
+
+export type Etape = { instruction: string; manoeuvre: string | null; distanceM: number; debut: Point };
 
 type Entree = {
   itineraire: Itineraire;
@@ -88,7 +95,8 @@ async function calculer(depart: Point, destination: Point): Promise<Itineraire |
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': cle,
-      'X-Goog-FieldMask': 'routes.polyline.encodedPolyline,routes.distanceMeters,routes.duration',
+      'X-Goog-FieldMask': 'routes.polyline.encodedPolyline,routes.distanceMeters,routes.duration,'
+        + 'routes.legs.steps.navigationInstruction,routes.legs.steps.distanceMeters,routes.legs.steps.startLocation',
     },
     body: JSON.stringify({
       origin: { location: { latLng: { latitude: depart.lat, longitude: depart.lng } } },
@@ -102,15 +110,39 @@ async function calculer(depart: Point, destination: Point): Promise<Itineraire |
   });
   if (!reponse.ok) return null;
   const corps = (await reponse.json()) as {
-    routes?: { polyline?: { encodedPolyline?: string }; distanceMeters?: number; duration?: string }[];
+    routes?: {
+      polyline?: { encodedPolyline?: string };
+      distanceMeters?: number;
+      duration?: string;
+      legs?: { steps?: {
+        navigationInstruction?: { instructions?: string; maneuver?: string };
+        distanceMeters?: number;
+        startLocation?: { latLng?: { latitude?: number; longitude?: number } };
+      }[] }[];
+    }[];
   };
   const route = corps.routes?.[0];
   const polyline = route?.polyline?.encodedPolyline;
   if (!polyline) return null;
+  const etapes: Etape[] = [];
+  for (const leg of route.legs ?? []) {
+    for (const e of leg.steps ?? []) {
+      const ll = e.startLocation?.latLng;
+      const instruction = e.navigationInstruction?.instructions?.replace(/\s+/g, ' ').trim();
+      if (!instruction || ll?.latitude == null || ll.longitude == null) continue;
+      etapes.push({
+        instruction,
+        manoeuvre: e.navigationInstruction?.maneuver ?? null,
+        distanceM: e.distanceMeters ?? 0,
+        debut: { lat: ll.latitude, lng: ll.longitude },
+      });
+    }
+  }
   return {
     polyline,
     distanceM: route.distanceMeters ?? 0,
     dureeS: Number.parseInt(route.duration ?? '0', 10) || 0,
+    etapes,
   };
 }
 

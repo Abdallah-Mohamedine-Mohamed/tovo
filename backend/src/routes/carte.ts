@@ -73,6 +73,10 @@ export async function carteRoutes(app: FastifyInstance): Promise<void> {
       distance_m: itineraire?.distanceM ?? Math.round(distanceKm(de, a) * 1000),
       duree_s: itineraire?.dureeS ?? null,
       quartier: autourDe(a).quartier,
+      // Le guidage vocal de « Y aller » : les consignes, étape par étape.
+      etapes: (itineraire?.etapes ?? []).map((e) => ({
+        instruction: e.instruction, manoeuvre: e.manoeuvre, distance_m: e.distanceM, lat: e.debut.lat, lng: e.debut.lng,
+      })),
       reperes: reperesDuTrajet(trajet),
     });
   });

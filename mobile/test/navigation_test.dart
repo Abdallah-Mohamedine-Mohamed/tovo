@@ -43,4 +43,30 @@ void main() {
     expect(ecartAngle(10, 350), -20);
     expect(ecartAngle(0, 180).abs(), 180);
   });
+
+  group('le guidage vocal : chaque annonce une seule fois', () {
+    // 300 m de trajet : départ, puis « tourner à droite » au coude (100 m restants).
+    final guide = Guide([
+      EtapeGuidage(instruction: 'Prendre la direction nord', manoeuvre: 'DEPART', debut: depart, restantAuDebut: 300),
+      EtapeGuidage(instruction: 'Tourner à droite sur Rue YN-12', manoeuvre: 'TURN_RIGHT', debut: coude, restantAuDebut: 100),
+    ]);
+
+    test('au départ, la première consigne ; puis rien tant que c’est loin', () {
+      expect(guide.annonce(300), 'Prendre la direction nord');
+      expect(guide.annonce(290), isNull);
+      expect(guide.prochaine(290)!.dansM, closeTo(190, 0.1));
+    });
+
+    test('à 150 m : « Dans 150 mètres, tourner à droite… », une fois ; au coude : la consigne', () {
+      expect(guide.annonce(250), 'Dans 150 mètres, tourner à droite sur Rue YN-12');
+      expect(guide.annonce(240), isNull);
+      expect(guide.annonce(130), 'Tourner à droite sur Rue YN-12');
+      expect(guide.annonce(120), isNull);
+    });
+
+    test('à l’arrivée : « Vous êtes arrivé. », une fois', () {
+      expect(guide.annonce(15), 'Vous êtes arrivé.');
+      expect(guide.annonce(10), isNull);
+    });
+  });
 }

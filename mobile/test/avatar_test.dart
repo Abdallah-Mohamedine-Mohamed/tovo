@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tovo/core/position_livreur.dart';
 import 'package:tovo/features/carte/avatar.dart';
 
 /// Simule le GPS : une mesure par seconde, le moteur avancé à 15 images/s.
@@ -7,12 +8,14 @@ class Simulation {
   final MoteurAvatar m;
   double lat = 13.5297, lng = 2.0886;
   EtatAvatar? dernier;
+  DateTime instant = DateTime(2026, 10, 7, 19);
 
   /// `secondes` à `vitesseMs`, vers le nord, une mesure GPS par seconde.
   void rouler(double secondes, double vitesseMs, {double precisionM = 5, double? bruitMs}) {
     for (var s = 0; s < secondes; s++) {
       lat += vitesseMs / 111320;
-      m.gps((lat: lat, lng: lng), vitesseMs: bruitMs ?? vitesseMs, capDeg: vitesseMs > 0.6 ? 0 : null, precisionM: precisionM);
+      instant = instant.add(const Duration(seconds: 1));
+      m.gps((lat: lat, lng: lng), vitesseMs: bruitMs ?? vitesseMs, capDeg: vitesseMs > 0.6 ? 0 : null, precisionM: precisionM, instant: instant);
       for (var k = 0; k < 15; k++) {
         dernier = m.avancer(1 / 15);
       }
@@ -94,6 +97,42 @@ void main() {
       final s = Simulation();
       s.rouler(3, 1.3);
       expect(s.dernier!.capDeg, closeTo(0, 1));
+    });
+  });
+
+  group('sur un vrai téléphone (essai du 07/10)', () {
+    test('iPhone : vitesse du GPS indisponible (−1) — il marche quand même, d’après son déplacement', () {
+      final m = MoteurAvatar(saluer: false);
+      var t = DateTime(2026, 10, 7, 19);
+      var lat = 13.5297;
+      for (var s = 0; s < 6; s++) {
+        lat += 1.4 / 111320;
+        t = t.add(const Duration(seconds: 1));
+        m.gps((lat: lat, lng: 2.0886), vitesseMs: -1, capDeg: -1, precisionM: 5, instant: t);
+        for (var k = 0; k < 15; k++) {
+          m.avancer(1 / 15);
+        }
+      }
+      expect(m.animation, AnimationAvatar.marche);
+      expect(m.avancer(0)!.capDeg, closeTo(0, 2), reason: 'vers le nord');
+    });
+
+    test('à l’arrêt, le GPS qui tremble de 6 m ne fait ni marcher, ni tourner, ni bouger l’avatar', () {
+      final m = MoteurAvatar(saluer: false);
+      var t = DateTime(2026, 10, 7, 19);
+      const sauts = [(6.0, 0.0), (-4.0, 5.0), (3.0, -6.0), (-6.0, -2.0), (5.0, 4.0), (0.0, 6.0)];
+      final depart = (lat: 13.5297, lng: 2.0886);
+      for (var i = 0; i < 30; i++) {
+        final (dn, de) = sauts[i % sauts.length];
+        t = t.add(const Duration(seconds: 1));
+        m.gps((lat: depart.lat + dn / 111320, lng: depart.lng + de / 108000), vitesseMs: -1, precisionM: 8, instant: t);
+        for (var k = 0; k < 15; k++) {
+          m.avancer(1 / 15);
+        }
+      }
+      expect(m.animation, AnimationAvatar.attente);
+      expect(m.avancer(0)!.capDeg, isNull, reason: 'pas de cap inventé : la caméra ne tourne pas');
+      expect(metres(m.position!, depart), lessThan(8));
     });
   });
 

@@ -30,6 +30,24 @@ describe('itinéraires de la carte de suivi', () => {
     expect(points[2]!.lng).toBeCloseTo(-126.453, 5);
   });
 
+  it('lit les consignes de navigation, étape par étape (guidage vocal, 07/10)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({ routes: [{
+      polyline: { encodedPolyline: EXEMPLE }, distanceMeters: 1200, duration: '240s',
+      legs: [{ steps: [
+        { navigationInstruction: { instructions: 'Prendre la direction  nord', maneuver: 'DEPART' }, distanceMeters: 300,
+          startLocation: { latLng: { latitude: 13.53, longitude: 2.09 } } },
+        { navigationInstruction: { instructions: 'Tourner à gauche sur Boulevard de la Jeunesse', maneuver: 'TURN_LEFT' }, distanceMeters: 900,
+          startLocation: { latLng: { latitude: 13.533, longitude: 2.09 } } },
+        { distanceMeters: 10 },
+      ] }],
+    }] }), { status: 200 }));
+    const it = await itinerairePour('carte:x', { lat: 13.53, lng: 2.09 }, { lat: 13.54, lng: 2.08 });
+    expect(it?.etapes).toEqual([
+      { instruction: 'Prendre la direction nord', manoeuvre: 'DEPART', distanceM: 300, debut: { lat: 13.53, lng: 2.09 } },
+      { instruction: 'Tourner à gauche sur Boulevard de la Jeunesse', manoeuvre: 'TURN_LEFT', distanceM: 900, debut: { lat: 13.533, lng: 2.09 } },
+    ]);
+  });
+
   it('sait si le livreur est encore sur le tracé', () => {
     const trace = [{ lat: 13.5, lng: 2.1 }, { lat: 13.51, lng: 2.1 }];
     expect(surLeTrace({ lat: 13.5002, lng: 2.1 }, trace)).toBe(true);

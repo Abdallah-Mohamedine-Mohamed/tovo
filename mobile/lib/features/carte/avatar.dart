@@ -110,6 +110,13 @@ class MoteurAvatar {
   Point? _affiche;
   double _vx = 0, _vy = 0; // m/s, est et nord
   double _depuisFix = 0;
+  final _historique = <({DateTime t, Point p, double precision})>[];
+  double _precision = 0;
+  double _vitesseGps = -1;
+
+  /// Diagnostic des essais : précision (m) et vitesse brute du GPS (m/s).
+  double get precision => _precision;
+  double get vitesseGps => _vitesseGps;
 
   AnimationAvatar get animation => _animation;
   double get vitesse => _vitesse;
@@ -121,9 +128,51 @@ class MoteurAvatar {
     required double vitesseMs,
     double? capDeg,
     double precisionM = 5,
+    DateTime? instant,
   }) {
+    final maintenant = instant ?? DateTime.now();
+    _precision = precisionM;
+    _vitesseGps = vitesseMs;
     final precis = precisionM <= precisionMaxM;
-    final v = precis && vitesseMs.isFinite && vitesseMs > 0 ? vitesseMs : 0.0;
+    // Les 4 dernières secondes de mesures : une vitesse et un cap DE SECOURS,
+    // tirés du déplacement réel. Sur iPhone, la vitesse du GPS vaut −1 quand
+    // elle n'est pas disponible : l'avatar restait figé (essai du 07/10).
+    if (precis) _historique.add((t: maintenant, p: p, precision: precisionM));
+    _historique.removeWhere(
+      (h) => maintenant.difference(h.t).inMilliseconds > 4000,
+    );
+    double? vitesseDeplacement;
+    double? capDeplacement;
+    if (_historique.length >= 2) {
+      final a = _historique.first, b = _historique.last;
+      final dt = b.t.difference(a.t).inMilliseconds / 1000;
+      if (dt >= 1.5) {
+        final d = metres(a.p, b.p);
+        // Un déplacement plus petit que la précision du GPS n'en est pas un.
+        final seuil = math.max(4.0, (a.precision + b.precision) / 2);
+        // Et un vrai déplacement va DANS UNE DIRECTION : le chemin suivi est
+        // presque droit. Un tremblement zigzague (chemin bien plus long que
+        // l'écart net) : ce n'est pas une marche.
+        var chemin = 0.0;
+        for (var i = 1; i < _historique.length; i++) {
+          chemin += metres(_historique[i - 1].p, _historique[i].p);
+        }
+        final droit = chemin == 0 || d / chemin > 0.7;
+        vitesseDeplacement = d > seuil && droit ? d / dt : 0;
+        if (d > seuil && droit) capDeplacement = cap(a.p, b.p);
+      }
+    }
+    final doppler = vitesseMs.isFinite && vitesseMs >= 0 ? vitesseMs : null;
+    double v;
+    if (!precis) {
+      v = 0;
+    } else if (doppler != null &&
+        (doppler > 0 || (vitesseDeplacement ?? 0) < 1.0)) {
+      // La vitesse du GPS (Doppler) est la plus précise quand elle existe.
+      v = doppler;
+    } else {
+      v = vitesseDeplacement ?? 0;
+    }
     // Lissage du seul BRUIT : une petite variation est amortie ; un vrai
     // changement d'allure (plus de 1 m/s d'écart, la moto qui freine) est
     // suivi presque aussitôt — sinon l'avatar courait encore 3 s après.
@@ -131,14 +180,17 @@ class MoteurAvatar {
     final alpha = ecart > 1.0 ? 0.75 : (v > _vitesse ? 0.55 : 0.4);
     _vitesse += (v - _vitesse) * alpha;
     if (_vitesse < 0.05) _vitesse = 0;
-    final ancien = _fix;
-    if (ancien != null) {
-      final d = metres(ancien, p);
-      // Le cap : celui du GPS en mouvement, sinon celui du déplacement réel.
-      if (_vitesse > 0.6 && capDeg != null && capDeg.isFinite && capDeg >= 0) {
+    // Le cap ne change que s'il bouge VRAIMENT : à l'arrêt, le GPS tremble
+    // de quelques mètres et la caméra tournait en rond (essai du 07/10).
+    if (_vitesse > 0.6) {
+      if (capDeg != null &&
+          capDeg.isFinite &&
+          capDeg >= 0 &&
+          doppler != null &&
+          doppler > 0.6) {
         _cap = capDeg;
-      } else if (d > 3) {
-        _cap = cap(ancien, p);
+      } else if (capDeplacement != null) {
+        _cap = capDeplacement;
       }
     }
     final c = _cap;
@@ -149,10 +201,23 @@ class MoteurAvatar {
     } else {
       _vx = _vy = 0;
     }
-    _fix = p;
+    // À l'arrêt, la position reste stable : un tremblement plus petit que la
+    // précision ne déplace ni l'avatar, ni l'écart au trajet.
+    final ancien = _fix;
+    final immobile =
+        _vitesse == 0 &&
+        ancien != null &&
+        metres(ancien, p) < math.max(5.0, precisionM);
+    if (!immobile) _fix = p;
     _affiche ??= p;
     _depuisFix = 0;
   }
+
+  /// La position stabilisée (pour l'écart au trajet et les recalculs).
+  Point? get position => _fix;
+
+  /// En mouvement réel (pas un tremblement du GPS).
+  bool get enMouvement => _vitesse > 0.3;
 
   /// Avance de `dt` secondes ; renvoie ce qu'il faut afficher.
   EtatAvatar? avancer(double dt) {
@@ -405,6 +470,24 @@ class ImagesAvatar {
     await dossier.create(recursive: true);
     await fichier.writeAsBytes(r.bodyBytes, flush: true);
     return r.bodyBytes;
+  }
+
+  /// Précharge toutes les directions de ces animations (une bande à la
+  /// fois) : au premier « Y aller », l'avatar est déjà là (essai du 07/10).
+  Future<void> precharger(
+    List<AnimationAvatar> anims,
+    int t,
+    double ratio,
+  ) async {
+    for (final a in anims) {
+      if (!fiche.cycles.containsKey(a)) continue;
+      for (var d = 0; d < 360; d += 15) {
+        final nom = _nom(a, t, d);
+        if (_bandes.containsKey(nom)) continue;
+        bande(a, t, d, ratio);
+        await _enCours[nom];
+      }
+    }
   }
 
   /// Prépare les bandes voisines (directions ± 15°) : pas d'attente quand

@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -210,8 +211,11 @@ class _Itineraire {
     this.dureeS,
     this.quartier,
     this.reperes = const [],
+    this.etapes = const [],
   });
 
+  /// Les consignes du guidage vocal (Google, en français).
+  final List<EtapeGuidage> etapes;
   final List<Point> trace;
   final int distanceM;
   final int? dureeS;
@@ -257,6 +261,16 @@ class _CarteCommercesState extends State<CarteCommerces> {
   double _horsTrajet = 0; // secondes passées loin du trajet
   bool _recalcul = false;
 
+  // Le guidage vocal, dans l'appli (essai du 07/10 : ne plus renvoyer
+  // vers Google Maps).
+  Guide? _guide;
+  String? _consigne; // affichée dans le bandeau
+  String? _manoeuvre;
+  double? _consigneDansM;
+  bool _voix = true;
+  bool _diagnostic = false;
+  final _tts = FlutterTts();
+
   @override
   void initState() {
     super.initState();
@@ -269,6 +283,7 @@ class _CarteCommercesState extends State<CarteCommerces> {
 
   @override
   void dispose() {
+    unawaited(_tts.stop());
     _horloge?.cancel();
     unawaited(_gps?.cancel());
     _pages.dispose();
@@ -301,6 +316,25 @@ class _CarteCommercesState extends State<CarteCommerces> {
     await avatar.chargerFiche();
     if (!mounted) return;
     _avatar = avatar;
+    // L'avatar debout sur la carte à plat (45°), puis celui de « Y aller »
+    // (60°) : prêts avant qu'on en ait besoin.
+    final ratio = _ratio;
+    unawaited(() async {
+      await avatar.precharger(
+        [AnimationAvatar.attente, AnimationAvatar.salut],
+        45,
+        ratio,
+      );
+      await avatar.precharger(
+        [
+          AnimationAvatar.attente,
+          AnimationAvatar.marche,
+          AnimationAvatar.course,
+        ],
+        60,
+        ratio,
+      );
+    }());
     final moteur = MoteurAvatar(fiche: avatar.fiche);
     _moteur = moteur;
     final client = _client;
@@ -355,13 +389,36 @@ class _CarteCommercesState extends State<CarteCommerces> {
     }
   }
 
+  /// Le guidage : la consigne du bandeau, et la voix au bon moment.
+  void _guider(Progres? p) {
+    final guide = _guide;
+    if (guide == null || p == null) return;
+    final prochaine = guide.prochaine(p.restantM);
+    _consigne = prochaine?.etape.instruction;
+    _manoeuvre = prochaine?.etape.manoeuvre;
+    _consigneDansM = prochaine?.dansM;
+    final phrase = guide.annonce(p.restantM);
+    if (phrase != null && _voix) unawaited(_dire(phrase));
+  }
+
+  Future<void> _dire(String phrase) async {
+    try {
+      await _tts.setLanguage('fr-FR');
+      await _tts.setSpeechRate(0.5);
+      await _tts.speak(phrase);
+    } catch (_) {
+      // Sans voix (téléphone sans synthèse française) : le bandeau suffit.
+    }
+  }
+
   /// La navigation : progression sur le trajet, arrivée, recalcul s'il
   /// s'en écarte, et la caméra derrière l'avatar.
   void _suivre(EtatAvatar etat, double dt) {
     final it = _itineraires[_choisi];
     if (it != null) {
-      final p = Progres.calculer(it.trace, etat.position);
+      final p = Progres.calculer(it.trace, _moteur?.position ?? etat.position);
       _progres = p;
+      _guider(p);
       final boutique = widget.commerces[_choisi].position;
       if (!_arrive &&
           (metres(etat.position, boutique) < 20 ||
@@ -370,7 +427,12 @@ class _CarteCommercesState extends State<CarteCommerces> {
         unawaited(HapticFeedback.mediumImpact());
       }
       // Loin du trajet (plus de 50 m pendant 8 s) : on recalcule depuis ici.
-      if (p != null && !_arrive && p.ecartM > 50) {
+      // Seulement en vrai mouvement : à l'arrêt, le GPS qui tremble faisait
+      // recalculer sans cesse (essai du 07/10).
+      if (p != null &&
+          !_arrive &&
+          p.ecartM > 50 &&
+          (_moteur?.enMouvement ?? false)) {
         _horsTrajet += dt;
         if (_horsTrajet > 8 && !_recalcul) {
           _recalcul = true;
@@ -378,7 +440,7 @@ class _CarteCommercesState extends State<CarteCommerces> {
           unawaited(
             _chargerItineraire(
               _choisi,
-              depuis: etat.position,
+              depuis: _moteur?.position ?? etat.position,
             ).whenComplete(() => _recalcul = false),
           );
         }
@@ -663,8 +725,30 @@ class _CarteCommercesState extends State<CarteCommerces> {
         ));
       }
     }
+    final trace = code == null ? [client, c.position] : decoderPolyline(code);
+    final etapes = <EtapeGuidage>[];
+    for (final x in (raw['etapes'] as List? ?? const [])) {
+      if (x is Map &&
+          x['lat'] is num &&
+          x['lng'] is num &&
+          x['instruction'] is String) {
+        final debut = (
+          lat: (x['lat'] as num).toDouble(),
+          lng: (x['lng'] as num).toDouble(),
+        );
+        etapes.add(
+          EtapeGuidage(
+            instruction: x['instruction'] as String,
+            manoeuvre: x['manoeuvre'] as String?,
+            debut: debut,
+            restantAuDebut: Progres.calculer(trace, debut)?.restantM ?? 0,
+          ),
+        );
+      }
+    }
     final it = _Itineraire(
-      trace: code == null ? [client, c.position] : decoderPolyline(code),
+      trace: trace,
+      etapes: etapes,
       distanceM: (raw['distance_m'] as num?)?.toInt() ?? 0,
       dureeS: (raw['duree_s'] as num?)?.toInt(),
       quartier: raw['quartier'] as String?,
@@ -692,6 +776,8 @@ class _CarteCommercesState extends State<CarteCommerces> {
     }
     if (!mounted) return;
     setState(() => _itineraires[i] = it);
+    // En navigation, le nouveau trajet a son propre guidage.
+    if (_nav && i == _choisi) _guide = Guide(it.etapes);
   }
 
   /// Le client et le commerce choisi dans le cadre, entre la barre du haut
@@ -830,7 +916,22 @@ class _CarteCommercesState extends State<CarteCommerces> {
     final points = [for (final p in reste) LatLng(p.lat, p.lng)];
     // Deux traits l'un sur l'autre : le plus large dessous. En navigation,
     // le trajet déjà parcouru s'éteint (le contour seul).
+    final avatar = _etat?.position;
     return {
+      // L'itinéraire de Google part de la rue la plus proche qu'il connaît :
+      // un pointillé relie l'avatar au tracé (essai du 07/10).
+      if (progres != null && avatar != null && progres.ecartM > 8)
+        Polyline(
+          polylineId: const PolylineId('jonction'),
+          points: [
+            LatLng(avatar.lat, avatar.lng),
+            LatLng(progres.projection.lat, progres.projection.lng),
+          ],
+          color: _t.trace,
+          width: 3,
+          zIndex: 3,
+          patterns: [PatternItem.dot, PatternItem.gap(8)],
+        ),
       if (parcouru.length >= 2)
         Polyline(
           polylineId: const PolylineId('parcouru'),
@@ -889,6 +990,22 @@ class _CarteCommercesState extends State<CarteCommerces> {
     }
   }
 
+  /// Pour les essais sur le terrain : ce que le GPS donne vraiment.
+  String _texteDiagnostic() {
+    final m = _moteur;
+    if (m == null) return 'GPS : en attente';
+    final cap = _etat?.capDeg;
+    final allure = switch (m.animation) {
+      AnimationAvatar.attente => 'arrêt',
+      AnimationAvatar.marche => 'marche',
+      AnimationAvatar.course => 'course',
+      AnimationAvatar.salut => 'salut',
+    };
+    return 'GPS ${m.vitesseGps.toStringAsFixed(1)} m/s · lissée ${m.vitesse.toStringAsFixed(1)} · '
+        '±${m.precision.round()} m · cap ${cap == null ? '—' : '${cap.round()}°'} · $allure · '
+        'écart ${_progres?.ecartM.round() ?? '—'} m';
+  }
+
   /// Le temps restant : celui de Google, au prorata de ce qui reste.
   int? _minutesRestantes() {
     final it = _itineraires[_choisi];
@@ -912,6 +1029,7 @@ class _CarteCommercesState extends State<CarteCommerces> {
     }
     if (!_itineraires.containsKey(i)) await _chargerItineraire(i);
     if (!mounted) return;
+    _guide = Guide(_itineraires[i]?.etapes ?? const []);
     setState(() {
       _nav = true;
       _arrive = false;
@@ -924,6 +1042,9 @@ class _CarteCommercesState extends State<CarteCommerces> {
   }
 
   void _quitterNavigation() {
+    unawaited(_tts.stop());
+    _guide = null;
+    _consigne = null;
     setState(() {
       _nav = false;
       _arrive = false;
@@ -1030,30 +1151,46 @@ class _CarteCommercesState extends State<CarteCommerces> {
                   onTap: () => Navigator.of(context).pop(),
                 ),
                 const SizedBox(width: 10),
-                Expanded(
-                  child: Container(
-                    height: 44,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    alignment: Alignment.centerLeft,
-                    decoration: BoxDecoration(
-                      color: _t.panneau,
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(color: _t.panneauBord),
+                if (_nav)
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _diagnostic = !_diagnostic),
+                      child: _Bandeau(
+                        t: _t,
+                        consigne:
+                            _consigne ??
+                            'Vers ${widget.commerces[_choisi].nom}',
+                        dansM: _consigne == null ? null : _consigneDansM,
+                        manoeuvre: _manoeuvre,
+                        diagnostic: _diagnostic ? _texteDiagnostic() : null,
+                      ),
                     ),
-                    child: Text(
-                      _nav
-                          ? 'Vers ${widget.commerces[_choisi].nom}'
-                          : widget.titre,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: _t.texte,
+                  )
+                else
+                  Expanded(
+                    child: Container(
+                      height: 44,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      alignment: Alignment.centerLeft,
+                      decoration: BoxDecoration(
+                        color: _t.panneau,
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: _t.panneauBord),
+                      ),
+                      child: Text(
+                        _nav
+                            ? 'Vers ${widget.commerces[_choisi].nom}'
+                            : widget.titre,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: _t.texte,
+                        ),
                       ),
                     ),
                   ),
-                ),
                 const SizedBox(width: 10),
                 _Rond(
                   t: _t,
@@ -1079,7 +1216,11 @@ class _CarteCommercesState extends State<CarteCommerces> {
                     _itineraires[_choisi]?.distanceM.toDouble(),
                 minutes: _minutesRestantes(),
                 arrive: _arrive,
-                guidage: () => _guidageVocal(widget.commerces[_choisi]),
+                voix: _voix,
+                basculerVoix: () {
+                  setState(() => _voix = !_voix);
+                  if (!_voix) unawaited(_tts.stop());
+                },
                 quitter: _quitterNavigation,
                 faireLivrer: () => _faireLivrer(_choisi),
                 appeler: widget.commerces[_choisi].telephone == null
@@ -1135,6 +1276,91 @@ class _CarteCommercesState extends State<CarteCommerces> {
 }
 
 /// Le panneau de « Y aller » : ce qui reste, et l'arrivée.
+/// La consigne du guidage, en haut (« Dans 80 m · Tourner à gauche… »).
+class _Bandeau extends StatelessWidget {
+  const _Bandeau({
+    required this.t,
+    required this.consigne,
+    required this.dansM,
+    required this.manoeuvre,
+    required this.diagnostic,
+  });
+
+  final _Teinte t;
+  final String consigne;
+  final double? dansM;
+  final String? manoeuvre;
+  final String? diagnostic;
+
+  static IconData icone(String? m) => switch (m) {
+    'TURN_LEFT' => Icons.turn_left_rounded,
+    'TURN_RIGHT' => Icons.turn_right_rounded,
+    'TURN_SLIGHT_LEFT' ||
+    'FORK_LEFT' ||
+    'RAMP_LEFT' ||
+    'MERGE' => Icons.turn_slight_left_rounded,
+    'TURN_SLIGHT_RIGHT' ||
+    'FORK_RIGHT' ||
+    'RAMP_RIGHT' => Icons.turn_slight_right_rounded,
+    'TURN_SHARP_LEFT' => Icons.turn_sharp_left_rounded,
+    'TURN_SHARP_RIGHT' => Icons.turn_sharp_right_rounded,
+    'UTURN_LEFT' || 'UTURN_RIGHT' => Icons.u_turn_left_rounded,
+    'ROUNDABOUT_LEFT' => Icons.roundabout_left_rounded,
+    'ROUNDABOUT_RIGHT' => Icons.roundabout_right_rounded,
+    _ => Icons.straight_rounded,
+  };
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.fromLTRB(12, 8, 14, 8),
+    constraints: const BoxConstraints(minHeight: 44),
+    decoration: BoxDecoration(
+      color: t.panneau,
+      borderRadius: BorderRadius.circular(22),
+      border: Border.all(color: t.panneauBord),
+    ),
+    child: Row(
+      children: [
+        Icon(icone(manoeuvre), size: 22, color: t.distance),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (dansM != null)
+                Text(
+                  'Dans ${Money.distance(dansM!.round())}',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: t.distance,
+                  ),
+                ),
+              Text(
+                consigne,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  height: 1.2,
+                  color: t.texte,
+                ),
+              ),
+              if (diagnostic != null)
+                Text(
+                  diagnostic!,
+                  style: TextStyle(fontSize: 11, color: t.second),
+                ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class _PanneauNavigation extends StatelessWidget {
   const _PanneauNavigation({
     required this.t,
@@ -1142,7 +1368,8 @@ class _PanneauNavigation extends StatelessWidget {
     required this.restantM,
     required this.minutes,
     required this.arrive,
-    required this.guidage,
+    required this.voix,
+    required this.basculerVoix,
     required this.quitter,
     required this.faireLivrer,
     required this.appeler,
@@ -1153,7 +1380,8 @@ class _PanneauNavigation extends StatelessWidget {
   final double? restantM;
   final int? minutes;
   final bool arrive;
-  final VoidCallback guidage;
+  final bool voix;
+  final VoidCallback basculerVoix;
   final VoidCallback quitter;
   final VoidCallback faireLivrer;
   final VoidCallback? appeler;
@@ -1257,9 +1485,11 @@ class _PanneauNavigation extends StatelessWidget {
                 Expanded(
                   child: _Bouton(
                     t: t,
-                    icone: Icons.record_voice_over_outlined,
-                    texte: 'Guidage vocal',
-                    onTap: guidage,
+                    icone: voix
+                        ? Icons.volume_up_outlined
+                        : Icons.volume_off_outlined,
+                    texte: voix ? 'Voix activée' : 'Voix coupée',
+                    onTap: basculerVoix,
                   ),
                 ),
               const SizedBox(width: 8),

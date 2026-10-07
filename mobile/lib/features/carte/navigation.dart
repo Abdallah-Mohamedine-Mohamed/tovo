@@ -92,3 +92,73 @@ double ecartAngle(double de, double vers) {
   if (d < -180) d += 360;
   return d;
 }
+
+/// Une consigne du guidage (Google Routes, en français).
+class EtapeGuidage {
+  const EtapeGuidage({
+    required this.instruction,
+    required this.manoeuvre,
+    required this.debut,
+    required this.restantAuDebut,
+  });
+
+  final String instruction;
+  final String? manoeuvre;
+  final Point debut;
+
+  /// La distance qui reste, le long du trajet, au début de cette étape.
+  final double restantAuDebut;
+}
+
+/// Le guidage vocal (« Y aller », 07/10) : la prochaine consigne, sa
+/// distance, et ce qu'il faut dire — chaque annonce une seule fois.
+class Guide {
+  Guide(this.etapes);
+
+  final List<EtapeGuidage> etapes;
+  final _dites = <String>{};
+
+  /// La prochaine consigne devant lui, et à combien de mètres.
+  ({EtapeGuidage etape, int rang, double dansM})? prochaine(double restantM) {
+    for (var i = 0; i < etapes.length; i++) {
+      final e = etapes[i];
+      // Devant lui : il reste plus de route que jusqu'au début de l'étape.
+      if (e.restantAuDebut < restantM - 3) {
+        return (etape: e, rang: i, dansM: restantM - e.restantAuDebut);
+      }
+    }
+    return null;
+  }
+
+  /// Ce qu'il faut annoncer maintenant, ou null.
+  String? annonce(double restantM) {
+    // Au départ : la première consigne (« Prendre la direction nord… »).
+    if (etapes.isNotEmpty && _dites.add('depart')) {
+      return etapes.first.instruction;
+    }
+    if (restantM < 20) {
+      return _dites.add('arrivee') ? 'Vous êtes arrivé.' : null;
+    }
+    final p = prochaine(restantM);
+    if (p == null) return null;
+    final consigne = p.etape.instruction;
+    if (p.dansM <= 35) {
+      // Au moment de tourner (l'annonce lointaine n'a plus lieu d'être).
+      _dites.add('${p.rang}:loin');
+      return _dites.add('${p.rang}:pres') ? consigne : null;
+    }
+    if (p.dansM <= 160 && _dites.add('${p.rang}:loin')) {
+      return 'Dans ${distanceDite(p.dansM)}, ${minusculeInitiale(consigne)}';
+    }
+    return null;
+  }
+}
+
+/// « 80 mètres », « 150 mètres » : arrondi comme on le dit.
+String distanceDite(double m) {
+  final arrondi = m < 100 ? (m / 10).round() * 10 : (m / 50).round() * 50;
+  return '$arrondi mètres';
+}
+
+String minusculeInitiale(String s) =>
+    s.isEmpty ? s : s[0].toLowerCase() + s.substring(1);
