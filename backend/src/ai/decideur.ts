@@ -1,3 +1,4 @@
+import { nomsDuType, type TypeCommerce } from '../services/commerces.js';
 import { env } from '../config/env.js';
 import { INTENTIONS, type Intention } from './jev.js';
 import { viaLigneGoogle } from '../lib/ligneGoogle.js';
@@ -75,6 +76,7 @@ export const CONSIGNE_CERVEAU = [
   '- livreur / colis : le client veut qu’un livreur SE DÉPLACE pour lui (venir le voir, aller chercher ou déposer un objet à lui). Faire livrer un PRODUIT du catalogue, même avec « livre-moi », « apporte-moi » ou « envoie … chez ma mère », c’est recherche.',
   '- Un objet qui ressemble à un mot de livraison reste un produit : un livre, un litre, un paquet de biscuits, un sac ou un « colis » de riz → recherche.',
   '- Tovo ne transporte PAS de personnes : un taxi, un Uber, « emmène-moi à l’aéroport », « ramène-moi à la maison » (c’est le client qui se déplace) → social. Un livreur vient pour un OBJET ou une course.',
+  '- Qui fait l’action : livreur / colis, c’est le CLIENT qui veut qu’un livreur vienne. Si celui qui parle EST livreur ou coursier (il vient livrer, il livre pour Tovo, il cherche du travail) → question, jamais livreur.',
   '- Les demandes d’assistant personnel (alarme, agenda, liste de tâches, musique, météo, lumière) → social.',
   '- Où en est la commande, quand elle arrive, où est le livreur → suivi. Un PROBLÈME (mauvaise commande, article manquant, livreur qui ne répond pas, monnaie, paiement Nita bloqué, modifier ou compléter une commande déjà passée) → aide.',
   '- question : SEULEMENT le service Tovo lui-même (frais de livraison, zones desservies, horaires de livraison, comment payer, devenir livreur ou boutique partenaire). Une question sur ce que Tovo PROPOSE (boutiques ouvertes, produits, catégories, prix d’un produit) → envie, recherche ou boutique, jamais question.',
@@ -104,13 +106,14 @@ export const CONSIGNE_CERVEAU = [
   '« Appelle-moi un taxi pour la gare » → social',
   '',
   '« sur » : false si la phrase peut raisonnablement vouloir dire autre chose, surtout si l’une des lectures est une action (livreur, colis, annuler, habitude).',
-  '« produit » : ce que le client cherche, en 1 à 5 mots, EN FRANÇAIS quelle que soit la langue du client (le catalogue est en français), tel qu’on le taperait dans le catalogue — le produit ou le plat (« merguez », « pommade Nivea », « riz parfumé »), ou la boutique nommée avec ce qui la précise (« O’Takoss Centre Aéré »). Sans les mots de politesse ni de demande (« je veux », « bien », « autre chose »). Si le message répond au dernier message de Tovo, complète avec lui (après « Dans quel quartier cherchez-vous du poulet ? », « Bobiel » → « poulet »). Vide s’il ne cherche rien.',
+  '« produit » : ce que le client cherche, en 1 à 5 mots, EN FRANÇAIS quelle que soit la langue du client (le catalogue est en français), tel qu’on le taperait dans le catalogue — le produit ou le plat (« merguez », « pommade Nivea », « riz parfumé »), ou la boutique nommée avec ce qui la précise (« O’Takoss Centre Aéré »). Sans les mots de politesse ni de demande (« je veux », « bien », « autre chose »). Si le message répond au dernier message de Tovo, complète avec lui (après « Dans quel quartier cherchez-vous du poulet ? », « Bobiel » → « poulet »). Vide s’il ne cherche rien, ou seulement un genre de lieu (« les restaurants autour de moi », « une pharmacie pas loin »).',
   '« rayon » : où chercher ce produit dans Tovo — repas (plats préparés, restaurants), supermarche (épicerie, boissons, produits ménagers, huile de cuisine, lait, riz en sac), marche (produits frais du marché), beaute (soins, cosmétiques, parfums), electronique (téléphones, accessoires, électroménager), vetements (habits, chaussures, montres, bijoux), gaz, pharmacie (parapharmacie, médicaments sans ordonnance) ; « aucun » si rien ne convient ou si c’est une boutique nommée. Choisis selon ce que le client VEUT : « un litre d’huile » → supermarche (pas beaute), « deux litres de lait » → supermarche.',
-  '« commerce » : le TYPE de commerce que le client cherche, s’il demande des commerces d’un genre plutôt qu’un produit ou une boutique nommée (« un supermarché pas loin », « les pharmacies du coin », « tous les supermarchés de Niamey ») ; « aucun » sinon. Il peut aussi dire ce qu’il veut y trouver (« produit »).',
+  '« commerce » : le GENRE de lieu que le client demande — il cherche un endroit (boutique, magasin, salon, atelier, maquis, friperie, officine…) et non seulement une chose : « un supermarché pas loin », « les pharmacies du coin », « un magasin de chaussures » → vetements, « un salon de coiffure » → beaute, « une dibiterie » → grillades. Il peut aussi dire ce qu’il veut y trouver (« produit »). « aucun » s’il ne demande qu’un produit ou un plat (« une pizza », « des chaussures », « un vendeur de merguez » = des merguez) ou une boutique nommée.',
+  '« lieu » : le quartier ou le repère de Niamey AUTOUR DUQUEL le client veut trouver ce qu’il cherche (« une friperie vers Yantala » → « Yantala », « des brochettes près du stade » → « stade »), ou celui où il veut être livré (« livrez-moi des brochettes à Yantala » → « Yantala » : les commerces proches de là), mot pour mot ; chaîne vide s’il n’en dit pas. Jamais le trajet d’une course (« depart », « arrivee »). « produit » ne contient pas ce lieu.',
   '« suite » : true si le client veut d’AUTRES résultats que ceux déjà montrés pour la même chose (d’autres, encore, plus, plus loin, ailleurs, d’autres vendeurs) — article 7. « produit » reste alors ce qu’il cherchait.',
   '« depart », « arrivee », « telephone » : ce que le client a précisé pour une course (article 9), mot pour mot, chaîne vide sinon : « depart » = où le livreur prend quelque chose, si ce n’est pas chez le client ; « arrivee » = où il doit l’apporter (« à mon frère à Yantala » → « Yantala ») ; « telephone » = un numéro dit.',
   '« precision » : la préférence que le client vient de dire sur ce qu’il choisit ou commande (« sans oignons », « bien cuit », « sonnez en arrivant »), mot pour mot ; chaîne vide s’il n’en dit pas. Jamais le choix d’un article (« le premier »).',
-  'Réponds uniquement en JSON : {"intention": "<clé>", "sur": true|false, "produit": "<mots>", "rayon": "<rayon>", "commerce": "<type>", "precision": "<texte ou vide>", "depart": "<lieu ou vide>", "arrivee": "<lieu ou vide>", "telephone": "<numéro ou vide>", "suite": true|false}.',
+  'Réponds uniquement en JSON : {"intention": "<clé>", "sur": true|false, "produit": "<mots>", "rayon": "<rayon>", "commerce": "<type>", "lieu": "<quartier ou repère, ou vide>", "precision": "<texte ou vide>", "depart": "<lieu ou vide>", "arrivee": "<lieu ou vide>", "telephone": "<numéro ou vide>", "suite": true|false}.',
 ].join('\n');
 
 export interface ContexteCerveau {
@@ -141,6 +144,12 @@ export interface DecisionCerveau {
   rayon?: Rayon;
   /** Le type de commerce cherché (« un supermarché pas loin »), s'il y en a un. */
   commerce?: TypeCommerceCherche;
+  /**
+   * Le quartier ou le repère autour duquel le client cherche (« une friperie
+   * vers Yantala » → « Yantala »), tel qu'il l'a dit. Situé ensuite par
+   * services/lieux.ts ; il remplace alors sa position pour la recherche.
+   */
+  lieu?: string;
   /** Le client veut d'autres résultats que ceux déjà montrés (article 7). */
   suite?: boolean;
   /** Ce qu'il a précisé et qu'une carte doit reprendre (article 9). */
@@ -155,7 +164,7 @@ export interface DecisionCerveau {
 
 /** Ce que le client a précisé, mot pour mot (article 9). */
 export interface Details { depart?: string; arrivee?: string; telephone?: string; precision?: string }
-export type Lecture = { intention: Intention; sur: boolean; produit?: string; rayon?: Rayon; commerce?: TypeCommerceCherche; suite?: boolean; details?: Details };
+export type Lecture = { intention: Intention; sur: boolean; produit?: string; rayon?: Rayon; commerce?: TypeCommerceCherche; lieu?: string; suite?: boolean; details?: Details };
 export type Essai = (message: string, signal: AbortSignal) => Promise<Lecture>;
 
 const SCHEMA = {
@@ -166,6 +175,8 @@ const SCHEMA = {
     produit: { type: 'STRING' },
     rayon: { type: 'STRING', enum: ['aucun', ...RAYONS] },
     commerce: { type: 'STRING', enum: ['aucun', ...COMMERCES] },
+    // Obligatoire aussi : facultatif, Flash-Lite omet les champs (05/10).
+    lieu: { type: 'STRING' },
     // Au premier niveau et obligatoire (vide s'il n'y en a pas) : rangée dans
     // « details », facultatif, elle était omise deux fois sur trois (05/10).
     precision: { type: 'STRING' },
@@ -183,14 +194,14 @@ const SCHEMA = {
     },
   },
   // « commerce » obligatoire : facultatif, Flash-Lite l'omettait (05/10).
-  required: ['intention', 'sur', 'commerce', 'precision', 'depart', 'arrivee', 'telephone'],
+  required: ['intention', 'sur', 'commerce', 'lieu', 'precision', 'depart', 'arrivee', 'telephone'],
 };
 
 export function lireDecision(texte: string): Lecture | null {
   const brut = texte.match(/\{[\s\S]*\}/)?.[0];
   if (!brut) return null;
   try {
-    const v = JSON.parse(brut) as { intention?: string; sur?: unknown; produit?: unknown; rayon?: unknown; commerce?: unknown; precision?: unknown; depart?: unknown; arrivee?: unknown; telephone?: unknown; suite?: unknown; details?: unknown };
+    const v = JSON.parse(brut) as { intention?: string; sur?: unknown; produit?: unknown; rayon?: unknown; commerce?: unknown; lieu?: unknown; precision?: unknown; depart?: unknown; arrivee?: unknown; telephone?: unknown; suite?: unknown; details?: unknown };
     if (!v.intention || !(v.intention in INTENTIONS)) return null;
     const produit = typeof v.produit === 'string' ? v.produit.trim().slice(0, 80) : '';
     const rayon = (RAYONS as readonly string[]).includes(String(v.rayon)) ? v.rayon as Rayon : undefined;
@@ -203,12 +214,17 @@ export function lireDecision(texte: string): Lecture | null {
       .filter(([, valeur]) => valeur));
     const details = lireDetails({ ...((v.details && typeof v.details === 'object') ? v.details as object : {}), ...haut });
     // « supermarché » ou « supermarche », « Pharmacies » : accents, casse et pluriel tolérés.
-    const brutCommerce = String(v.commerce ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/s$/, '');
-    const commerce = (COMMERCES as readonly string[]).includes(brutCommerce) ? brutCommerce as TypeCommerceCherche : undefined;
+    // Le « s » n'est retiré que si le mot exact n'est pas un type : « vetements »
+    // et « grillades » finissent par « s », et devenaient des types inconnus
+    // (jamais lus jusqu'au 06/10).
+    const brutCommerce = String(v.commerce ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const commerce = [brutCommerce, brutCommerce.replace(/s$/, ''), `${brutCommerce}s`]
+      .find((t) => (COMMERCES as readonly string[]).includes(t)) as TypeCommerceCherche | undefined;
+    const lieu = typeof v.lieu === 'string' ? v.lieu.trim().slice(0, 80) : '';
     return {
       intention: v.intention as Intention, sur: v.sur === true,
       ...(produit ? { produit } : {}), ...(rayon ? { rayon } : {}),
-      ...(commerce ? { commerce } : {}),
+      ...(commerce ? { commerce } : {}), ...(lieu ? { lieu } : {}),
       ...(v.suite === true ? { suite: true } : {}), ...(details ? { details } : {}),
     };
   } catch {
@@ -223,29 +239,33 @@ export function lireDecision(texte: string): Lecture | null {
  * de ses mots. Vu le 05/10 : le cerveau inventait « 0000000000 » comme
  * téléphone, une fois sur trois.
  */
+const VIDES = new Set(['un', 'une', 'des', 'de', 'du', 'd', 'la', 'le', 'les', 'l', 'pour', 'a', 'au', 'aux', 'en', 'et']);
+const motsDe = (texte: string) => texte.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .split(/[^a-z0-9]+/).filter((m) => m && !VIDES.has(m));
+
 /**
- * Le même principe pour le TYPE de commerce : il n'est retenu que si le
- * client l'a nommé. Obligé de remplir le champ, le cerveau mettait
- * « restaurant » pour « pizza » ou « Otakoss », et Tovo listait des
- * restaurants au lieu des pizzas (05/10). Les mots qui désignent chaque type,
- * sous leurs formes courantes à Niamey.
+ * Un « produit » qui ne fait que NOMMER le genre du lieu (« supermarché » pour
+ * « un supermarché pas loin ») n'est pas un produit : la demande reste une
+ * demande de lieu. Le cerveau le remplit ainsi une fois sur deux (07/10).
  */
-const NOMS_DU_COMMERCE: Record<TypeCommerceCherche, RegExp> = {
-  supermarche: /\b(super ?march|supermarket|superette|market|alimentation|epicerie)/,
-  marche: /\bmarches?\b/,
-  pharmacie: /\b(pharmacie|pharma\b|officine)/,
-  restaurant: /\b(restaurant|resto|maquis|gargote|cantine)/,
-  boulangerie: /\b(boulanger|patisser)/,
-  boucherie: /\b(boucher)/,
-  grillades: /\b(grill|dibiterie|rotisserie)/,
-  beaute: /\b(beaute|cosmetique|salon de)/,
-  electronique: /\b(electronique|magasin de telephone|boutique de telephone)/,
-  vetements: /\b(vetement|habit|friperie|boutique de mode|tailleur|pret a porter|couture)/,
-  quincaillerie: /\b(quincaill)/,
-};
-export function commerceNomme(type: TypeCommerceCherche, message: string): boolean {
-  const n = message.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-  return NOMS_DU_COMMERCE[type].test(n);
+export function produitNommeLeGenre(produit: string, type: TypeCommerceCherche): boolean {
+  const sansS = (m: string) => m.replace(/s$/, '');
+  const mots = motsDe(produit).map(sansS);
+  if (mots.length === 0) return true;
+  const genre = new Set(nomsDuType(type as TypeCommerce).flatMap((n) => motsDe(n)).map(sansS));
+  return mots.every((m) => genre.has(m));
+}
+
+/**
+ * Article 5 pour le lieu : gardé seulement si chacun de ses mots a été DIT
+ * (dans le message, ou dans ce à quoi il répond). Un lieu deviné déplacerait
+ * toute la recherche.
+ */
+export function lieuDit(lieu: string | undefined, message: string, avant = ''): string | undefined {
+  const mots = motsDe(lieu ?? '');
+  if (mots.length === 0) return undefined;
+  const dits = new Set(motsDe(`${message} ${avant}`));
+  return mots.every((m) => dits.has(m)) ? lieu!.trim() : undefined;
 }
 
 export function detailsDits(details: Details | undefined, message: string, avant: string): Details | undefined {
@@ -436,10 +456,17 @@ export async function comprendre(
         (d) => {
           // Article 5 : une précision n'est gardée que si le client l'a DITE.
           const details = detailsDits(d.details, message, contexte.avant ?? '');
-          // Le type de commerce aussi : seulement s'il est NOMMÉ.
-          const commerce = d.commerce && commerceNomme(d.commerce, message) ? d.commerce : undefined;
-          const { details: _brut, commerce: _type, ...reste } = d;
-          terminer({ ...reste, ...(details ? { details } : {}), ...(commerce ? { commerce } : {}), modele, ms: performance.now() - debut, relance: lances > 1, erreurs });
+          // Le genre de lieu (« un supermarché pas loin ») : seulement pour une
+          // demande de lieu PURE. Article 6 : un produit nommé passe avant
+          // (« une pizza » n'est pas « restaurant », « un vendeur de merguez »
+          // cherche des merguez) ; une boutique nommée n'est pas un genre.
+          // Plus de liste de mots ni de citation : cette règle suffit, et le
+          // champ de citation ralentissait le cerveau (mesuré le 07/10).
+          const commerce = d.commerce && d.intention !== 'boutique' && produitNommeLeGenre(d.produit ?? '', d.commerce)
+            ? d.commerce : undefined;
+          const lieu = lieuDit(d.lieu, message, contexte.avant ?? '');
+          const { details: _brut, commerce: _type, lieu: _lieu, ...reste } = d;
+          terminer({ ...reste, ...(details ? { details } : {}), ...(commerce ? { commerce } : {}), ...(lieu ? { lieu } : {}), modele, ms: performance.now() - debut, relance: lances > 1, erreurs });
         },
         (cause: unknown) => {
           enCours--;

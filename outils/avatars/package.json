@@ -1,0 +1,12 @@
+{
+  "name": "tovo-avatars",
+  "private": true,
+  "description": "Génère les images des avatars de la carte (comme les vues de la moto du suivi).",
+  "scripts": {
+    "generer": "node generer.cjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "25.12.0",
+    "three": "0.147.0"
+  }
+}

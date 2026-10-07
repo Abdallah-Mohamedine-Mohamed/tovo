@@ -10,6 +10,7 @@ import '../../core/api.dart';
 import '../../core/deconnexion.dart';
 import '../../core/theme.dart';
 import 'driver_controller.dart';
+import 'nouveau_commerce.dart';
 
 /// Écran unique de l'app livreur.
 ///
@@ -96,9 +97,16 @@ class _DriverHomeState extends State<DriverHome> with WidgetsBindingObserver {
           // cible en plein service.
           PopupMenuButton<String>(
             onSelected: (choix) {
+              if (choix == 'commerce') {
+                unawaited(Navigator.of(context).push(MaterialPageRoute<bool>(
+                  builder: (_) => NouveauCommerce(api: widget.api),
+                )));
+              }
               if (choix == 'sortir') unawaited(confirmerDeconnexion(context));
             },
             itemBuilder: (_) => const [
+              // Relever un commerce devant sa devanture (07/10).
+              PopupMenuItem(value: 'commerce', child: Text('Ajouter un commerce')),
               PopupMenuItem(value: 'sortir', child: Text('Se déconnecter')),
             ],
           ),

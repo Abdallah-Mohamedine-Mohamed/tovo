@@ -25,6 +25,13 @@ export class Faits {
    * « commande » (une commande ou une course existe).
    */
   private readonly actions = new Set<'gardee' | 'commande' | 'annulee' | 'proche' | 'ailleurs'>();
+  /** Le client cherche autour d'un AUTRE lieu que lui (« vers Yantala ») : les distances partent de là. */
+  private autourDUnLieu = false;
+  /**
+   * Le lieu autour duquel on a cherché (« Yantala Bas ») quand les distances,
+   * elles, partent du client : « à 3,2 km de Yantala » est alors faux.
+   */
+  lieuCherche: string | null = null;
   /** Les numéros de téléphone que les données OU le client ont donnés (article 13). */
   private readonly telephones = new Set<string>();
 
@@ -51,6 +58,8 @@ export class Faits {
       if (o.enregistree === true || o.signale === true) this.actions.add('gardee');
       if (typeof o.order_id === 'string' || o.livreur_assigne === true) this.actions.add('commande');
       if (o.annulee === true || o.status === 'cancelled') this.actions.add('annulee');
+      if (o.distances_depuis_le_lieu === true) this.autourDUnLieu = true;
+      if (typeof o.autour_de === 'string' && o.autour_de.trim()) this.lieuCherche = o.autour_de;
       // Un lieu montré à moins de 2 km : « près de vous » devient vrai.
       if (typeof o.distance_m === 'number' && o.distance_m < 2000) this.actions.add('proche');
       // Des commerces hors Tovo réellement montrés : on peut y envoyer le client.
@@ -60,6 +69,9 @@ export class Faits {
   }
 
   confirme(action: 'gardee' | 'commande' | 'annulee' | 'proche' | 'ailleurs'): boolean {
+    // Mesurées depuis le lieu demandé, les distances ne disent rien de la
+    // proximité du CLIENT : « près de vous » n'est jamais confirmé.
+    if (action === 'proche' && this.autourDUnLieu) return false;
     return this.actions.has(action);
   }
 
@@ -162,6 +174,20 @@ const ENVOIE_AILLEURS = /(?:je vous (?:invite|conseille|recommande)|vous (?:pouv
 const DIT_PROCHE = /(?:^|[\s,;(«'’])(?:pr[eè]s de (?:chez )?vous|[aà] proximit[ée]|tout pr[eè]s|non loin de (?:chez )?vous|pas loin de (?:chez )?vous|juste [aà] c[oô]t[ée])/i;
 const DIT_EN_ROUTE = /\b(?:(?:est|sont) en route|se rend\b|se rendra\b|se dirige|vous rejoint|est parti|arrive (?:chez|à) vous|vient chez vous)/i;
 
+/**
+ * « à 3,2 km de Yantala » quand on a cherché vers Yantala : aucune distance
+ * n'est mesurée depuis le lieu cherché (elles partent du client), la phrase
+ * est fausse. Le premier mot du lieu suffit (« Yantala Bas » → « yantala »).
+ */
+export function distanceAuLieu(phrase: string, lieu: string | null): string | null {
+  if (!lieu) return null;
+  const mot = normaliserIntention(lieu).split(' ').find((m) => m.length >= 3);
+  if (!mot) return null;
+  const n = normaliserIntention(phrase);
+  const m = n.match(new RegExp(`\\b\\d+(?: \\d+)? ?(?:km|m|metres?|kilometres?) (?:de|du|d) (?:la |le |l )?(?:quartier (?:de |du )?)?${mot}\\b`));
+  return m ? m[0] : null;
+}
+
 /** Les affirmations d'une phrase qui ne viennent pas des faits. */
 export function affirmationsInventees(phrase: string, faits: Faits): Affirmation[] {
   const inventees: Affirmation[] = [];
@@ -175,6 +201,9 @@ export function affirmationsInventees(phrase: string, faits: Faits): Affirmation
   if (DIT_EN_ROUTE.test(phrase) && !faits.confirme('commande')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_EN_ROUTE)![0] });
   if (DIT_PROCHE.test(phrase) && !faits.confirme('proche')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_PROCHE)![0] });
   if (ENVOIE_AILLEURS.test(phrase) && !faits.confirme('ailleurs')) inventees.push({ genre: 'action', valeur: phrase.match(ENVOIE_AILLEURS)![0] });
+  // Une distance attribuée au lieu cherché : toutes partent du client (07/10).
+  const auLieu = distanceAuLieu(phrase, faits.lieuCherche);
+  if (auLieu) inventees.push({ genre: 'donnees', valeur: auLieu });
   if (DIT_ANNULE.test(phrase) && !faits.confirme('annulee')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_ANNULE)![0] });
   if (CONSEIL_MEDICAL.test(phrase)) inventees.push({ genre: 'sante', valeur: CONSEIL_MEDICAL.match(phrase)?.[0] ?? phrase });
   if (TUTOIEMENT.test(phrase)) inventees.push({ genre: 'ton', valeur: phrase.match(TUTOIEMENT)![0].trim() });

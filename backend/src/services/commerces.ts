@@ -34,8 +34,12 @@ export interface Commerce {
   lat: number;
   lng: number;
   fiabilite: number;
-  /** « tovo » : ajouté à la main (data/commerces-ajouts.json) ; « google » : demandé à Google, jamais conservé. */
-  source: 'overture' | 'osm' | 'tovo' | 'google';
+  /**
+   * « tovo » : ajouté à la main (data/commerces-ajouts.json) ; « google » :
+   * demandé à Google, jamais conservé ; « terrain » : relevé par un livreur
+   * devant la devanture et validé par l'admin (commercesTerrain.ts).
+   */
+  source: 'overture' | 'osm' | 'tovo' | 'google' | 'terrain';
   /** Ce qui fait sa réputation (« merguez ») : demandé, il passe en premier. */
   specialites?: string[];
   /** Les autres noms sous lesquels on le connaît (« Vendeur de merguez de la place Toumo »). */
@@ -76,8 +80,24 @@ const PRODUITS: Array<[RegExp, TypeCommerce[]]> = [
 ];
 
 let cache: Commerce[] | null = null;
+/** Les fiches du terrain validées (commercesTerrain.ts), relues toutes les 5 minutes. */
+let terrain: Commerce[] = [];
+let fusion: Commerce[] | null = null;
 
-export function chargerCommerces(chemin = join(process.cwd(), 'data', 'commerces-niamey.json')): Commerce[] {
+/** L'annuaire : le fichier, puis les commerces relevés sur le terrain. */
+export function chargerCommerces(chemin?: string): Commerce[] {
+  if (fusion) return fusion;
+  fusion = [...chargerFichier(chemin), ...terrain];
+  return fusion;
+}
+
+/** Remplace les fiches du terrain (validées par l'admin). */
+export function installerTerrain(commerces: Commerce[]): void {
+  terrain = commerces;
+  fusion = null;
+}
+
+function chargerFichier(chemin = join(process.cwd(), 'data', 'commerces-niamey.json')): Commerce[] {
   if (cache) return cache;
   try {
     cache = (JSON.parse(readFileSync(chemin, 'utf8')) as { commerces: Commerce[] }).commerces;
@@ -100,6 +120,20 @@ export function chargerCommerces(chemin = join(process.cwd(), 'data', 'commerces
 /** Pour les tests. */
 export function installerCommerces(commerces: Commerce[] | null): void {
   cache = commerces;
+  terrain = [];
+  fusion = null;
+}
+
+/**
+ * Où l'on CHERCHE, et d'où l'on MESURE (07/10). « Une friperie vers Yantala » :
+ * les commerces sont choisis autour de Yantala, mais la distance affichée est
+ * celle qui sépare le client de chacun — une seule référence partout.
+ * `depuis` présent : la position du client (null s'il ne l'a pas donnée).
+ */
+export type PointDeRecherche = { lat: number; lng: number; depuis?: { lat: number; lng: number } | null };
+export function pointDeMesure(p: PointDeRecherche | null | undefined): { lat: number; lng: number } | null {
+  if (!p) return null;
+  return 'depuis' in p ? p.depuis ?? null : p;
 }
 
 const metres = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) =>
@@ -290,7 +324,9 @@ export function commercesPourProduit(
     return position
       ? candidats
         .map((c) => ({ c, d: metres(position, c) }))
-        .filter(({ d }) => d <= (elargir ? 20_000 : 8000) && d > auDelaDe)
+        // « Plus loin » seulement : au-delà de ce qui a été vu. Sinon un commerce
+        // pile au point cherché (« près de la pharmacie X ») était écarté (07/10).
+        .filter(({ d }) => d <= (elargir ? 20_000 : 8000) && (auDelaDe === 0 || d > auDelaDe))
         .sort((a, b) => a.d - b.d)
         .map(({ c }) => c)
       : candidats.sort((a, b) => b.fiabilite - a.fiabilite);
@@ -317,6 +353,12 @@ export function commercesPourProduit(
   return retenus;
 }
 
+/** Les noms d'un type de commerce (« supermarche », « Supermarché », « supermarchés »). */
+export function nomsDuType(type: TypeCommerce): string[] {
+  const l = LIBELLES[type];
+  return l ? [type, l.un, l.des] : [type];
+}
+
 /** « supermarchés » si tous sont du même type, sinon « commerces ». */
 export function libelleDes(commerces: Commerce[]): string {
   const types = new Set(commerces.map((c) => c.type));
@@ -339,9 +381,10 @@ export function carteCommerces(
   commerces: Commerce[],
   achat: string,
   prefixeOui: string,
-  position?: { lat: number; lng: number } | null,
+  position?: PointDeRecherche | null,
   note: string = NOTE_SOURCE,
 ): Component {
+  const mesure = pointDeMesure(position);
   return {
     type: 'commerces_hors_tovo',
     data: {
@@ -354,7 +397,11 @@ export function carteCommerces(
           type: LIBELLES[c.type].un,
           icone: LIBELLES[c.type].icone,
           adresse: ou || null,
-          distance_m: position ? Math.round(metres(position, c)) : null,
+          distance_m: mesure ? Math.round(metres(mesure, c)) : null,
+          // Pour « Voir sur la carte » (07/10).
+          lat: +c.lat.toFixed(6),
+          lng: +c.lng.toFixed(6),
+          quartier: c.quartier,
           telephone: c.telephone,
           telephone_appel: c.telephone_appel,
           livreur: {

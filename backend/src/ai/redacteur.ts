@@ -41,6 +41,7 @@ const CONSIGNE = [
   '- Pas de question si la réponse prévue n’en pose pas.',
   '- S’il n’y a AUCUNE carte, ne dis jamais « voici », « ci-dessous », « découvrez » : rien ne s’affiche sous ta phrase.',
   '- Sur Tovo lui-même (recrutement, contacts, horaires, adresses, procédures), ne dis que ce qui est dans les faits.',
+  '- Si les faits ont « autour_de », les commerces hors Tovo ont été choisis au plus près de CE lieu, sans y être forcément : dis « vers Yantala » ou « les plus proches de Yantala », jamais « à Yantala » sauf pour un commerce dont le quartier est Yantala ; les boutiques Tovo, elles, ne sont pas choisies selon ce lieu. Leurs distances, elles, se comptent depuis le client (« à 2,9 km de vous »). Ce lieu ne concerne que les commerces : les produits Tovo ne sont pas choisis selon lui, ne dis jamais qu’ils sont « autour de » ce lieu.',
 ].join('\n');
 
 /**

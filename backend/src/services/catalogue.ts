@@ -5,7 +5,7 @@ import { embed, embeddingsEnabled } from './embeddings.js';
 import { commandesRecentes, marquerLePlusCommande, parPopularite } from './popularite.js';
 import { offreVille } from './livreur.js';
 import { serviceClient } from './supabase.js';
-import { carteCommerces, commercesDuType, commercesNommes, memeCommerce, commercesPourProduit, libelleDes, specialistesDe, type Commerce, type TypeCommerce } from './commerces.js';
+import { carteCommerces, pointDeMesure, type PointDeRecherche, commercesDuType, commercesNommes, memeCommerce, commercesPourProduit, libelleDes, specialistesDe, type Commerce, type TypeCommerce } from './commerces.js';
 import { avecOuvertureReelle } from './ouverture.js';
 import { chercherSurGoogle, lieuGoogle, NOTE_GOOGLE } from './googlePlaces.js';
 import { heuresDeGarde, reponseGarde } from './pharmaciesGarde.js';
@@ -636,7 +636,7 @@ export function typesDuRayon(rayon: Rayon | undefined): TypeCommerce[] {
 export async function alternativesHorsTovo(
   db: SupabaseClient,
   texte: string,
-  position?: { lat: number; lng: number } | null,
+  position?: PointDeRecherche | null,
   produit?: string,
   /** Article 7 : « d'autres », « plus loin » — hors ce qui a déjà été montré, tous types, plus loin. */
   suite?: { dejaVus: ReadonlySet<string>; auDelaDe?: number },
@@ -662,7 +662,8 @@ export async function alternativesHorsTovo(
       };
     }
   }
-  const distances = position ? commerces.map((c) => metresEntre(position, c)) : [];
+  const mesure = pointDeMesure(position);
+  const distances = mesure ? commerces.map((c) => metresEntre(mesure, c)) : [];
   const proche = distances.length > 0 && Math.min(...distances) < 2000;
   // Un médicament (toutes des pharmacies) : appeler, et l'ordonnance. Pas pour une pommade.
   const pharmacie = commerces.every((c) => c.type === 'pharmacie');
@@ -677,7 +678,7 @@ export async function alternativesHorsTovo(
         nom: c.nom,
         type: c.type,
         ou: [c.adresse, c.quartier].filter(Boolean).join(', ') || null,
-        distance: position ? distanceLisible(distances[i]!) : null,
+        distance: mesure ? distanceLisible(distances[i]!) : null,
         telephone: c.telephone,
       })),
       consigne: 'Tovo n’a pas ce produit. Réponds en une ou deux phrases naturelles, en nommant ce que le client cherche '
@@ -720,7 +721,7 @@ export const PEU_DE_RESULTATS = 3;
 export async function ailleursEnPlus(
   db: SupabaseClient,
   produit: string,
-  position: { lat: number; lng: number } | null | undefined,
+  position: PointDeRecherche | null | undefined,
   resultatsTovo: number,
 ): Promise<CatalogueAnswer | null> {
   const quoi = produit.trim();
@@ -732,12 +733,13 @@ export async function ailleursEnPlus(
     : [];
   const commerces = [...specialistes, ...duBonType].slice(0, 3);
   if (commerces.length === 0) return null;
+  const mesureAilleurs = pointDeMesure(position);
   return {
     content: 'Hors de Tovo, ces commerces en ont probablement ; un livreur peut y aller, il vous appelle pour convenir de l’achat.',
     summary: {
       aussi_hors_tovo: commerces.map((c) => ({
         nom: c.nom, type: c.type, specialiste: specialistes.includes(c),
-        distance: position ? `${Math.round(Math.hypot((position.lat - c.lat) * 111_000, (position.lng - c.lng) * 108_000) / 100) / 10} km` : null,
+        distance: mesureAilleurs ? distanceLisible(metresEntre(mesureAilleurs, c)) : null,
       })),
       consigne: 'Sous les produits Tovo, la carte montre AUSSI des commerces hors Tovo qui en ont probablement (un spécialiste si son nom porte le produit). '
         + 'Dis-le en une courte phrase après avoir présenté ce que Tovo propose. Un livreur peut y aller : il appelle le client pour convenir de l’achat ; jamais d’avance promise.',
@@ -759,7 +761,7 @@ export async function ailleursEnPlus(
 export async function commercesDuTypeDemande(
   db: SupabaseClient,
   type: TypeCommerceCherche,
-  position: { lat: number; lng: number } | null | undefined,
+  position: PointDeRecherche | null | undefined,
   dejaVus: { boutiques: ReadonlySet<string>; commerces: ReadonlySet<string> },
 ): Promise<CatalogueAnswer | null> {
   const suite = dejaVus.boutiques.size + dejaVus.commerces.size > 0;
@@ -779,6 +781,7 @@ export async function commercesDuTypeDemande(
       // Les ouvertes d'abord, puis les plus proches.
       .sort((a, b) => Number(b.is_open) - Number(a.is_open) || Number(a.distance_m ?? 0) - Number(b.distance_m ?? 0))
       .slice(0, 6);
+    boutiques = await distancesDepuisLeClient(db, boutiques, position, categorie);
   }
   // Puis l'annuaire : ni sur Tovo, ni déjà montrés.
   const surTovo = await estSurTovo(db);
@@ -807,7 +810,7 @@ export async function commercesDuTypeDemande(
       consigne: 'Le client cherche des commerces de ce type. Présente d’abord ceux de Tovo (dis combien sont ouverts), puis ceux hors Tovo. '
         + 'Ne dis jamais qu’il n’y en a pas d’autres : la liste montre ce qui est connu.',
     },
-    components: avecMemoire([
+    components: avecMemoire(await avecBoutiquesSurLaCarte(db, [
       ...boutiques.map((m) => merchantCard({
         id: m.id, name: m.name as string, description: (m.description as string | null) ?? null,
         logo_url: (m.logo_url as string | null) ?? null, address_hint: (m.address_hint as string) ?? '',
@@ -815,7 +818,7 @@ export async function commercesDuTypeDemande(
         distance_m: (m.distance_m as number | null) ?? null,
       } as MerchantRow)),
       ...(commerces.length ? [carteCommerces(commerces, 'Faire les achats du client', HORS_TOVO_OUI, position)] : []),
-    ], vus),
+    ], boutiques), vus),
   };
 }
 
@@ -824,6 +827,43 @@ export async function commercesDuTypeDemande(
  * la dernière carte : celle des commerces hors Tovo, sinon la dernière
  * boutique. Le message suivant la relit (orchestrator.ts).
  */
+/**
+ * « Voir sur la carte » (07/10) : la carte des commerces hors Tovo emporte
+ * aussi les boutiques Tovo de la même réponse, avec leur position, pour les
+ * montrer ensemble. Sans la migration 0077, la carte n'a que les hors Tovo.
+ */
+async function avecBoutiquesSurLaCarte(
+  db: SupabaseClient, cartes: Component[], boutiques: Array<Record<string, unknown> & { id: string; is_open: boolean }>,
+): Promise<Component[]> {
+  const i = cartes.findIndex((c) => c.type === 'commerces_hors_tovo');
+  if (i < 0 || boutiques.length === 0) return cartes;
+  const { data, error } = await db.rpc('merchants_positions', { ids: boutiques.map((b) => b.id) });
+  if (error || !Array.isArray(data)) return cartes;
+  const positions = new Map((data as Array<{ id: string; lat: number; lng: number }>).map((p) => [p.id, p]));
+  const surLaCarte = boutiques.filter((b) => positions.has(b.id)).map((b) => ({
+    id: b.id, nom: b.name as string, ouverte: b.is_open, distance_m: (b.distance_m as number | null) ?? null,
+    logo_url: (b.logo_url as string | null) ?? null, lat: positions.get(b.id)!.lat, lng: positions.get(b.id)!.lng,
+  }));
+  if (surLaCarte.length === 0) return cartes;
+  const copie = [...cartes];
+  copie[i] = { ...cartes[i]!, data: { ...cartes[i]!.data, boutiques_tovo: surLaCarte } };
+  return copie;
+}
+
+async function distancesDepuisLeClient<T extends Record<string, unknown> & { id: string }>(
+  db: SupabaseClient, boutiques: T[], position: PointDeRecherche, categorie: string,
+): Promise<T[]> {
+  if (!('depuis' in position) || boutiques.length === 0) return boutiques;
+  const client = position.depuis;
+  if (!client) return boutiques.map((b) => ({ ...b, distance_m: null }));
+  const { data } = await db.rpc('nearby_merchants', {
+    origin_lat: client.lat, origin_lng: client.lng, radius_m: 60_000,
+    filter_category: categorie, match_count: 200,
+  });
+  const depuisClient = new Map(((data ?? []) as Array<{ id: string; distance_m: number }>).map((b) => [b.id, b.distance_m]));
+  return boutiques.map((b) => ({ ...b, distance_m: depuisClient.get(b.id) ?? null }));
+}
+
 function avecMemoire(cartes: Component[], memoire: Record<string, unknown>): Component[] {
   const derniere = cartes.at(-1);
   if (!derniere) return cartes;

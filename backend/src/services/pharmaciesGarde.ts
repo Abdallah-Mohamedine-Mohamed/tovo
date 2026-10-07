@@ -1,6 +1,6 @@
 import { normaliserIntention } from '../ai/intents.js';
 import type { Component } from '../components/builders.js';
-import { chargerCommerces } from './commerces.js';
+import { chargerCommerces, pointDeMesure, type PointDeRecherche } from './commerces.js';
 import { nomsCorrespondent, positionSurGoogle } from './googlePlaces.js';
 import { reperer } from './lieux.js';
 import { serviceClient } from './supabase.js';
@@ -136,7 +136,7 @@ export const HORS_TOVO_GARDE = 'D’après la liste officielle des pharmacies de
  * partager sa position. La carte est celle des commerces hors Tovo.
  */
 export async function reponseGarde(
-  position: { lat: number; lng: number } | null | undefined,
+  position: PointDeRecherche | null | undefined,
   prefixeOui: string,
   combien = 5,
 ): Promise<{ content: string; summary: Record<string, unknown>; components: Component[] }> {
@@ -155,6 +155,8 @@ export async function reponseGarde(
   const choisies = position
     ? placees.sort((a, b) => (a.d ?? Infinity) - (b.d ?? Infinity)).slice(0, combien)
     : placees.slice(0, combien);
+  // Choisies autour du lieu cherché ; la distance affichée, depuis le client.
+  const mesure = pointDeMesure(position);
   const periode = `du ${quand(garde.debut)} au ${quand(garde.fin)}`;
   return {
     content: position
@@ -164,7 +166,7 @@ export async function reponseGarde(
     components: [{
       type: 'commerces_hors_tovo',
       data: {
-        items: choisies.map(({ p, d }) => {
+        items: choisies.map(({ p }) => {
           const nom = `Pharmacie ${p.nom}`;
           return {
             id: `garde:${normaliserIntention(p.nom).replace(/ /g, '-')}`,
@@ -172,7 +174,8 @@ export async function reponseGarde(
             type: `De garde · Commune ${p.commune}`,
             icone: 'lieu-pharmacie',
             adresse: p.localisation,
-            distance_m: d === null ? null : Math.round(d),
+            ...(p.lat !== null && p.lng !== null ? { lat: p.lat, lng: p.lng } : {}),
+            distance_m: mesure && p.lat !== null && p.lng !== null ? Math.round(metres(mesure, { lat: p.lat, lng: p.lng })) : null,
             telephone: p.telephone.replace(/(\d{2})(?=\d)/g, '$1 '),
             telephone_appel: `+227${p.telephone}`,
             livreur: {

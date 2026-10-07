@@ -23,6 +23,7 @@ import { SettingsEdit } from './pages/settings';
 import { QualiteIa } from './pages/qualiteIa';
 import { Signalements } from './pages/signalements';
 import { BoutiquesDemandees } from './pages/boutiquesDemandees';
+import { CommercesTerrain } from './pages/commercesTerrain';
 import { PharmaciesGarde } from './pages/pharmaciesGarde';
 
 /**
@@ -97,6 +98,11 @@ export const App = () => (
               meta: { label: 'Boutiques demandées' },
             },
             {
+              name: 'commerces_terrain',
+              list: '/commerces-terrain',
+              meta: { label: 'Commerces du terrain' },
+            },
+            {
               name: 'external_offers',
               list: '/offers',
               meta: { label: 'Prix concurrents' },
@@ -144,6 +150,7 @@ export const App = () => (
               <Route path="/qualite-ia" element={<QualiteIa />} />
               <Route path="/signalements" element={<Signalements />} />
               <Route path="/boutiques-demandees" element={<BoutiquesDemandees />} />
+              <Route path="/commerces-terrain" element={<CommercesTerrain />} />
               <Route path="/pharmacies-garde" element={<PharmaciesGarde />} />
               <Route path="*" element={<ErrorComponent />} />
             </Route>

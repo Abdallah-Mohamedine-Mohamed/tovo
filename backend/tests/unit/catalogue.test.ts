@@ -567,6 +567,19 @@ describe('Tovo dit où trouver ce qu’il n’a pas (annuaire public, 01/10)', (
       .toEqual(['Haddad Khalil Super Market', 'Supermarché Azar']);
   });
 
+  it('chercher autour d’un lieu, mesurer depuis le client (07/10)', async () => {
+    // Cherché autour de Haddad (13.51) ; le client est à 13.53 : 2,2 km de lui.
+    const lieu = { lat: 13.51, lng: 2.1, depuis: { lat: 13.53, lng: 2.1 } };
+    const r = await alternativesHorsTovo(adapter, 'Je cherche de la pommade Nivea', lieu, 'pommade nivea');
+    const items = r?.components[0]?.data.items as Array<{ nom: string; distance_m: number }>;
+    expect(items[0]).toMatchObject({ nom: 'Haddad Khalil Super Market', distance_m: 2220 });
+    expect(r?.summary.commerces_hors_tovo).toEqual(expect.arrayContaining([
+      expect.objectContaining({ nom: 'Haddad Khalil Super Market', distance: '2,2 km' })]));
+    // Sans position du client : aucune distance, plutôt qu'une distance au lieu.
+    const sans = await alternativesHorsTovo(adapter, 'Je cherche de la pommade Nivea', { lat: 13.51, lng: 2.1, depuis: null }, 'pommade nivea');
+    expect((sans?.components[0]?.data.items as Array<{ distance_m: number | null }>)[0]!.distance_m).toBeNull();
+  });
+
   it('« Envoyer un livreur » : la carte livreur, avec le numéro du commerce comme contact', async () => {
     const r = await reponseHorsTovo(adapter, `${HORS_TOVO_OUI}Acheter du riz chez Azar|+22770777770`);
     expect(r.components[0]?.data).toMatchObject({

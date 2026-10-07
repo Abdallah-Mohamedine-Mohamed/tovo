@@ -125,6 +125,36 @@ describe('la route décidée par le cerveau', () => {
   });
 });
 
+describe('le genre de commerce lu par le cerveau', () => {
+  it('un « produit » qui nomme seulement le genre du lieu n’en est pas un', async () => {
+    const { produitNommeLeGenre } = await import('../../src/ai/decideur.js');
+    expect(produitNommeLeGenre('supermarché', 'supermarche')).toBe(true);
+    expect(produitNommeLeGenre('pharmacies', 'pharmacie')).toBe(true);
+    expect(produitNommeLeGenre('', 'boulangerie')).toBe(true);
+    // Un vrai produit passe avant le genre (article 6).
+    expect(produitNommeLeGenre('merguez', 'grillades')).toBe(false);
+    expect(produitNommeLeGenre('chaussures', 'vetements')).toBe(false);
+    expect(produitNommeLeGenre('pizza', 'restaurant')).toBe(false);
+  });
+
+  it('les types qui finissent par « s » sont lus (vetements, grillades)', async () => {
+    const { lireDecision } = await import('../../src/ai/decideur.js');
+    expect(lireDecision('{"intention":"recherche","sur":true,"commerce":"vetements"}')?.commerce).toBe('vetements');
+    expect(lireDecision('{"intention":"recherche","sur":true,"commerce":"grillades"}')?.commerce).toBe('grillades');
+    expect(lireDecision('{"intention":"recherche","sur":true,"commerce":"Pharmacies"}')?.commerce).toBe('pharmacie');
+  });
+});
+
+describe('article 5 : le lieu de recherche n’est gardé que s’il a été dit', () => {
+  it('dit dans le message ou dans ce à quoi il répond ; inventé, refusé', async () => {
+    const { lieuDit } = await import('../../src/ai/decideur.js');
+    expect(lieuDit('Yantala', 'Il y a une friperie vers Yantala ?')).toBe('Yantala');
+    expect(lieuDit('Bobiel', 'Bobiel', 'Dans quel quartier cherchez-vous du poulet ?')).toBe('Bobiel');
+    expect(lieuDit('Plateau', 'Une friperie pas loin')).toBeUndefined();
+    expect(lieuDit('', 'Une friperie vers Yantala')).toBeUndefined();
+  });
+});
+
 describe('article 5 : une précision n’est gardée que si le client l’a dite', () => {
   it('un numéro inventé est retiré, un lieu dit est gardé', async () => {
     const { detailsDits } = await import('../../src/ai/decideur.js');

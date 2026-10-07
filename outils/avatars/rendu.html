@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<script src="/three.min.js"></script>
+<script src="/GLTFLoader.js"></script>
+<style>body{margin:0}</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="bande"></canvas>
+<script>
+// Les images de l'avatar pour la carte de l'appli, comme la moto du suivi :
+// fond transparent, point de contact au sol à 85 % de la hauteur, une
+// direction = cap de l'avatar VU DE LA CAMÉRA (0 = il s'éloigne vers le haut
+// de l'écran, 90 = il va vers la droite), une inclinaison = celle de la caméra.
+const T = THREE;
+if (T.ColorManagement) T.ColorManagement.legacyMode = false;
+const TAILLE = 240;
+
+let rendu, scene, camera, modele, melangeur, actions, ombre;
+window.charger = (cle) => new Promise((ok, ko) => {
+  if (!rendu) {
+    rendu = new T.WebGLRenderer({ canvas: document.getElementById('gl'), antialias: true, alpha: true, preserveDrawingBuffer: true });
+    rendu.setSize(TAILLE, TAILLE, false); rendu.setPixelRatio(1);
+    rendu.outputEncoding = T.sRGBEncoding; rendu.setClearColor(0x000000, 0);
+    rendu.shadowMap.enabled = true; rendu.shadowMap.type = T.PCFSoftShadowMap;
+  }
+  scene = new T.Scene();
+  scene.add(new T.HemisphereLight(0xffffff, 0x8aa7ad, 1.15));
+  const soleil = new T.DirectionalLight(0xffffff, 0.75);
+  soleil.position.set(-0.7, 6, 1.1); soleil.castShadow = true;
+  soleil.shadow.mapSize.set(1024, 1024);
+  Object.assign(soleil.shadow.camera, { left: -2, right: 2, top: 2, bottom: -2, near: 0.5, far: 20 });
+  soleil.shadow.radius = 4;
+  scene.add(soleil);
+  // Une ombre douce au sol, qui pose l'avatar sur la carte.
+  ombre = new T.Mesh(new T.PlaneGeometry(6, 6), new T.ShadowMaterial({ opacity: 0.32 }));
+  ombre.rotation.x = -Math.PI / 2; ombre.receiveShadow = true; scene.add(ombre);
+  new T.GLTFLoader().load('/avatar/' + cle + '.glb', (gltf) => {
+    const m = gltf.scene;
+    m.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+    const b = new T.Box3().setFromObject(m);
+    m.scale.setScalar(1.8 / ((b.max.y - b.min.y) || 1));
+    const b2 = new T.Box3().setFromObject(m);
+    m.position.set(-(b2.min.x + b2.max.x) / 2, -b2.min.y, -(b2.min.z + b2.max.z) / 2);
+    modele = new T.Group(); modele.add(m); scene.add(modele);
+    melangeur = new T.AnimationMixer(m);
+    actions = {};
+    for (const clip of gltf.animations) actions[clip.name.split('|').pop()] = { action: melangeur.clipAction(clip), duree: clip.duration };
+    // Caméra orthographique : l'avatar garde la même taille à l'écran,
+    // comme un repère de carte. Le sol (pieds) au centre de l'image.
+    // Cadre de 2,35 unités : 2,0 au-dessus du sol, 0,35 dessous. Les pieds
+    // tombent à 85 % de la hauteur de l'image (ancrage noté dans le manifeste).
+    camera = new T.OrthographicCamera(-1.175, 1.175, 2.0, -0.35, 0.1, 50);
+    const durees = {};
+    for (const k of Object.keys(actions)) durees[k] = actions[k].duree;
+    ok(durees);
+  }, undefined, (e) => ko(String(e && e.message || e)));
+});
+// Une bande : toutes les images d'un cycle, côte à côte, pour une animation,
+// une inclinaison et une direction. Rendue en WebP transparent.
+window.bande = (anim, inclinaison, direction, images) => {
+  const a = actions[anim];
+  if (!a) return null;
+  for (const k of Object.keys(actions)) actions[k].action.stop();
+  a.action.reset().setEffectiveWeight(1).play();
+  const t = inclinaison * Math.PI / 180;
+  camera.position.set(0, Math.cos(t) * 10, Math.sin(t) * 10);
+  camera.up.set(0, t < 0.01 ? 0 : 1, t < 0.01 ? -1 : 0);
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
+  // Direction 0 : il s'éloigne vers le haut de l'écran (dos à la caméra).
+  modele.rotation.y = Math.PI - direction * Math.PI / 180;
+  const sortie = document.getElementById('bande');
+  sortie.width = TAILLE * images; sortie.height = TAILLE;
+  const ctx = sortie.getContext('2d');
+  ctx.clearRect(0, 0, sortie.width, sortie.height);
+  for (let i = 0; i < images; i++) {
+    melangeur.setTime((a.duree * i) / images);
+    rendu.clear();
+    rendu.render(scene, camera);
+    ctx.drawImage(rendu.domElement, i * TAILLE, 0);
+  }
+  return sortie.toDataURL('image/webp', 0.86);
+};
+window.pret = true;
+</script>
+</body>
+</html>

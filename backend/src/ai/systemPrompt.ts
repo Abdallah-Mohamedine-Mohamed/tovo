@@ -248,7 +248,10 @@ options → panier → suivi`;
  * système : elle change à chaque conversation, et la mettre dans la partie
  * fixe empêcherait toute mise en cache.
  */
-export function contexteUtilisateur(position?: { lat: number; lng: number }): string {
+export function contexteUtilisateur(position?: { lat: number; lng: number }, autourDe?: string): string {
+  if (position && autourDe) {
+    return `Le client cherche autour de ${autourDe} (${position.lat}, ${position.lng}), pas autour de lui. Ne dis jamais « près de vous ».`;
+  }
   if (!position) {
     return "L'utilisateur n'a pas partagé sa position. Ce n'est pas bloquant pour chercher un produit, un restaurant ou une enseigne.";
   }

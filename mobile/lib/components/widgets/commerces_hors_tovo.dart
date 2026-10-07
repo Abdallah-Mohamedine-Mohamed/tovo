@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../features/carte/carte_commerces.dart';
 import '../registry.dart';
 
 /// `commerces_hors_tovo` — où trouver ce que Tovo n'a pas (maquette validée
@@ -43,6 +44,7 @@ class CommercesHorsTovo extends StatelessWidget {
     final items = component.list('items');
     if (items.isEmpty) return const SizedBox.shrink();
     final note = component.str('note');
+    final surCarte = CarteCommerces.depuisComposant(component);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -57,6 +59,49 @@ class CommercesHorsTovo extends StatelessWidget {
                 premier: i == 0,
                 dernier: i == items.length - 1,
                 onInteraction: onInteraction,
+              ),
+            ),
+          // La carte des commerces (07/10) : tous ces commerces sur une
+          // carte, le tracé depuis le client jusqu'à celui qu'il choisit.
+          if (surCarte.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Material(
+                color: const Color(0xFFF0F2EC),
+                borderRadius: BorderRadius.circular(16),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => CarteCommerces(
+                        commerces: surCarte,
+                        onInteraction: onInteraction,
+                      ),
+                    ),
+                  ),
+                  child: const SizedBox(
+                    height: 46,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.map_outlined,
+                          size: 18,
+                          color: TovoTheme.ink,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'Voir sur la carte',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: TovoTheme.ink,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
           if (note.isNotEmpty)

@@ -20,6 +20,7 @@ import { resumeAffichage } from './memoire.js';
 import type { Intention } from './jev.js';
 import type { Rayon, TypeCommerceCherche } from './decideur.js';
 import { idDuRayon } from '../services/catalogue.js';
+import type { PointDeRecherche } from '../services/commerces.js';
 import { avecOuvertureReelle } from '../services/ouverture.js';
 import { Faits, FluxVerifie, verifierTexte, type Verification } from './verificateur.js';
 import { rediger, redigerEtJuger, sansPromesseVide } from './redacteur.js';
@@ -74,7 +75,12 @@ export interface OrchestrateInput {
    * ultérieur : elle traverse la requête et disparaît avec elle.
    */
   audio?: { mime: string; data: string } | undefined;
-  position?: { lat: number; lng: number } | undefined;
+  position?: PointDeRecherche | undefined;
+  /**
+   * Le lieu dit par le client (« vers Yantala ») : `position` est alors SON
+   * point (où chercher), et `position.depuis` celle du client (d'où mesurer).
+   */
+  autourDe?: string | undefined;
   onEvent?: ((event: Record<string, unknown>) => void) | undefined;
   /**
    * Route déjà connue (Jev, ou tuile touchée par le client). Hors catalogue
@@ -247,9 +253,13 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // par une IA, à partir du message EXACT du client. Les cartes partent
   // d'abord ; la phrase suit, ~0,5–1 s plus tard.
   const dernierDeTovo = [...previous.history].reverse().find((t) => t.role === 'model')?.content ?? null;
+  // Le lieu autour duquel on a cherché, joint à tout ce que lit le rédacteur.
+  const avecLieu = (faits: unknown) => input.autourDe
+    ? { autour_de: input.autourDe, distances_mesurees_depuis: 'le client (jamais depuis autour_de)', ...(faits && typeof faits === 'object' && !Array.isArray(faits) ? faits : { resultat: faits }) }
+    : faits;
   const enMots = (prevue: string, faits: unknown, composants: Component[]) => (input.audio
     ? Promise.resolve(prevue)
-    : rediger({ message: input.messagePublic ?? input.message, prevue, faits, composants, avant: dernierDeTovo }));
+    : rediger({ message: input.messagePublic ?? input.message, prevue, faits: avecLieu(faits), composants, avant: dernierDeTovo }));
   // Des produits trouvés : le rédacteur dit aussi s'ils répondent vraiment à
   // la demande (« deux litres de lait » ramenait des savons au lait). Sinon,
   // les commerces hors Tovo qui en ont probablement.
@@ -259,7 +269,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     // Article 8 : ce qui existe ailleurs fait partie de la réponse, sous Tovo.
     reponse = await avecAilleurs(reponse);
     const jugement = await redigerEtJuger({ message: input.messagePublic ?? input.message, prevue: reponse.content,
-      faits: reponse.summary, composants: reponse.components, avant: dernierDeTovo });
+      faits: avecLieu(reponse.summary), composants: reponse.components, avant: dernierDeTovo });
     const j = avecLesProduitsDuNom(reponse, jugement);
     // Une partie seulement répond (des merguez mêlées de tacos) : on ne garde
     // qu'elle, et la phrase est réécrite sur ce qui reste.
@@ -412,7 +422,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
       const avecProduits = suite.components.some((c) => c.type === 'product_carousel' || c.type === 'product_list');
       if (!avecProduits) return repondre(suite);
       const j = await redigerEtJuger({ message: input.messagePublic ?? input.message, prevue: suite.content,
-        faits: suite.summary, composants: suite.components, avant: dernierDeTovo });
+        faits: avecLieu(suite.summary), composants: suite.components, avant: dernierDeTovo });
       const gardee = j.garder ? seulementPertinents(suite, j.garder) : suite;
       return repondre(gardee.components.length ? gardee : {
         content: 'Je n’ai rien d’autre qui corresponde vraiment à votre demande.',
@@ -562,7 +572,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
 
   history.push({
     role: 'user',
-    content: `${contexteUtilisateur(input.position)}\n\n${input.message}`,
+    content: `${contexteUtilisateur(input.position, input.autourDe)}\n\n${input.message}`,
     // L'ENREGISTREMENT LUI-MÊME. Il était reçu par la route, transmis
     // jusqu'ici, déclaré dans l'interface d'entrée — et jamais attaché au
     // tour envoyé au modèle.
@@ -582,6 +592,9 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // Ce qui est vrai pendant ce tour : la phrase du client, ce qui était déjà
   // à l'écran, puis tout ce que les outils renverront (verificateur.ts).
   const faits = new Faits();
+  // L'assistant libre ne sait pas mesurer depuis le client : ses distances
+  // partent du lieu, « près de vous » n'y est jamais confirmé.
+  if (input.autourDe) faits.ajouter({ distances_depuis_le_lieu: true });
   // Les mots du client : des noms, jamais des montants ni des durées.
   faits.ajouterParole(parole);
   for (const tour of previous.history) {

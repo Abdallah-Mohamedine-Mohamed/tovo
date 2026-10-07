@@ -36,3 +36,6 @@ supabase/staging/
 
 # Sons du banc voix : fabriqués par banc-stt.ts, pas du code.
 backend/scripts/voix/sons/
+
+# Avatars : images générées (node outils/avatars/generer.cjs)
+outils/avatars/images/

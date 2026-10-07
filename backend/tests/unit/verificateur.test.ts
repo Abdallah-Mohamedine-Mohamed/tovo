@@ -164,3 +164,21 @@ describe('article 8 : n’envoyer vers un type de commerce que s’il est montr�
     expect(verifierTexte('Je n’ai pas de livres dans le catalogue pour le moment.', new Faits()).texte).toContain('livres');
   });
 });
+
+describe('article 5 : « près de vous » est faux quand on cherche autour d’un autre lieu', () => {
+  it('les distances partent de Yantala : « près de vous » est retiré, « près de Yantala » reste', () => {
+    const faits = new Faits();
+    faits.ajouter({ distances_depuis_le_lieu: true, commerces_hors_tovo: [{ nom: 'Amimi-Scarf', distance_m: 530 }] });
+    expect(verifierTexte('Amimi-Scarf est tout près de vous.', faits).texte).toBe('');
+    expect(verifierTexte('Amimi-Scarf est à 530 m de Yantala.', faits).texte).toContain('Yantala');
+  });
+});
+
+describe('les distances partent du client, jamais du lieu cherché (07/10)', () => {
+  it('« à 3,2 km de Yantala » est retiré ; « à 3,2 km » et « vers Yantala » restent', () => {
+    const faits = new Faits();
+    faits.ajouter({ autour_de: 'Yantala Bas', commerces_hors_tovo: [{ nom: 'Second Life Africa', distance: '3,2 km' }] });
+    expect(verifierTexte('Second Life Africa est la plus proche, située à 3,2 km de Yantala.', faits).texte).toBe('');
+    expect(verifierTexte('Second Life Africa, vers Yantala, est à 3,2 km de vous.', faits).texte).toContain('3,2 km');
+  });
+});

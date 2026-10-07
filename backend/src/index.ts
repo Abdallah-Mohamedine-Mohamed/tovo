@@ -7,6 +7,7 @@ import { closeQueues } from './services/queue.js';
 import { chargerClassifieur } from './ai/classifieur.js';
 import { lireReglage } from './ai/decideur.js';
 import { entretenirLigneGoogle } from './lib/ligneGoogle.js';
+import { suivreCommercesTerrain } from './services/commercesTerrain.js';
 import { demarrerBancIa } from './services/bancIa.js';
 import { demarrerExemples } from './ai/banc/exemples.js';
 
@@ -31,6 +32,8 @@ if (env.AIGUILLAGE === 'cascade') {
 // La ligne vers Google reste chaude : pas de connexion à rouvrir après un
 // silence (jusqu'à 0,9 s gagnée par message, lib/ligneGoogle.ts).
 entretenirLigneGoogle(env.GEMINI_API_KEY, lireReglage(env.CERVEAU_MODELE)[0]);
+// Les commerces relevés par les livreurs et validés : dans l'annuaire (0076).
+suivreCommercesTerrain();
 
 // L'examen du cerveau grandit en continu : un passage toutes les 30 minutes
 // par défaut, réglable dans l'admin (services/bancIa.ts).

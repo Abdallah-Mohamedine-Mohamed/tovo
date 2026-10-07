@@ -58,7 +58,21 @@ Deux règles d'écriture :
 - **Un champ du cerveau n'est gardé que si le client l'a dit** (article 5) :
   - un numéro doit figurer chiffre pour chiffre dans le message ;
   - un lieu ou une précision doit y figurer par l'un de ses mots ;
-  - un type de commerce doit y être nommé (« pizza » n'est pas « restaurant »).
+  - un type de commerce doit y être nommé (« pizza » n'est pas « restaurant »). Depuis le 07/10, sans liste de mots ni citation : un genre de lieu n'est retenu que pour une demande de lieu pure — pas de produit, ou un « produit » qui ne fait que nommer le genre (`produitNommeLeGenre`). La citation `commerce_dit` (06/10) a été retirée : redondante, et elle ralentissait le cerveau (relances doublées, mesuré).
+
+## Ajouts du 06/10 : garanties générales, pas des cas
+
+- **Un produit nommé passe avant le genre de lieu** (article 6). Une « envie » qui contient un produit est une recherche (`routeDuCerveau`). Un genre de lieu n'est retenu que pour une demande de lieu pure (« un supermarché pas loin ») : « un vendeur de merguez » cherche des merguez, pas la liste des grillades.
+- **Un seul interprète, jusque dans l'annuaire** (article 1). Quand les mots ne disent pas quel commerce chercher (« prêt-à-porter »), l'annuaire prend les types du rayon compris par le cerveau (`typesDuRayon`).
+- **Mesure** : `scripts/banc-ia/banc-commerce.ts` (34 phrases, genres et pièges). 78 % avec l'ancienne liste de mots ; 100 % avec la citation (06/10) ; 96 % sans elle, avant la règle `produitNommeLeGenre` (07/10, à remesurer).
+
+## Ajouts du 07/10 : le lieu dit par le client
+
+- **Le lieu dit remplace la position pour chercher** (articles 5 et 9). « Une friperie vers Yantala » : le cerveau recopie le lieu (`lieu`), `lieuDit` vérifie que ses mots ont été dits, `reperer` (services/lieux.ts) le situe, et la route `/chat` cherche autour de ce point. Pour une recherche seulement : une course garde son départ et son arrivée. Le lieu de livraison d'un achat compte (« livrez-moi des brochettes à Yantala » : les commerces proches de Yantala).
+- **On cherche autour du lieu, on mesure depuis le client** (07/10). `PointDeRecherche` : le point du lieu, et `depuis` = la position du client (null s'il ne l'a pas donnée → aucune distance). Une seule référence partout : « à 3,2 km de vous ». Le vérificateur retire toute distance attribuée au lieu (« à 3,2 km de Yantala », `distanceAuLieu`). L'assistant libre, qui mesure depuis le lieu, ne peut pas dire « près de vous ». Le lieu ne concerne que les commerces hors Tovo.
+- **Un commerce pile au point cherché n'est plus écarté** (« près de la pharmacie X » : `auDelaDe` ne filtre que pour « plus loin »).
+- **Qui fait l'action** : celui qui EST livreur (« je viens livrer ») ne demande pas de livreur → question.
+- **Mesure** : `scripts/banc-ia/banc-lieu.ts` (16 phrases, dont les pièges de course) : 100 %, aucune recherche déplacée à tort.
 - **Un choix en attente passe avant tout le reste** (article 2) : avant la suite, la précision ou toute recherche.
 - **Une boutique nommée est cherchée comme boutique, jamais comme produit au nom proche** (article 1) : « Otakoss » ne doit pas donner des tacos d'autres enseignes.
 - **Un produit dont le nom COMMENCE par ce qui est cherché y répond**, et le juge ne peut pas l'écarter (article 6) : « Riz basmati » est du riz, « Savon au lait » est un savon.

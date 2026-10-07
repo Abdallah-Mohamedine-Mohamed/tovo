@@ -30,6 +30,7 @@ import { aiguiller, cascadeActive } from '../ai/cascade.js';
 import { rechercheProduitRapide } from '../ai/orchestrator.js';
 import { cataloguePage, HORS_TOVO_NON, HORS_TOVO_OUI, reponseHorsTovo, type CataloguePage } from '../services/catalogue.js';
 import { demandeDeGarde, reponseGarde } from '../services/pharmaciesGarde.js';
+import { reperer } from '../services/lieux.js';
 import { rediger } from '../ai/redacteur.js';
 import { serviceClient } from '../services/supabase.js';
 import { orderTracking, type Component } from '../components/builders.js';
@@ -565,6 +566,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     let suiteCerveau = false;
     let commerceCerveau: TypeCommerceCherche | undefined;
     let detailsCerveau: Details | undefined;
+    let lieuCerveau: string | undefined;
     // Le rédacteur (ai/redacteur.ts) : chaque réponse directe à un message du
     // client est mise en mots par une IA, à partir de ce qu'il a VRAIMENT dit.
     // Les cartes partent d'abord ; la phrase suit.
@@ -596,6 +598,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         suiteCerveau = d?.suite === true;
         commerceCerveau = d?.commerce;
         detailsCerveau = d?.details;
+        lieuCerveau = d?.lieu;
         request.log.info({
           ref: body.data.client_message_id,
           intention: d?.intention ?? null,
@@ -885,6 +888,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         ? note ? `${texteClient}\n${note}` : texteClient
         : message;
 
+      // « Une friperie vers Yantala » : le lieu DIT remplace la position du
+      // client pour chercher (article 9 : ce qu'il précise est gardé). Pour
+      // une recherche seulement : une course a son départ et son arrivée.
+      const situe = lieuCerveau && (intention === 'recherche' || intention === 'boutique' || intention === 'envie' || commerceCerveau)
+        ? reperer(lieuCerveau) : null;
+      const autour = situe?.point && situe.description ? { point: situe.point, nom: situe.description } : null;
+      if (lieuCerveau) request.log.info({ ref: body.data.client_message_id, lieu: lieuCerveau, situe: autour?.nom ?? null }, 'lieu de recherche');
+
       output.emit({ type: 'conversation', conversation_id: conversationId });
       const resultat = await orchestrate({
         db,
@@ -901,7 +912,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         ...(messagePublic ? { messagePublic } : {}),
         clientMessageId: body.data.client_message_id,
         ...(body.data.audio ? { audio: body.data.audio } : {}),
-        position: body.data.context,
+        // Chercher autour du lieu dit, mesurer depuis le client (07/10).
+        position: autour ? { ...autour.point, depuis: body.data.context ?? null } : body.data.context,
+        ...(autour ? { autourDe: autour.nom } : {}),
         ...(streaming ? { onEvent: emit } : {}),
       });
 

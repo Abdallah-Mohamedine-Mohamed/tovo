@@ -31,6 +31,8 @@ dependencies:
   # File de synchronisation hors ligne de l'app livreur : elle doit
   # survivre à la fermeture de l'app, donc au disque.
   shared_preferences: ^2.3.2
+  # Les images de l'avatar de la carte, gardées sur le téléphone (07/10).
+  path_provider: ^2.1.4
 
   # Notifications push. firebase_core est requis par firebase_messaging.
   firebase_core: ^3.6.0
@@ -118,6 +120,9 @@ flutter:
     # mentions légales. Rendu sous 4 inclinaisons de caméra (0, 30, 45, 60°)
     # × 36 directions.
     - assets/carte/scooter/
+    # La carte des commerces, la nuit : le style du fondateur (07/10,
+    # Documents/map-style.json) — bleu canard, lieux masqués.
+    - assets/carte/style-nuit-commerces.json
     - assets/branding/
 
   # DM Sans, embarquée et non chargée à l'exécution.
