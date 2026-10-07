@@ -7,6 +7,7 @@ import '../../core/deconnexion.dart';
 import '../../core/theme.dart';
 import '../../components/widgets/read_placeholder.dart';
 import 'conversation_chrome.dart';
+import '../carte/choix_avatar.dart';
 
 /// La liste des conversations, en tiroir.
 ///
@@ -226,6 +227,34 @@ class _TiroirConversationsState extends State<TiroirConversations> {
             // cherche son compte, et l'app client n'offrait jusqu'ici aucune
             // façon d'en sortir.
             const Divider(height: 1),
+            // Le personnage qui représente le client sur la carte (07/10).
+            ListTile(
+              dense: true,
+              leading: const Icon(
+                Icons.accessibility_new_rounded,
+                size: 20,
+                color: TovoTheme.muted,
+              ),
+              title: const Text(
+                'Mon avatar',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: TovoTheme.muted,
+                ),
+              ),
+              onTap: () {
+                final racine = Navigator.of(context, rootNavigator: true);
+                Navigator.of(context).pop();
+                unawaited(
+                  racine.push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const ChoixAvatar(),
+                    ),
+                  ),
+                );
+              },
+            ),
             ListTile(
               dense: true,
               leading: const ConversationIcon(

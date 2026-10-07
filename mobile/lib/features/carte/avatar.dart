@@ -261,9 +261,23 @@ class ImagesAvatar {
   static String get _base =>
       '${TovoConfig.supabaseUrl}/storage/v1/object/public/avatars';
 
+  /// Les personnages, dans l'ordre du choix (étape 5, 07/10).
+  static const personnages = {
+    'femme': 'Femme',
+    'capuche': 'Capuche',
+    'aventurier': 'Aventurier',
+    'homme': 'Homme',
+  };
+
   static Future<String> choisi() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('avatar') ?? 'femme';
+    final cle = prefs.getString('avatar');
+    return personnages.containsKey(cle) ? cle! : 'femme';
+  }
+
+  static Future<void> choisir(String cle) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('avatar', cle);
   }
 
   FicheAvatar fiche = FicheAvatar.parDefaut;
@@ -340,7 +354,7 @@ class ImagesAvatar {
     int images,
   ) async {
     try {
-      final octets = await _octets(nom);
+      final octets = await octetsBande(cle, nom);
       if (octets == null) return null;
       final codec = await ui.instantiateImageCodec(octets);
       final bande = (await codec.getNextFrame()).image;
@@ -378,7 +392,7 @@ class ImagesAvatar {
   }
 
   /// Une bande : depuis le téléphone, sinon téléchargée puis gardée.
-  Future<Uint8List?> _octets(String nom) async {
+  static Future<Uint8List?> octetsBande(String cle, String nom) async {
     final dossier = Directory(
       '${(await getApplicationSupportDirectory()).path}/avatars/$cle',
     );

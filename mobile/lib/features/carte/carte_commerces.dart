@@ -18,6 +18,7 @@ import '../../core/position_livreur.dart';
 import '../../core/soleil.dart';
 import '../../core/theme.dart';
 import 'avatar.dart';
+import 'navigation.dart';
 
 /// La carte des commerces (maquette validée le 07/10) : les commerces trouvés
 /// sur une carte, le tracé depuis le client jusqu'à celui qu'il choisit, et
@@ -241,6 +242,21 @@ class _CarteCommercesState extends State<CarteCommerces> {
   double _bearing = 0;
   double _tilt = 0;
 
+  // « Y aller » (étape 4, 07/10) : la caméra suit l'avatar, inclinée, et
+  // tourne avec lui ; on glisse pour tourner autour de lui.
+  bool _nav = false;
+  bool _arrive = false;
+  double _orbite = 0; // degrés, ajoutés par le doigt
+  double _zoomNav = 18;
+  double _tiltNav = 60;
+  double _zoomDebut = 18;
+  double _tiltDebut = 60;
+  double? _camBearing;
+  Point? _camCible;
+  Progres? _progres;
+  double _horsTrajet = 0; // secondes passées loin du trajet
+  bool _recalcul = false;
+
   @override
   void initState() {
     super.initState();
@@ -331,9 +347,78 @@ class _CarteCommercesState extends State<CarteCommerces> {
         metres(avant.position, etat.position) > 0.05 ||
         !identical(image, _imageAvatar);
     _etat = etat;
-    if (bouge) {
+    if (_nav) {
+      _suivre(etat, dt);
+      setState(() => _imageAvatar = image);
+    } else if (bouge) {
       setState(() => _imageAvatar = image);
     }
+  }
+
+  /// La navigation : progression sur le trajet, arrivée, recalcul s'il
+  /// s'en écarte, et la caméra derrière l'avatar.
+  void _suivre(EtatAvatar etat, double dt) {
+    final it = _itineraires[_choisi];
+    if (it != null) {
+      final p = Progres.calculer(it.trace, etat.position);
+      _progres = p;
+      final boutique = widget.commerces[_choisi].position;
+      if (!_arrive &&
+          (metres(etat.position, boutique) < 20 ||
+              (p != null && p.restantM < 15))) {
+        _arrive = true;
+        unawaited(HapticFeedback.mediumImpact());
+      }
+      // Loin du trajet (plus de 50 m pendant 8 s) : on recalcule depuis ici.
+      if (p != null && !_arrive && p.ecartM > 50) {
+        _horsTrajet += dt;
+        if (_horsTrajet > 8 && !_recalcul) {
+          _recalcul = true;
+          _horsTrajet = 0;
+          unawaited(
+            _chargerItineraire(
+              _choisi,
+              depuis: etat.position,
+            ).whenComplete(() => _recalcul = false),
+          );
+        }
+      } else {
+        _horsTrajet = 0;
+      }
+    }
+    final carte = _carte;
+    if (carte == null) return;
+    // À l'arrivée, la caméra fait lentement le tour de l'avatar.
+    if (_arrive) _orbite += dt * 22;
+    final cap = etat.capDeg ?? _camBearing ?? 0;
+    final voulu = (cap + _orbite) % 360;
+    final actuel = _camBearing ?? voulu;
+    _camBearing =
+        (actuel + ecartAngle(actuel, voulu) * math.min(1, dt * 2.5) + 360) %
+        360;
+    // On regarde un peu devant lui (18 m), sauf à l'arrivée : sur lui.
+    final cible = _arrive ? etat.position : devant(etat.position, cap, 18);
+    final c = _camCible ?? cible;
+    final k = math.min(1.0, dt * 5);
+    _camCible = (
+      lat: c.lat + (cible.lat - c.lat) * k,
+      lng: c.lng + (cible.lng - c.lng) * k,
+    );
+    unawaited(
+      carte.moveCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(
+            target: LatLng(_camCible!.lat, _camCible!.lng),
+            zoom: _zoomNav,
+            tilt: _tiltNav,
+            bearing: _camBearing!,
+          ),
+        ),
+      ),
+    );
+    // La vue de l'avatar suit la caméra.
+    _bearing = _camBearing!;
+    _tilt = _tiltNav;
   }
 
   // ------------------------------------------------------------ dessins
@@ -552,8 +637,8 @@ class _CarteCommercesState extends State<CarteCommerces> {
     if (!_itineraires.containsKey(i)) await _chargerItineraire(i);
   }
 
-  Future<void> _chargerItineraire(int i) async {
-    final client = _client;
+  Future<void> _chargerItineraire(int i, {Point? depuis}) async {
+    final client = depuis ?? _client;
     if (client == null) return;
     final c = widget.commerces[i];
     final r = await _api.get(
@@ -738,9 +823,25 @@ class _CarteCommercesState extends State<CarteCommerces> {
   Set<Polyline> _traces() {
     final it = _itineraires[_choisi];
     if (it == null || it.trace.length < 2) return const {};
-    final points = [for (final p in it.trace) LatLng(p.lat, p.lng)];
-    // Deux traits l'un sur l'autre : le plus large dessous.
+    final progres = _nav ? _progres : null;
+    final (parcouru, reste) = progres == null
+        ? (const <Point>[], it.trace)
+        : progres.couper(it.trace);
+    final points = [for (final p in reste) LatLng(p.lat, p.lng)];
+    // Deux traits l'un sur l'autre : le plus large dessous. En navigation,
+    // le trajet déjà parcouru s'éteint (le contour seul).
     return {
+      if (parcouru.length >= 2)
+        Polyline(
+          polylineId: const PolylineId('parcouru'),
+          points: [for (final p in parcouru) LatLng(p.lat, p.lng)],
+          color: _t.traceBord,
+          width: 5,
+          zIndex: 1,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+          jointType: JointType.round,
+        ),
       Polyline(
         polylineId: const PolylineId('bord'),
         points: points,
@@ -766,13 +867,73 @@ class _CarteCommercesState extends State<CarteCommerces> {
 
   // ------------------------------------------------------------ actions
 
+  void _faireLivrer(int i) {
+    final c = widget.commerces[i];
+    if (c.tovo) {
+      _agir(
+        TovoInteraction('select_merchant', {
+          'merchant_id': c.idBoutique,
+          'apercu': {
+            'name': c.nom,
+            'logo_url': ?((c.logo ?? '').isEmpty ? null : c.logo),
+          },
+        }),
+      );
+    } else if (c.livreur != null) {
+      _agir(
+        TovoInteraction('quick_reply', {
+          'value': c.livreur!['value'],
+          'label': c.livreur!['label'] ?? 'Envoyer un livreur',
+        }),
+      );
+    }
+  }
+
+  /// Le temps restant : celui de Google, au prorata de ce qui reste.
+  int? _minutesRestantes() {
+    final it = _itineraires[_choisi];
+    final reste = _progres?.restantM;
+    if (it == null || it.dureeS == null || it.distanceM <= 0) return null;
+    final part = reste == null ? 1.0 : (reste / it.distanceM).clamp(0.0, 1.0);
+    return math.max(1, (it.dureeS! * part / 60).round());
+  }
+
   void _agir(TovoInteraction i) {
     Navigator.of(context).pop();
     widget.onInteraction(i);
   }
 
-  Future<void> _yAller(CommerceSurCarte c) async {
-    // Étape 2 : le guidage de Google Maps. L'immersion avec l'avatar viendra.
+  Future<void> _yAller(int i) async {
+    if (i != _choisi) await _choisir(i);
+    // Sans position, ni itinéraire : le guidage de Google Maps.
+    if (_client == null || _etat == null) {
+      await _guidageVocal(widget.commerces[i]);
+      return;
+    }
+    if (!_itineraires.containsKey(i)) await _chargerItineraire(i);
+    if (!mounted) return;
+    setState(() {
+      _nav = true;
+      _arrive = false;
+      _orbite = 0;
+      _zoomNav = 18;
+      _tiltNav = 60;
+      _camBearing = null;
+      _camCible = null;
+    });
+  }
+
+  void _quitterNavigation() {
+    setState(() {
+      _nav = false;
+      _arrive = false;
+      _progres = null;
+    });
+    unawaited(_cadrer());
+  }
+
+  /// Le guidage vocal de Google Maps, pour qui le veut.
+  Future<void> _guidageVocal(CommerceSurCarte c) async {
     final uri = Uri.parse(
       'https://www.google.com/maps/dir/?api=1&destination=${c.position.lat},${c.position.lng}&travelmode=driving',
     );
@@ -799,7 +960,10 @@ class _CarteCommercesState extends State<CarteCommerces> {
               ),
               style: _t.nuit ? _styleNuit : ThemeCarte.clair.style,
               // La barre du haut et la fiche du bas ne cachent rien.
-              padding: EdgeInsets.only(top: marges.top + 64, bottom: 210),
+              padding: EdgeInsets.only(
+                top: marges.top + 64,
+                bottom: _nav ? 150 : 210,
+              ),
               onMapCreated: (carte) {
                 _carte = carte;
                 unawaited(_cadrer());
@@ -815,6 +979,10 @@ class _CarteCommercesState extends State<CarteCommerces> {
               },
               markers: _marqueurs(),
               polylines: _traces(),
+              scrollGesturesEnabled: !_nav,
+              zoomGesturesEnabled: !_nav,
+              rotateGesturesEnabled: !_nav,
+              tiltGesturesEnabled: !_nav,
               zoomControlsEnabled: false,
               myLocationButtonEnabled: false,
               mapToolbarEnabled: false,
@@ -823,6 +991,31 @@ class _CarteCommercesState extends State<CarteCommerces> {
               trafficEnabled: false,
               indoorViewEnabled: false,
               minMaxZoomPreference: const MinMaxZoomPreference(11, 19),
+            ),
+          // En navigation : glisser à l'horizontale tourne autour de l'avatar
+          // (le voir de tous les côtés), à la verticale incline, pincer zoome.
+          if (_nav)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onScaleStart: (_) {
+                  _zoomDebut = _zoomNav;
+                  _tiltDebut = _tiltNav;
+                },
+                onScaleUpdate: (d) {
+                  _orbite = (_orbite + d.focalPointDelta.dx * 0.35) % 360;
+                  _tiltDebut = (_tiltDebut - d.focalPointDelta.dy * 0.25).clamp(
+                    30.0,
+                    67.5,
+                  );
+                  _tiltNav = _tiltDebut;
+                  if (d.scale != 1) {
+                    _zoomNav = (_zoomDebut + math.log(d.scale) / math.ln2)
+                        .clamp(15.0, 19.5);
+                  }
+                },
+                onDoubleTap: () => _orbite = 0,
+              ),
             ),
           Positioned(
             top: marges.top + 8,
@@ -848,7 +1041,9 @@ class _CarteCommercesState extends State<CarteCommerces> {
                       border: Border.all(color: _t.panneauBord),
                     ),
                     child: Text(
-                      widget.titre,
+                      _nav
+                          ? 'Vers ${widget.commerces[_choisi].nom}'
+                          : widget.titre,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -862,71 +1057,221 @@ class _CarteCommercesState extends State<CarteCommerces> {
                 const SizedBox(width: 10),
                 _Rond(
                   t: _t,
-                  etiquette: 'Recentrer',
-                  icone: Icons.center_focus_strong_rounded,
-                  onTap: _cadrer,
+                  etiquette: _nav ? 'Vue derrière vous' : 'Recentrer',
+                  icone: _nav
+                      ? Icons.navigation_rounded
+                      : Icons.center_focus_strong_rounded,
+                  onTap: _nav ? () => _orbite = 0 : _cadrer,
                 ),
               ],
             ),
           ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: marges.bottom + 18,
-            child: SizedBox(
-              height: 168,
-              child: PageView.builder(
-                controller: _pages,
-                itemCount: widget.commerces.length,
-                onPageChanged: (i) => _choisir(i, deplacerPage: false),
-                itemBuilder: (context, i) => Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 5),
-                  child: _Fiche(
-                    t: _t,
-                    commerce: widget.commerces[i],
-                    numero: i + 1,
-                    total: widget.commerces.length,
-                    itineraire: _itineraires[i],
-                    precedent: i > 0 ? () => _choisir(i - 1) : null,
-                    suivant: i < widget.commerces.length - 1
-                        ? () => _choisir(i + 1)
-                        : null,
-                    faireLivrer: () {
-                      final c = widget.commerces[i];
-                      if (c.tovo) {
-                        _agir(
-                          TovoInteraction('select_merchant', {
-                            'merchant_id': c.idBoutique,
-                            'apercu': {
-                              'name': c.nom,
-                              'logo_url': ?((c.logo ?? '').isEmpty
-                                  ? null
-                                  : c.logo),
-                            },
-                          }),
-                        );
-                      } else if (c.livreur != null) {
-                        _agir(
-                          TovoInteraction('quick_reply', {
-                            'value': c.livreur!['value'],
-                            'label':
-                                c.livreur!['label'] ?? 'Envoyer un livreur',
-                          }),
-                        );
-                      }
-                    },
-                    yAller: () => _yAller(widget.commerces[i]),
-                    appeler: widget.commerces[i].telephone == null
-                        ? null
-                        : () => widget.onInteraction(
-                            TovoInteraction('call_phone', {
-                              'phone': widget.commerces[i].telephone,
-                            }),
-                          ),
+          if (_nav)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: marges.bottom + 18,
+              child: _PanneauNavigation(
+                t: _t,
+                commerce: widget.commerces[_choisi],
+                restantM:
+                    _progres?.restantM ??
+                    _itineraires[_choisi]?.distanceM.toDouble(),
+                minutes: _minutesRestantes(),
+                arrive: _arrive,
+                guidage: () => _guidageVocal(widget.commerces[_choisi]),
+                quitter: _quitterNavigation,
+                faireLivrer: () => _faireLivrer(_choisi),
+                appeler: widget.commerces[_choisi].telephone == null
+                    ? null
+                    : () => widget.onInteraction(
+                        TovoInteraction('call_phone', {
+                          'phone': widget.commerces[_choisi].telephone,
+                        }),
+                      ),
+              ),
+            ),
+          if (!_nav)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: marges.bottom + 18,
+              child: SizedBox(
+                height: 168,
+                child: PageView.builder(
+                  controller: _pages,
+                  itemCount: widget.commerces.length,
+                  onPageChanged: (i) => _choisir(i, deplacerPage: false),
+                  itemBuilder: (context, i) => Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    child: _Fiche(
+                      t: _t,
+                      commerce: widget.commerces[i],
+                      numero: i + 1,
+                      total: widget.commerces.length,
+                      itineraire: _itineraires[i],
+                      precedent: i > 0 ? () => _choisir(i - 1) : null,
+                      suivant: i < widget.commerces.length - 1
+                          ? () => _choisir(i + 1)
+                          : null,
+                      faireLivrer: () => _faireLivrer(i),
+                      yAller: () => _yAller(i),
+                      appeler: widget.commerces[i].telephone == null
+                          ? null
+                          : () => widget.onInteraction(
+                              TovoInteraction('call_phone', {
+                                'phone': widget.commerces[i].telephone,
+                              }),
+                            ),
+                    ),
                   ),
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Le panneau de « Y aller » : ce qui reste, et l'arrivée.
+class _PanneauNavigation extends StatelessWidget {
+  const _PanneauNavigation({
+    required this.t,
+    required this.commerce,
+    required this.restantM,
+    required this.minutes,
+    required this.arrive,
+    required this.guidage,
+    required this.quitter,
+    required this.faireLivrer,
+    required this.appeler,
+  });
+
+  final _Teinte t;
+  final CommerceSurCarte commerce;
+  final double? restantM;
+  final int? minutes;
+  final bool arrive;
+  final VoidCallback guidage;
+  final VoidCallback quitter;
+  final VoidCallback faireLivrer;
+  final VoidCallback? appeler;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: t.panneau,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: t.panneauBord),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x8C000C10),
+            blurRadius: 36,
+            offset: Offset(0, 16),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      arrive ? 'Vous êtes arrivé' : commerce.nom,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: TovoTheme.policeNoms,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: t.texte,
+                      ),
+                    ),
+                    Text(
+                      arrive ? commerce.nom : commerce.sousTitre,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, color: t.second),
+                    ),
+                  ],
+                ),
+              ),
+              if (!arrive && restantM != null)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      Money.distance(restantM!.round()),
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: t.distance,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    if (minutes != null)
+                      Text(
+                        '~$minutes min',
+                        style: TextStyle(fontSize: 12, color: t.second),
+                      ),
+                  ],
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              if (arrive) ...[
+                Expanded(
+                  child: _Bouton(
+                    t: t,
+                    icone: commerce.tovo
+                        ? Icons.shopping_bag_outlined
+                        : Icons.two_wheeler_rounded,
+                    texte: commerce.tovo ? 'Commander' : 'Faire livrer',
+                    onTap: commerce.tovo || commerce.livreur != null
+                        ? faireLivrer
+                        : null,
+                  ),
+                ),
+                if (appeler != null) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _Bouton(
+                      t: t,
+                      icone: Icons.call_outlined,
+                      texte: 'Appeler',
+                      onTap: appeler,
+                    ),
+                  ),
+                ],
+              ] else
+                Expanded(
+                  child: _Bouton(
+                    t: t,
+                    icone: Icons.record_voice_over_outlined,
+                    texte: 'Guidage vocal',
+                    onTap: guidage,
+                  ),
+                ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _Bouton(
+                  t: t,
+                  icone: Icons.close_rounded,
+                  texte: 'Quitter',
+                  onTap: quitter,
+                ),
+              ),
+            ],
           ),
         ],
       ),
