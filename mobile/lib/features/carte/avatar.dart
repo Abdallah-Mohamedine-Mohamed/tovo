@@ -341,7 +341,7 @@ class MoteurAvatar {
 /// Les images d'un avatar : manifeste, bandes téléchargées à la demande et
 /// gardées sur le téléphone, découpées en images de repère.
 class ImagesAvatar {
-  ImagesAvatar(this.cle, {this.largeurPt = 76});
+  ImagesAvatar(this.cle, {this.largeurPt = 92}); // 08/10 : +20 %
 
   final String cle;
   final double largeurPt;

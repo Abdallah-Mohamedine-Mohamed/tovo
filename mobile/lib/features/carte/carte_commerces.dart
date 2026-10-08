@@ -932,6 +932,10 @@ class _CarteCommercesState extends State<CarteCommerces> {
     // Deux traits l'un sur l'autre : le plus large dessous. En navigation,
     // le trajet déjà parcouru s'éteint (le contour seul).
     final avatar = _etat?.position;
+    // Épaisseurs (08/10 : « le tracé est très mince ») : en navigation, la
+    // carte inclinée à 60° amincit le trait au loin, il est plus large.
+    final large = _nav ? 11 : 8;
+    final bordure = large + 6;
     return {
       // L'itinéraire de Google part de la rue la plus proche qu'il connaît :
       // un pointillé relie l'avatar au tracé (essai du 07/10).
@@ -943,16 +947,16 @@ class _CarteCommercesState extends State<CarteCommerces> {
             LatLng(progres.projection.lat, progres.projection.lng),
           ],
           color: _t.trace,
-          width: 3,
+          width: 6,
           zIndex: 3,
-          patterns: [PatternItem.dot, PatternItem.gap(8)],
+          patterns: [PatternItem.dot, PatternItem.gap(10)],
         ),
       if (parcouru.length >= 2)
         Polyline(
           polylineId: const PolylineId('parcouru'),
           points: [for (final p in parcouru) LatLng(p.lat, p.lng)],
           color: _t.traceBord,
-          width: 5,
+          width: large,
           zIndex: 1,
           startCap: Cap.roundCap,
           endCap: Cap.roundCap,
@@ -962,7 +966,7 @@ class _CarteCommercesState extends State<CarteCommerces> {
         polylineId: const PolylineId('bord'),
         points: points,
         color: _t.traceBord,
-        width: 9,
+        width: bordure,
         zIndex: 1,
         startCap: Cap.roundCap,
         endCap: Cap.roundCap,
@@ -972,7 +976,7 @@ class _CarteCommercesState extends State<CarteCommerces> {
         polylineId: const PolylineId('trace'),
         points: points,
         color: _t.trace,
-        width: 5,
+        width: large,
         zIndex: 2,
         startCap: Cap.roundCap,
         endCap: Cap.roundCap,
