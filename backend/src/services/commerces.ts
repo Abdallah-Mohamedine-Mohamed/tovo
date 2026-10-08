@@ -310,11 +310,16 @@ export function commercesPourProduit(
   secours: TypeCommerce[] = [],
 ): Commerce[] {
   const n = normaliserIntention(texte);
-  const mots = new Set(n.split(' '));
   // Ceux dont c'est la réputation (« le vendeur de merguez de la place
   // Toumo ») passent devant, où qu'ils soient dans la ville.
+  // Une spécialité ou une catégorie de plusieurs mots (« pièces auto ») se
+  // compare en entier, au singulier comme au pluriel de son dernier mot.
+  const phrase = ` ${n} `;
   const reputes = chargerCommerces().filter((c) =>
-    (c.specialites ?? []).some((s) => mots.has(normaliserIntention(s)) || mots.has(`${normaliserIntention(s)}s`)));
+    (c.specialites ?? []).some((s) => {
+      const sp = normaliserIntention(s);
+      return sp.length > 0 && (phrase.includes(` ${sp} `) || phrase.includes(` ${sp}s `));
+    }));
   // Les types sont rangés du plus probable au moins probable (PRODUITS) : le
   // premier qui a un commerce à portée l'emporte, les suivants ne servent que
   // s'il n'y en a aucun. Mélangés et triés par distance, un supermarché à

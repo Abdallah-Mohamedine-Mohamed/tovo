@@ -16,21 +16,32 @@ import { serviceClient } from './supabase.js';
 export const TYPES_TERRAIN: TypeCommerce[] = ['supermarche', 'marche', 'boucherie', 'boulangerie', 'beaute',
   'electronique', 'vetements', 'quincaillerie', 'restaurant', 'grillades', 'pharmacie', 'boutique'];
 
+/** « Pièces auto » → « pieces-auto » : la clé d'une catégorie. */
+export function cleDeCategorie(libelle: string): string {
+  return normaliserIntention(libelle).split(' ').filter(Boolean).join('-').slice(0, 60);
+}
+
+export interface Categorie { slug: string; libelle: string; type: TypeCommerce | null; statut: 'propose' | 'valide' }
+
 interface Ligne {
   id: string;
   nom: string;
-  type: TypeCommerce;
+  type: TypeCommerce | null;
+  categories: string[] | null;
   telephone: string | null;
   lat: number;
   lng: number;
   repere: string | null;
 }
 
-const enCommerce = (l: Ligne): Commerce => ({
+const enCommerce = (l: Ligne, categories: Map<string, Categorie>): Commerce => ({
   id: `terrain:${l.id}`,
   nom: l.nom,
   nom_normalise: normaliserIntention(l.nom),
-  type: l.type,
+  type: l.type ?? 'boutique',
+  // Les catégories (« Friperie », « Pièces auto ») : un client qui les
+  // demande trouve ce commerce, comme une spécialité (08/10).
+  specialites: (l.categories ?? []).map((c) => categories.get(c)?.libelle ?? c),
   adresse: l.repere,
   quartier: autourDe({ lat: l.lat, lng: l.lng }).quartier,
   telephone: l.telephone ? l.telephone.replace(/(\d{2})(?=\d)/g, '$1 ') : null,
@@ -44,12 +55,14 @@ const enCommerce = (l: Ligne): Commerce => ({
 /** Relit les fiches validées ; jamais bloquant (l'annuaire garde les précédentes). */
 export async function rafraichirCommercesTerrain(): Promise<number | null> {
   try {
-    const { data, error } = await serviceClient().from('commerces_terrain')
-      .select('id, nom, type, telephone, lat, lng, repere')
-      .eq('statut', 'valide')
-      .limit(20_000);
+    const db = serviceClient();
+    const [{ data, error }, cats] = await Promise.all([
+      db.from('commerces_terrain').select('id, nom, type, categories, telephone, lat, lng, repere').eq('statut', 'valide').limit(20_000),
+      db.from('categories_commerce').select('slug, libelle, type, statut'),
+    ]);
     if (error) return null;
-    const commerces = ((data ?? []) as Ligne[]).map(enCommerce);
+    const categories = new Map(((cats.data ?? []) as Categorie[]).map((c) => [c.slug, c]));
+    const commerces = ((data ?? []) as Ligne[]).map((l) => enCommerce(l, categories));
     installerTerrain(commerces);
     return commerces.length;
   } catch {

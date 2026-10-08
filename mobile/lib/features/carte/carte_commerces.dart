@@ -342,10 +342,25 @@ class _CarteCommercesState extends State<CarteCommerces> {
     // Le GPS en continu, à la meilleure précision, tant que l'écran est ouvert.
     _gps =
         Geolocator.getPositionStream(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.bestForNavigation,
-            distanceFilter: 0,
-          ),
+          // Réglages de NAVIGATION : sur iPhone, pas de pause automatique des
+          // mises à jour ; sur Android, une mesure toutes les 0,5 s.
+          locationSettings: defaultTargetPlatform == TargetPlatform.iOS
+              ? AppleSettings(
+                  accuracy: LocationAccuracy.bestForNavigation,
+                  activityType: ActivityType.otherNavigation,
+                  distanceFilter: 0,
+                  pauseLocationUpdatesAutomatically: false,
+                )
+              : defaultTargetPlatform == TargetPlatform.android
+              ? AndroidSettings(
+                  accuracy: LocationAccuracy.bestForNavigation,
+                  distanceFilter: 0,
+                  intervalDuration: const Duration(milliseconds: 500),
+                )
+              : const LocationSettings(
+                  accuracy: LocationAccuracy.bestForNavigation,
+                  distanceFilter: 0,
+                ),
         ).listen((p) {
           moteur.gps(
             (lat: p.latitude, lng: p.longitude),
@@ -1001,7 +1016,12 @@ class _CarteCommercesState extends State<CarteCommerces> {
       AnimationAvatar.course => 'course',
       AnimationAvatar.salut => 'salut',
     };
-    return 'GPS ${m.vitesseGps.toStringAsFixed(1)} m/s · lissée ${m.vitesse.toStringAsFixed(1)} · '
+    // En km/h, pour comparer avec le compteur.
+    String kmh(double? ms) =>
+        ms == null || ms < 0 ? '—' : '${(ms * 3.6).round()}';
+    final age = m.ageDerniereMesure();
+    return 'GPS ${kmh(m.vitesseGps)} · positions ${kmh(m.vitesseDeplacement)} · retenue ${kmh(m.vitesse)} km/h · '
+        '${m.positionsParSeconde.toStringAsFixed(1)} pos/s · dernière ${age == null ? '—' : '${age.toStringAsFixed(1)} s'} · '
         '±${m.precision.round()} m · cap ${cap == null ? '—' : '${cap.round()}°'} · $allure · '
         'écart ${_progres?.ecartM.round() ?? '—'} m';
   }

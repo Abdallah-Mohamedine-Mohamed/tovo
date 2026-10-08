@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { dejaConnu, TYPES_TERRAIN } from '../services/commercesTerrain.js';
+import { cleDeCategorie, dejaConnu, type Categorie } from '../services/commercesTerrain.js';
 import { serviceClient } from '../services/supabase.js';
 
 /**
@@ -13,7 +13,8 @@ import { serviceClient } from '../services/supabase.js';
 
 const ficheSchema = z.object({
   nom: z.string().trim().min(2).max(120),
-  type: z.enum(TYPES_TERRAIN as [string, ...string[]]),
+  // Une à cinq catégories (clés de categories_commerce, migration 0078).
+  categories: z.array(z.string().regex(/^[a-z0-9-]{2,60}$/)).min(1).max(5),
   telephone: z.string().optional().nullable()
     .transform((t) => (t ? t.replace(/\D/g, '').replace(/^227(?=\d{8}$)/, '') : null))
     .refine((t) => t === null || t === '' || /^\d{8}$/.test(t), 'numéro à 8 chiffres')
@@ -44,6 +45,16 @@ export async function commercesTerrainRoutes(app: FastifyInstance): Promise<void
       return reply.code(400).send({ error: `fiche invalide : ${premiere?.path.join(' › ')} — ${premiere?.message}` });
     }
     const fiche = body.data;
+    // Les catégories : validées, ou proposées par CE livreur.
+    const { data: cats, error: errCats } = await serviceClient().from('categories_commerce')
+      .select('slug, libelle, type, statut, propose_par').in('slug', fiche.categories);
+    if (errCats) return reply.code(500).send({ error: `${errCats.message} — la migration 0078 est-elle appliquée ?` });
+    const connues = ((cats ?? []) as Array<Categorie & { propose_par: string | null }>)
+      .filter((c) => c.statut === 'valide' || c.propose_par === request.user!.id);
+    const inconnue = fiche.categories.find((c) => !connues.some((k) => k.slug === c));
+    if (inconnue) return reply.code(400).send({ error: `catégorie inconnue : ${inconnue}` });
+    // Le type de l'annuaire : celui de la première catégorie qui en a un.
+    const type = fiche.categories.map((c) => connues.find((k) => k.slug === c)?.type).find((t) => t) ?? 'boutique';
     // Déjà connu à cet endroit : pas de doublon.
     const connu = await dejaConnu(fiche.nom, fiche);
     if (connu) return reply.code(409).send({ error: `« ${connu} » est déjà connu à cet endroit.`, deja_connu: connu });
@@ -62,7 +73,8 @@ export async function commercesTerrainRoutes(app: FastifyInstance): Promise<void
     }
     const { data, error } = await db.from('commerces_terrain').insert({
       nom: fiche.nom,
-      type: fiche.type,
+      type,
+      categories: fiche.categories,
       telephone: fiche.telephone,
       lat: fiche.lat,
       lng: fiche.lng,
@@ -72,13 +84,43 @@ export async function commercesTerrainRoutes(app: FastifyInstance): Promise<void
       propose_par: request.user!.id,
     }).select('id, statut').single();
     if (error) return reply.code(500).send({ error: `${error.message} — la migration 0076 est-elle appliquée ?` });
-    request.log.info({ id: data.id, type: fiche.type, photo: Boolean(photo) }, 'commerce relevé sur le terrain');
+    request.log.info({ id: data.id, type, categories: fiche.categories, photo: Boolean(photo) }, 'commerce relevé sur le terrain');
     return reply.code(201).send({ id: data.id, statut: data.statut });
+  });
+
+  // Les catégories que le livreur peut choisir : les validées, et celles
+  // qu'il a lui-même proposées (en attente de l'admin).
+  app.get('/livreur/categories', livreur, async (request, reply) => {
+    const { data, error } = await serviceClient().from('categories_commerce')
+      .select('slug, libelle, statut, propose_par')
+      .or(`statut.eq.valide,propose_par.eq.${request.user!.id}`)
+      .order('libelle');
+    if (error) return reply.code(500).send({ error: `${error.message} — la migration 0078 est-elle appliquée ?` });
+    return reply.send({ categories: (data ?? []).map(({ slug, libelle, statut }) => ({ slug, libelle, statut })) });
+  });
+
+  // Une catégorie qui manque : le livreur la propose, et l'utilise aussitôt.
+  app.post('/livreur/categories', livreur, async (request, reply) => {
+    const body = z.object({ libelle: z.string().trim().min(2).max(60) }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: 'nom de catégorie : 2 à 60 caractères' });
+    const libelle = body.data.libelle.charAt(0).toUpperCase() + body.data.libelle.slice(1);
+    const slug = cleDeCategorie(libelle);
+    if (slug.length < 2) return reply.code(400).send({ error: 'nom de catégorie illisible' });
+    const db = serviceClient();
+    // Elle existe déjà (même nom, accents et majuscules mis à part) : on la rend.
+    const { data: existe } = await db.from('categories_commerce').select('slug, libelle, statut').eq('slug', slug).maybeSingle();
+    if (existe) return reply.send({ categorie: existe, existait: true });
+    const { data, error } = await db.from('categories_commerce')
+      .insert({ slug, libelle, statut: 'propose', propose_par: request.user!.id })
+      .select('slug, libelle, statut').single();
+    if (error) return reply.code(500).send({ error: error.message });
+    request.log.info({ slug }, 'catégorie proposée par un livreur');
+    return reply.code(201).send({ categorie: data, existait: false });
   });
 
   app.get('/livreur/commerces', livreur, async (request, reply) => {
     const { data, error } = await serviceClient().from('commerces_terrain')
-      .select('id, nom, type, statut, motif_refus, cree_le')
+      .select('id, nom, type, categories, statut, motif_refus, cree_le')
       .eq('propose_par', request.user!.id)
       .order('cree_le', { ascending: false })
       .limit(100);

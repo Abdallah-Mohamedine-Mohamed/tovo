@@ -11,11 +11,22 @@ class Simulation {
   DateTime instant = DateTime(2026, 10, 7, 19);
 
   /// `secondes` à `vitesseMs`, vers le nord, une mesure GPS par seconde.
-  void rouler(double secondes, double vitesseMs, {double precisionM = 5, double? bruitMs}) {
+  void rouler(
+    double secondes,
+    double vitesseMs, {
+    double precisionM = 5,
+    double? bruitMs,
+  }) {
     for (var s = 0; s < secondes; s++) {
       lat += vitesseMs / 111320;
       instant = instant.add(const Duration(seconds: 1));
-      m.gps((lat: lat, lng: lng), vitesseMs: bruitMs ?? vitesseMs, capDeg: vitesseMs > 0.6 ? 0 : null, precisionM: precisionM, instant: instant);
+      m.gps(
+        (lat: lat, lng: lng),
+        vitesseMs: bruitMs ?? vitesseMs,
+        capDeg: vitesseMs > 0.6 ? 0 : null,
+        precisionM: precisionM,
+        instant: instant,
+      );
       for (var k = 0; k < 15; k++) {
         dernier = m.avancer(1 / 15);
       }
@@ -101,39 +112,92 @@ void main() {
   });
 
   group('sur un vrai téléphone (essai du 07/10)', () {
-    test('iPhone : vitesse du GPS indisponible (−1) — il marche quand même, d’après son déplacement', () {
-      final m = MoteurAvatar(saluer: false);
-      var t = DateTime(2026, 10, 7, 19);
-      var lat = 13.5297;
-      for (var s = 0; s < 6; s++) {
-        lat += 1.4 / 111320;
-        t = t.add(const Duration(seconds: 1));
-        m.gps((lat: lat, lng: 2.0886), vitesseMs: -1, capDeg: -1, precisionM: 5, instant: t);
-        for (var k = 0; k < 15; k++) {
-          m.avancer(1 / 15);
+    test(
+      'iPhone : vitesse du GPS indisponible (−1) — il marche quand même, d’après son déplacement',
+      () {
+        final m = MoteurAvatar(saluer: false);
+        var t = DateTime(2026, 10, 7, 19);
+        var lat = 13.5297;
+        for (var s = 0; s < 6; s++) {
+          lat += 1.4 / 111320;
+          t = t.add(const Duration(seconds: 1));
+          m.gps(
+            (lat: lat, lng: 2.0886),
+            vitesseMs: -1,
+            capDeg: -1,
+            precisionM: 5,
+            instant: t,
+          );
+          for (var k = 0; k < 15; k++) {
+            m.avancer(1 / 15);
+          }
         }
-      }
-      expect(m.animation, AnimationAvatar.marche);
-      expect(m.avancer(0)!.capDeg, closeTo(0, 2), reason: 'vers le nord');
-    });
+        expect(m.animation, AnimationAvatar.marche);
+        expect(m.avancer(0)!.capDeg, closeTo(0, 2), reason: 'vers le nord');
+      },
+    );
 
-    test('à l’arrêt, le GPS qui tremble de 6 m ne fait ni marcher, ni tourner, ni bouger l’avatar', () {
-      final m = MoteurAvatar(saluer: false);
-      var t = DateTime(2026, 10, 7, 19);
-      const sauts = [(6.0, 0.0), (-4.0, 5.0), (3.0, -6.0), (-6.0, -2.0), (5.0, 4.0), (0.0, 6.0)];
-      final depart = (lat: 13.5297, lng: 2.0886);
-      for (var i = 0; i < 30; i++) {
-        final (dn, de) = sauts[i % sauts.length];
-        t = t.add(const Duration(seconds: 1));
-        m.gps((lat: depart.lat + dn / 111320, lng: depart.lng + de / 108000), vitesseMs: -1, precisionM: 8, instant: t);
-        for (var k = 0; k < 15; k++) {
-          m.avancer(1 / 15);
+    test(
+      'en voiture à 50 km/h, le GPS dit 0,2 m/s : il court quand même (essai du 08/10)',
+      () {
+        final m = MoteurAvatar(saluer: false);
+        var t = DateTime(2026, 10, 8, 16, 35);
+        var lat = 13.5297;
+        for (var s = 0; s < 6; s++) {
+          lat += 14 / 111320; // 14 m/s = 50 km/h
+          t = t.add(const Duration(seconds: 1));
+          m.gps(
+            (lat: lat, lng: 2.0886),
+            vitesseMs: 0.2,
+            capDeg: 13,
+            precisionM: 2,
+            instant: t,
+          );
+          for (var k = 0; k < 15; k++) {
+            m.avancer(1 / 15);
+          }
         }
-      }
-      expect(m.animation, AnimationAvatar.attente);
-      expect(m.avancer(0)!.capDeg, isNull, reason: 'pas de cap inventé : la caméra ne tourne pas');
-      expect(metres(m.position!, depart), lessThan(8));
-    });
+        expect(m.animation, AnimationAvatar.course);
+        expect(m.vitesse, greaterThan(10));
+      },
+    );
+
+    test(
+      'à l’arrêt, le GPS qui tremble de 6 m ne fait ni marcher, ni tourner, ni bouger l’avatar',
+      () {
+        final m = MoteurAvatar(saluer: false);
+        var t = DateTime(2026, 10, 7, 19);
+        const sauts = [
+          (6.0, 0.0),
+          (-4.0, 5.0),
+          (3.0, -6.0),
+          (-6.0, -2.0),
+          (5.0, 4.0),
+          (0.0, 6.0),
+        ];
+        final depart = (lat: 13.5297, lng: 2.0886);
+        for (var i = 0; i < 30; i++) {
+          final (dn, de) = sauts[i % sauts.length];
+          t = t.add(const Duration(seconds: 1));
+          m.gps(
+            (lat: depart.lat + dn / 111320, lng: depart.lng + de / 108000),
+            vitesseMs: -1,
+            precisionM: 8,
+            instant: t,
+          );
+          for (var k = 0; k < 15; k++) {
+            m.avancer(1 / 15);
+          }
+        }
+        expect(m.animation, AnimationAvatar.attente);
+        expect(
+          m.avancer(0)!.capDeg,
+          isNull,
+          reason: 'pas de cap inventé : la caméra ne tourne pas',
+        );
+        expect(metres(m.position!, depart), lessThan(8));
+      },
+    );
   });
 
   group('la vue montrée selon la caméra', () {
@@ -142,13 +206,20 @@ void main() {
       expect(ImagesAvatar.directionPour(90, 90), 0);
       expect(ImagesAvatar.directionPour(10, 0), 15);
       expect(ImagesAvatar.directionPour(350, 0), 345);
-      expect(ImagesAvatar.directionPour(null, 0), 180, reason: 'sans cap : de face');
+      expect(
+        ImagesAvatar.directionPour(null, 0),
+        180,
+        reason: 'sans cap : de face',
+      );
     });
 
-    test('inclinaison : jamais vu de dessus (une tête), 45° sur une carte à plat', () {
-      expect(ImagesAvatar.inclinaisonPour(0), 45);
-      expect(ImagesAvatar.inclinaisonPour(30), 45);
-      expect(ImagesAvatar.inclinaisonPour(60), 60);
-    });
+    test(
+      'inclinaison : jamais vu de dessus (une tête), 45° sur une carte à plat',
+      () {
+        expect(ImagesAvatar.inclinaisonPour(0), 45);
+        expect(ImagesAvatar.inclinaisonPour(30), 45);
+        expect(ImagesAvatar.inclinaisonPour(60), 60);
+      },
+    );
   });
 }

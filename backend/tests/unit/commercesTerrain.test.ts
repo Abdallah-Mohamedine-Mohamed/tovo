@@ -26,3 +26,24 @@ describe('les commerces relevés sur le terrain rejoignent l’annuaire (07/10)'
     expect(chargerCommerces().map((c) => c.nom)).toEqual(['Boutique Ancienne']);
   });
 });
+
+describe('les catégories des livreurs (08/10)', () => {
+  afterAll(() => installerCommerces(null));
+
+  it('« Pièces auto » → « pieces-auto » : la clé d’une catégorie', async () => {
+    const { cleDeCategorie } = await import('../../src/services/commercesTerrain.js');
+    expect(cleDeCategorie('Pièces auto')).toBe('pieces-auto');
+    expect(cleDeCategorie('  Friperie ')).toBe('friperie');
+  });
+
+  it('un client qui demande la catégorie trouve le commerce, même en plusieurs mots', () => {
+    installerCommerces([]);
+    installerTerrain([
+      { ...commerce('terrain:2', 'Garage Issa', 'terrain', 13.52), type: 'boutique', specialites: ['Pièces auto'] },
+      { ...commerce('terrain:3', 'Chez Fati', 'terrain', 13.51), type: 'vetements', specialites: ['Friperie'] },
+    ]);
+    expect(commercesPourProduit('je cherche des pièces auto', { lat: 13.5, lng: 2.1 }).map((c) => c.nom)).toContain('Garage Issa');
+    expect(commercesPourProduit('une friperie pas loin', { lat: 13.5, lng: 2.1 })[0]?.nom).toBe('Chez Fati');
+    expect(commercesPourProduit('des friperies', { lat: 13.5, lng: 2.1 })[0]?.nom).toBe('Chez Fati');
+  });
+});

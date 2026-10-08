@@ -113,6 +113,26 @@ class MoteurAvatar {
   final _historique = <({DateTime t, Point p, double precision})>[];
   double _precision = 0;
   double _vitesseGps = -1;
+  double? _vitesseDeplacement;
+  DateTime? _dernierFix;
+
+  /// Diagnostic : la vitesse tirée des positions (m/s), le nombre de
+  /// positions reçues par seconde, et l'âge de la dernière.
+  double? get vitesseDeplacement => _vitesseDeplacement;
+  double get positionsParSeconde {
+    if (_historique.length < 2) return 0;
+    final duree =
+        _historique.last.t.difference(_historique.first.t).inMilliseconds /
+        1000;
+    return duree <= 0 ? 0 : (_historique.length - 1) / duree;
+  }
+
+  double? ageDerniereMesure([DateTime? maintenant]) {
+    final d = _dernierFix;
+    return d == null
+        ? null
+        : (maintenant ?? DateTime.now()).difference(d).inMilliseconds / 1000;
+  }
 
   /// Diagnostic des essais : précision (m) et vitesse brute du GPS (m/s).
   double get precision => _precision;
@@ -158,7 +178,14 @@ class MoteurAvatar {
           chemin += metres(_historique[i - 1].p, _historique[i].p);
         }
         final droit = chemin == 0 || d / chemin > 0.7;
-        vitesseDeplacement = d > seuil && droit ? d / dt : 0;
+        // La moyenne sur 4 s écarte le tremblement, mais traîne au freinage :
+        // le dernier tronçon, s'il est plus lent, l'emporte.
+        final avant = _historique[_historique.length - 2];
+        final dtDernier = b.t.difference(avant.t).inMilliseconds / 1000;
+        final dernier = dtDernier > 0
+            ? metres(avant.p, b.p) / dtDernier
+            : double.infinity;
+        vitesseDeplacement = d > seuil && droit ? math.min(d / dt, dernier) : 0;
         if (d > seuil && droit) capDeplacement = cap(a.p, b.p);
       }
     }
@@ -166,13 +193,15 @@ class MoteurAvatar {
     double v;
     if (!precis) {
       v = 0;
-    } else if (doppler != null &&
-        (doppler > 0 || (vitesseDeplacement ?? 0) < 1.0)) {
-      // La vitesse du GPS (Doppler) est la plus précise quand elle existe.
-      v = doppler;
     } else {
-      v = vitesseDeplacement ?? 0;
+      // La plus grande des deux : celle du GPS, et celle tirée du déplacement
+      // réel (filtrée contre le tremblement : chemin droit, au-delà de la
+      // précision). Essai du 08/10 en voiture : le GPS de l'iPhone disait
+      // 0,2 m/s à 50 km/h (compteur), et l'avatar marchait.
+      v = math.max(doppler ?? 0, vitesseDeplacement ?? 0);
     }
+    _vitesseDeplacement = vitesseDeplacement;
+    _dernierFix = maintenant;
     // Lissage du seul BRUIT : une petite variation est amortie ; un vrai
     // changement d'allure (plus de 1 m/s d'écart, la moto qui freine) est
     // suivi presque aussitôt — sinon l'avatar courait encore 3 s après.

@@ -26,7 +26,9 @@ class NouveauCommerce extends StatefulWidget {
   State<NouveauCommerce> createState() => _NouveauCommerceState();
 }
 
-const Map<String, String> _types = {
+/// Les catégories de base, si le serveur ne répond pas (migration 0078 :
+/// les mêmes clés). Le serveur ajoute celles que les livreurs ont créées.
+const Map<String, String> _categoriesDeBase = {
   'boutique': 'Boutique',
   'supermarche': 'Supermarché',
   'restaurant': 'Restaurant',
@@ -45,7 +47,11 @@ class _NouveauCommerceState extends State<NouveauCommerce> {
   final _nom = TextEditingController();
   final _telephone = TextEditingController();
   final _repere = TextEditingController();
-  String? _type;
+  // Les catégories (08/10) : plusieurs par commerce, et le livreur peut en
+  // créer une quand elle manque.
+  Map<String, String> _categories = Map.of(_categoriesDeBase);
+  final _choisies = <String>[];
+  static const _maxCategories = 5;
   File? _photo;
   Position? _position;
   bool _gpsEnCours = true;
@@ -56,6 +62,78 @@ class _NouveauCommerceState extends State<NouveauCommerce> {
   void initState() {
     super.initState();
     unawaited(_relever());
+    unawaited(_chargerCategories());
+  }
+
+  Future<void> _chargerCategories() async {
+    final r = await widget.api.get('/livreur/categories');
+    if (!mounted || !r.ok) return;
+    final liste = r.list('categories');
+    if (liste.isEmpty) return;
+    setState(() {
+      _categories = {for (final c in liste) '${c['slug']}': '${c['libelle']}'};
+    });
+  }
+
+  void _basculer(String slug) {
+    setState(() {
+      if (_choisies.remove(slug)) return;
+      if (_choisies.length < _maxCategories) _choisies.add(slug);
+    });
+  }
+
+  /// Une catégorie qui manque : le livreur la nomme, elle est créée et
+  /// choisie aussitôt (l'équipe la valide ensuite).
+  Future<void> _nouvelleCategorie() async {
+    final champ = TextEditingController();
+    final libelle = await showDialog<String>(
+      context: context,
+      builder: (contexte) => AlertDialog(
+        title: const Text('Nouvelle catégorie'),
+        content: TextField(
+          controller: champ,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          maxLength: 60,
+          decoration: const InputDecoration(
+            hintText: 'Ex. : Pièces auto, Friperie, Couture',
+          ),
+          onSubmitted: (v) => Navigator.of(contexte).pop(v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(contexte).pop(),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: TovoTheme.ink),
+            onPressed: () => Navigator.of(contexte).pop(champ.text.trim()),
+            child: const Text('Ajouter'),
+          ),
+        ],
+      ),
+    );
+    champ.dispose();
+    if (libelle == null || libelle.length < 2 || !mounted) return;
+    final r = await widget.api.post('/livreur/categories', {
+      'libelle': libelle,
+    });
+    if (!mounted) return;
+    final c = r.raw['categorie'];
+    if (!r.ok || c is! Map) {
+      setState(
+        () =>
+            _erreur = r.content.isEmpty ? 'Catégorie non ajoutée.' : r.content,
+      );
+      return;
+    }
+    final slug = '${c['slug']}';
+    setState(() {
+      _categories = {..._categories, slug: '${c['libelle']}'};
+      if (!_choisies.contains(slug) && _choisies.length < _maxCategories) {
+        _choisies.add(slug);
+      }
+    });
   }
 
   @override
@@ -90,7 +168,7 @@ class _NouveauCommerceState extends State<NouveauCommerce> {
 
   bool get _pret =>
       _nom.text.trim().length >= 2 &&
-      _type != null &&
+      _choisies.isNotEmpty &&
       _position != null &&
       _photo != null &&
       !_envoi;
@@ -105,8 +183,10 @@ class _NouveauCommerceState extends State<NouveauCommerce> {
     final photo = _photo;
     final reponse = await widget.api.post('/livreur/commerces', {
       'nom': _nom.text.trim(),
-      'type': _type,
-      'telephone': _telephone.text.trim().isEmpty ? null : _telephone.text.trim(),
+      'categories': _choisies,
+      'telephone': _telephone.text.trim().isEmpty
+          ? null
+          : _telephone.text.trim(),
       'repere': _repere.text.trim().isEmpty ? null : _repere.text.trim(),
       'lat': position.latitude,
       'lng': position.longitude,
@@ -167,15 +247,26 @@ class _NouveauCommerceState extends State<NouveauCommerce> {
               ),
               clipBehavior: Clip.antiAlias,
               child: _photo != null
-                  ? Image.file(_photo!, fit: BoxFit.cover, width: double.infinity)
+                  ? Image.file(
+                      _photo!,
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                    )
                   : const Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.photo_camera_outlined, size: 34, color: TovoTheme.ink),
+                        Icon(
+                          Icons.photo_camera_outlined,
+                          size: 34,
+                          color: TovoTheme.ink,
+                        ),
                         SizedBox(height: 8),
                         Text(
                           'Photographier la devanture',
-                          style: TextStyle(fontWeight: FontWeight.w600, color: TovoTheme.ink),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: TovoTheme.ink,
+                          ),
                         ),
                       ],
                     ),
@@ -193,24 +284,43 @@ class _NouveauCommerceState extends State<NouveauCommerce> {
             ),
           ),
           const SizedBox(height: 16),
-          const Text('Type', style: TextStyle(fontWeight: FontWeight.w600)),
+          const Text(
+            'Catégories (une ou plusieurs)',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final entree in _types.entries)
-                ChoiceChip(
+              for (final entree in _categories.entries)
+                FilterChip(
                   label: Text(entree.value),
-                  selected: _type == entree.key,
+                  selected: _choisies.contains(entree.key),
                   selectedColor: TovoTheme.ink,
                   labelStyle: TextStyle(
-                    color: _type == entree.key ? Colors.white : TovoTheme.ink,
+                    color: _choisies.contains(entree.key)
+                        ? Colors.white
+                        : TovoTheme.ink,
                     fontWeight: FontWeight.w600,
                   ),
                   showCheckmark: false,
-                  onSelected: _envoi ? null : (_) => setState(() => _type = entree.key),
+                  onSelected: _envoi ? null : (_) => _basculer(entree.key),
                 ),
+              // La catégorie qui manque : le livreur la crée.
+              ActionChip(
+                avatar: const Icon(
+                  Icons.add_rounded,
+                  size: 18,
+                  color: TovoTheme.ink,
+                ),
+                label: const Text('Nouvelle catégorie'),
+                labelStyle: const TextStyle(
+                  color: TovoTheme.ink,
+                  fontWeight: FontWeight.w600,
+                ),
+                onPressed: _envoi ? null : _nouvelleCategorie,
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -237,7 +347,9 @@ class _NouveauCommerceState extends State<NouveauCommerce> {
           Row(
             children: [
               Icon(
-                position == null ? Icons.location_searching : Icons.location_on_outlined,
+                position == null
+                    ? Icons.location_searching
+                    : Icons.location_on_outlined,
                 size: 20,
                 color: TovoTheme.inkDoux,
               ),
@@ -247,8 +359,8 @@ class _NouveauCommerceState extends State<NouveauCommerce> {
                   _gpsEnCours
                       ? 'Recherche de la position…'
                       : position == null
-                          ? 'Position introuvable : activez la localisation.'
-                          : 'Position prise (à ${position.accuracy.round()} m près)',
+                      ? 'Position introuvable : activez la localisation.'
+                      : 'Position prise (à ${position.accuracy.round()} m près)',
                   style: const TextStyle(color: TovoTheme.inkDoux),
                 ),
               ),
@@ -284,10 +396,10 @@ class _NouveauCommerceState extends State<NouveauCommerce> {
               _photo == null
                   ? 'Il manque la photo de la devanture.'
                   : _nom.text.trim().length < 2
-                      ? 'Il manque le nom.'
-                      : _type == null
-                          ? 'Choisissez le type.'
-                          : 'Il manque la position.',
+                  ? 'Il manque le nom.'
+                  : _choisies.isEmpty
+                  ? 'Choisissez au moins une catégorie.'
+                  : 'Il manque la position.',
               textAlign: TextAlign.center,
               style: const TextStyle(color: TovoTheme.muted, fontSize: 13),
             ),
