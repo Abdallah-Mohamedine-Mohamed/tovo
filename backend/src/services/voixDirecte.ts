@@ -64,24 +64,64 @@ export const LIMITE_MOTS_MAI = 200;
 
 let vocabulaireEnCache: { quand: number; mots: string[] } | null = null;
 
+/** Le nombre de lettres à changer pour passer d'un mot à l'autre. */
+function distanceDEdition(a: string, b: string): number {
+  let precedente = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const courante = [i];
+    for (let j = 1; j <= b.length; j++) {
+      courante[j] = Math.min(precedente[j]! + 1, courante[j - 1]! + 1, precedente[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    precedente = courante;
+  }
+  return precedente[b.length]!;
+}
+
+/**
+ * Deux noms trop proches pour cohabiter dans la liste : le modèle choisirait
+ * au hasard entre eux (« Garbado » / « GARBA D'OR », mesuré le 09/10). Collés
+ * et sans accents ; à 1 lettre près jusqu'à 6 lettres, 2 au-delà, ou l'un
+ * qui contient l'autre.
+ */
+export function tropProches(a: string, b: string): boolean {
+  const x = normaliserIntention(a).replace(/ /g, '');
+  const y = normaliserIntention(b).replace(/ /g, '');
+  if (x.length < 4 || y.length < 4) return x === y;
+  if (x.includes(y) || y.includes(x)) return true;
+  return distanceDEdition(x, y) <= (Math.min(x.length, y.length) <= 6 ? 1 : 2);
+}
+
 /**
  * Mots locaux, quartiers, puis noms d'enseignes (sans le quartier entre
- * parenthèses). 10 min de cache. Azure accepte 500 phrases : 300 suffisent.
- * `avecQuartiers: false` : la liste d'avant le 09/10 (banc de comparaison).
+ * parenthèses). 10 min de cache.
+ *
+ * Quartiers et enseignes COHABITENT (09/10, demande du fondateur) : tous les
+ * quartiers entrent, sauf ceux trop proches d'une enseigne ou de ses alias —
+ * mesuré sur ses notes, « GARBA D'OR » devenait « Garbado » quand les deux y
+ * étaient. L'enseigne reste (on commande chez elle) ; « Bobiel » et « BOBA »,
+ * assez différents, cohabitent. `avecQuartiers: false` : la liste d'avant
+ * (banc de comparaison).
  */
 export async function vocabulaire(db: SupabaseClient, options: { avecQuartiers?: boolean } = {}): Promise<string[]> {
   const avecQuartiers = options.avecQuartiers ?? true;
   if (avecQuartiers && vocabulaireEnCache && Date.now() - vocabulaireEnCache.quand < 10 * 60_000) return vocabulaireEnCache.mots;
-  const { data } = await db.from('merchants').select('name').eq('is_approved', true).limit(300);
-  const enseignes = (data ?? [])
+  const { data } = await db.from('merchants').select('name, search_aliases').eq('is_approved', true).limit(300);
+  const lignes = (data ?? []) as Array<{ name: string; search_aliases?: string | null }>;
+  const enseignes = lignes
     .map((m) => String(m.name).replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim())
     .filter((n) => n.length >= 3);
+  // Les noms et alias des enseignes : un quartier trop proche de l'un d'eux reste dehors.
+  const nomsDEnseignes = lignes.flatMap((m) => [String(m.name).replace(/\([^)]*\)/g, ' '), ...(m.search_aliases ?? '').split(';')])
+    .map((n) => n.trim()).filter((n) => n.length >= 3);
   // Les plats et les enseignes d'abord (les commandes) ; les quartiers
   // prennent la place qui reste, sans jamais dépasser la limite de MAI.
   const base = [...new Set([...MOTS_LOCAUX, ...enseignes])].slice(0, LIMITE_MOTS_MAI);
   const dejaLa = new Set(base.map((m) => normaliserIntention(m)));
   const quartiers = avecQuartiers
-    ? quartiersDeNiamey().filter((q) => !dejaLa.has(normaliserIntention(q))).slice(0, LIMITE_MOTS_MAI - base.length)
+    ? quartiersDeNiamey()
+      .filter((q) => !dejaLa.has(normaliserIntention(q)))
+      .filter((q) => !nomsDEnseignes.some((e) => tropProches(q, e)))
+      .slice(0, LIMITE_MOTS_MAI - base.length)
     : [];
   const mots = [...MOTS_LOCAUX.filter((m) => base.includes(m)), ...quartiers, ...base.filter((m) => !MOTS_LOCAUX.includes(m))];
   if (avecQuartiers) vocabulaireEnCache = { quand: Date.now(), mots };

@@ -25,7 +25,7 @@ const notes = [
 ];
 
 const avant = await vocabulaire(db, { avecQuartiers: false });
-const apres = await vocabulaire(db);
+const apres = await vocabulaire(db, { avecQuartiers: true });
 console.log(`liste : ${avant.length} mots avant, ${apres.length} après\n`);
 let differences = 0;
 for (const note of notes) {

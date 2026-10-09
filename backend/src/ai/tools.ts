@@ -22,6 +22,7 @@ import { decrireImageDepuisOctets } from '../services/vision.js';
 import { offreVille } from '../services/livreur.js';
 import { avecPreuves } from './verificateur.js';
 import { autourDe, reperer } from '../services/lieux.js';
+import { chargerCommerces } from '../services/commerces.js';
 import { paiementMobileActif } from '../config/env.js';
 import {
   demandeDeProximite,
@@ -1473,27 +1474,46 @@ async function carteDeTrajet(ctx: ToolContext, t: {
 }
 
 /**
- * Un lieu dit, situé : un quartier ou un repère (OpenStreetMap), sinon une
- * boutique TOVO nommée — sa vraie position (09/10 : « BOBA » restait sans
- * position, le prix tombait au forfait). Plusieurs agences et aucune
- * précisée : on ne devine pas.
+ * Un lieu dit, situé, d'après les TROIS sources (09/10, demande du
+ * fondateur) : un quartier ou un repère (OpenStreetMap), une boutique TOVO
+ * (sa vraie position, alias compris), puis un commerce de l'annuaire public
+ * ou relevé par les livreurs. Plusieurs candidats et aucun précisé (les
+ * agences de BOBA) : on ne devine pas.
  */
 async function situer(db: SupabaseClient, lieu: string): Promise<{ lat: number; lng: number } | null> {
   const repere = reperer(lieu).point;
   if (repere) return repere;
+  const dit = ` ${normaliserIntention(lieu)} `;
+  const ditColle = dit.replace(/ /g, '');
+  // Le nom, ou l'un de ses alias (« OTAKOSS », « O takos ») ; collé, pour
+  // que « Otakoss » reconnaisse « O'TAKOSS ».
+  const reconnu = (n: string) => n.length >= 3
+    && (dit.includes(` ${n} `) || (n.replace(/ /g, '').length >= 5 && ditColle.includes(n.replace(/ /g, ''))));
+  const tovo = await boutiqueTovo(db, dit, reconnu);
+  if (tovo !== undefined) return tovo;
+  // L'annuaire public et les commerces relevés sur le terrain.
+  const commerces = chargerCommerces().filter((c) =>
+    [c.nom_normalise, ...(c.alias ?? []).map((a) => normaliserIntention(a))].some(reconnu));
+  return commerces.length === 1 ? { lat: commerces[0]!.lat, lng: commerces[0]!.lng } : null;
+}
+
+/**
+ * Une boutique Tovo nommée : sa position ; `null` si le nom est reconnu mais
+ * ambigu (plusieurs agences) ; `undefined` si aucune boutique ne correspond.
+ */
+async function boutiqueTovo(
+  db: SupabaseClient,
+  dit: string,
+  reconnu: (n: string) => boolean,
+): Promise<{ lat: number; lng: number } | null | undefined> {
   try {
     const { data } = await db.from('merchants').select('id, name, search_aliases').eq('is_approved', true).limit(400);
-    const dit = ` ${normaliserIntention(lieu)} `;
-    const ditColle = dit.replace(/ /g, '');
-    // Le nom, ou l'un de ses alias (« OTAKOSS », « O takos ») ; collé, pour
-    // que « Otakoss » reconnaisse « O'TAKOSS ».
-    const reconnu = (n: string) => n.length >= 3
-      && (dit.includes(` ${n} `) || (n.replace(/ /g, '').length >= 5 && ditColle.includes(n.replace(/ /g, ''))));
     const boutiques = ((data ?? []) as Array<{ id: string; name: string; search_aliases?: string | null }>).map((m) => ({
       id: m.id,
       noms: [m.name.replace(/\([^)]*\)/g, ' '), ...(m.search_aliases ?? '').split(';')].map((n) => normaliserIntention(n)).filter(Boolean),
       agence: normaliserIntention((/\(([^)]*)\)/.exec(m.name)?.[1]) ?? ''),
     })).filter((b) => b.noms.some(reconnu));
+    if (boutiques.length === 0) return undefined;
     const precisees = boutiques.filter((b) => b.agence && dit.includes(` ${b.agence} `));
     const choisies = precisees.length ? precisees : boutiques;
     if (choisies.length !== 1) return null;
@@ -1501,7 +1521,7 @@ async function situer(db: SupabaseClient, lieu: string): Promise<{ lat: number; 
     const p = (positions as Array<{ lat: number | null; lng: number | null }> | null)?.[0];
     return p?.lat != null && p?.lng != null ? { lat: p.lat, lng: p.lng } : null;
   } catch {
-    return null;
+    return undefined;
   }
 }
 
