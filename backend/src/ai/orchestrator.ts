@@ -102,6 +102,8 @@ export interface OrchestrateInput {
   commerce?: TypeCommerceCherche | undefined;
   /** Article 9 : une précision à garder pour la commande (« sans oignons »). */
   precision?: string | undefined;
+  /** L'application montre un trajet entre deux lieux et la consigne (contrat 2). */
+  trajetLibre?: boolean | undefined;
   /**
    * Recherche lexicale déjà faite par la route, en parallèle de Jev, sur le
    * MÊME message : on ne la refait pas.
@@ -198,6 +200,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // celui-là… », et « sans oignons » passait pour une désignation (05/10).
   const parole = input.messagePublic ?? input.message;
   const reference = !input.audio && referenceAuxResultats(parole);
+  const pourUneCourse = input.intention === 'livreur' || input.intention === 'colis';
   // « Comme d'habitude » : aucun produit dans la phrase, seul le modèle sait
   // relire l'historique des commandes. Toujours au modèle, affichage ou pas.
   const commandePassee = !input.audio && demandeDeCommandePassee(parole);
@@ -395,7 +398,11 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // Désigner un article affiché (« ajoute la première ») n'est pas une
   // précision : le cerveau le classait parfois ainsi, et rien n'était ajouté
   // (05/10). La désignation suit son chemin habituel.
-  if (input.precision && !input.audio && !reference) {
+  // Pendant une course (09/10, R5), la précision n'est PAS une note de repas :
+  // rangée là, elle partirait avec la prochaine commande de boutique, et
+  // « c'est noté » deviendrait vrai sans que le livreur de la course la voie.
+  // Elle va à la carte de course (ctx.consigne), qui dit si elle est transmise.
+  if (input.precision && !input.audio && !reference && !pourUneCourse) {
     const note = await ajouterALaNote(input.db, input.userId, input.precision);
     if (!catalogueAutorise || input.intention === 'designe') {
       const panier = note
@@ -566,6 +573,9 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
     ...(rayonId ? { rayonId } : {}),
     catalogueIntent: intent,
     position: input.position,
+    // Une précision dite pendant une course est une consigne pour le livreur.
+    ...(input.precision && pourUneCourse ? { consigne: input.precision } : {}),
+    ...(input.trajetLibre ? { trajetLibre: true } : {}),
   };
 
   const history = previous.history;

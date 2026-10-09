@@ -98,15 +98,22 @@ class _DriverHomeState extends State<DriverHome> with WidgetsBindingObserver {
           PopupMenuButton<String>(
             onSelected: (choix) {
               if (choix == 'commerce') {
-                unawaited(Navigator.of(context).push(MaterialPageRoute<bool>(
-                  builder: (_) => NouveauCommerce(api: widget.api),
-                )));
+                unawaited(
+                  Navigator.of(context).push(
+                    MaterialPageRoute<bool>(
+                      builder: (_) => NouveauCommerce(api: widget.api),
+                    ),
+                  ),
+                );
               }
               if (choix == 'sortir') unawaited(confirmerDeconnexion(context));
             },
             itemBuilder: (_) => const [
               // Relever un commerce devant sa devanture (07/10).
-              PopupMenuItem(value: 'commerce', child: Text('Ajouter un commerce')),
+              PopupMenuItem(
+                value: 'commerce',
+                child: Text('Ajouter un commerce'),
+              ),
               PopupMenuItem(value: 'sortir', child: Text('Se déconnecter')),
             ],
           ),
@@ -337,6 +344,19 @@ String? _lisible(Object? texte) {
   return parDefaut.contains(t) ? null : t;
 }
 
+/// Le départ d'une course quand il est décrit (« Harobanda », un repère
+/// chez le client) ; null quand c'est simplement la position du client.
+String? _departAilleurs(Object? texte) {
+  final t = _lisible(texte);
+  const chezLeClient = {
+    'Chez le client',
+    'Chez moi',
+    'Chez vous',
+    'Ma position actuelle',
+  };
+  return t == null || chezLeClient.contains(t) ? null : t;
+}
+
 /// Une course disponible dans le pool.
 class _CarteCourse extends StatelessWidget {
   const _CarteCourse({required this.ordre, required this.controller});
@@ -431,6 +451,10 @@ class _CarteCourse extends StatelessWidget {
             Text(
               recuperer
                   ? 'À chercher : ${_lisible(ordre['pickup_hint']) ?? 'à demander au client'}'
+                  // Un trajet entre deux lieux (09/10) : le départ n'est pas
+                  // forcément chez le client.
+                  : _departAilleurs(ordre['pickup_hint']) != null
+                  ? 'Départ : ${_departAilleurs(ordre['pickup_hint'])}'
                   : 'Départ : chez le client',
               style: const TextStyle(
                 fontSize: 13,
@@ -682,6 +706,25 @@ class _CourseEnCoursState extends State<_CourseEnCours> {
                   ),
                   child: Text(
                     'Note du client : ${course['note']}',
+                    style: const TextStyle(fontSize: 12, height: 1.4),
+                  ),
+                ),
+              ],
+              // La consigne d'une course (« sonnez au portail bleu »), écrite
+              // sur la carte du client (09/10) : elle arrive ici.
+              if ((course['parcel_note'] as String?)?.trim().isNotEmpty ??
+                  false) ...[
+                const SizedBox(height: 12),
+                Container(
+                  key: const Key('consigne-livreur'),
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: TovoTheme.tealSoft,
+                    borderRadius: BorderRadius.circular(TovoTheme.radiusChip),
+                  ),
+                  child: Text(
+                    'Consigne du client : ${course['parcel_note']}',
                     style: const TextStyle(fontSize: 12, height: 1.4),
                   ),
                 ),

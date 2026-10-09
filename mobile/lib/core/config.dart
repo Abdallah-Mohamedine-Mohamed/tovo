@@ -28,7 +28,9 @@ class TovoConfig {
 
   /// Version du contrat UI comprise par ce client. Envoyée au backend, qui
   /// n'émet que des composants supportés par cette version.
-  static const int contractVersion = 1;
+  /// 2 (09/10) : la carte de course montre un trajet entre deux lieux et
+  /// porte la consigne pour le livreur.
+  static const int contractVersion = 2;
 
   static bool get isConfigured =>
       supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;

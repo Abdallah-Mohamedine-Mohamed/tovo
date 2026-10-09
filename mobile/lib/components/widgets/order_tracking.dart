@@ -414,9 +414,309 @@ class _OrderTrackingState extends State<OrderTracking>
     };
   }
 
+  /// Le lieu est le client lui-même (ce que la base ou la carte écrivent),
+  /// pas un endroit à nommer.
+  static bool _chezLeClient(String lieu) => const {
+    '',
+    'Chez le client',
+    'Chez vous',
+    'Chez moi',
+    'Position du client',
+    'Ma position actuelle',
+    _destinationInconnue,
+  }.contains(lieu.trim());
+
+  /// Le suivi d'une COURSE dans le fil (maquette « Carte de course Tovo »,
+  /// V6, 09/10) : le titre d'état, les trois étapes AVEC leurs lieux, la
+  /// consigne pour le livreur, le prix, puis les boutons. Le délai d'appel
+  /// n'est dit qu'une fois, dans la phrase de Tovo au-dessus.
+  Widget _suiviCourse() {
+    const gris = Color(0xFF8A918E);
+    final annulee = _statut == 'cancelled';
+    final annulable =
+        _livreur == null &&
+        const {'pending', 'confirmed', 'preparing', 'ready'}.contains(_statut);
+    final prenom = _prenomLivreur;
+    final depart = ((widget.component.map('pickup')['hint'] as String?) ?? '')
+        .trim();
+    final arrivee = ((widget.component.map('dropoff')['hint'] as String?) ?? '')
+        .trim();
+    final departClient = _chezLeClient(depart) && !_recuperer;
+    final arriveeClient = _recuperer;
+    final consigne = widget.component.str('parcel_note').trim();
+    final total = widget.component.money('total');
+
+    final titre = switch (_statut) {
+      'pending' || 'confirmed' || 'preparing' || 'ready' => 'Livreur demandé',
+      'assigned' when departClient =>
+        prenom.isEmpty ? 'Votre livreur arrive' : '$prenom arrive',
+      'assigned' =>
+        prenom.isEmpty
+            ? 'Votre livreur part le chercher'
+            : '$prenom part le chercher',
+      'picked_up' => 'Colis récupéré',
+      'delivering' => 'Colis en route',
+      'delivered' => 'Colis livré',
+      'cancelled' => 'Livraison annulée',
+      _ => _statut,
+    };
+    // Les étapes portent les lieux : le titre ne se répète plus.
+    final etapes = <(IconData, String)>[
+      (
+        Icons.inventory_2_outlined,
+        departClient
+            ? 'Récupération chez vous'
+            : depart.isEmpty || _chezLeClient(depart)
+            ? 'Récupération du colis'
+            : 'Récupération à $depart',
+      ),
+      (
+        Icons.two_wheeler_outlined,
+        arriveeClient
+            ? 'En route vers vous'
+            : _chezLeClient(arrivee)
+            ? 'En route'
+            : 'En route vers $arrivee',
+      ),
+      (Icons.location_on_outlined, 'Livré'),
+    ];
+    final courante = _etapeColisVisible(_statut);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x1414201E),
+            blurRadius: 30,
+            offset: Offset(0, 10),
+          ),
+          BoxShadow(
+            color: Color(0x0D14201E),
+            blurRadius: 3,
+            offset: Offset(0, 1),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_livreur == null && !annulee) ...[
+                  const Text(
+                    'Votre livraison',
+                    style: TextStyle(fontSize: 13, color: gris),
+                  ),
+                  const SizedBox(height: 4),
+                ],
+                AnimatedSwitcher(
+                  duration: TovoTheme.normal,
+                  child: Text(
+                    titre,
+                    key: ValueKey(titre),
+                    style: TextStyle(
+                      fontSize: 24,
+                      height: 1.2,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.4,
+                      color: annulee ? TovoTheme.inkDoux : TovoTheme.ink,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (!annulee) ...[
+            const SizedBox(height: 18),
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFFFAFBF9),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final (i, (icone, libelle)) in etapes.indexed) ...[
+                    if (i > 0) const _DeuxPoints(),
+                    Row(
+                      children: [
+                        Icon(
+                          icone,
+                          size: 24,
+                          color: i <= courante
+                              ? TovoTheme.ink
+                              : const Color(0xFFA3A9A6),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Text(
+                            libelle,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: i == courante
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                              color: i <= courante ? TovoTheme.ink : gris,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  // La consigne, rattachée au trajet (pas un bloc à part).
+                  if (consigne.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 38, top: 14),
+                      child: Text.rich(
+                        TextSpan(
+                          text: 'Pour le livreur : ',
+                          children: [
+                            TextSpan(
+                              text: '« $consigne »',
+                              style: const TextStyle(color: TovoTheme.ink),
+                            ),
+                          ],
+                        ),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          height: 1.4,
+                          color: gris,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+          if (widget.component.str('payment_method') == 'mobile_money' &&
+              !annulee &&
+              (_paiement == 'paid' ||
+                  (_livreur != null && _statut != 'delivered'))) ...[
+            const SizedBox(height: 14),
+            _PaiementNita(
+              paye: _paiement == 'paid',
+              montant: total,
+              prenom: prenom,
+              telephone: (_livreur?['phone'] as String?) ?? '',
+            ),
+          ],
+          if (total > 0) ...[
+            const SizedBox(height: 18),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.component.str('payment_method') == 'mobile_money'
+                          ? 'Nita'
+                          : 'Espèces',
+                      style: const TextStyle(fontSize: 15, color: gris),
+                    ),
+                  ),
+                  Text(
+                    Money.format(total),
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (_livreur != null && !annulee && _statut != 'delivered') ...[
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: () => widget.onInteraction(
+                TovoInteraction('call_driver', {
+                  'phone': _livreur!['phone'] ?? '',
+                }),
+              ),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                backgroundColor: TovoTheme.teal,
+                foregroundColor: Colors.white,
+                shape: const StadiumBorder(),
+              ),
+              icon: const Icon(Icons.call, size: 19),
+              label: Text(
+                prenom.isEmpty ? 'Appeler le livreur' : 'Appeler $prenom',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: () => ouvrirSuivi(
+                context,
+                component: widget.component,
+                onInteraction: widget.onInteraction,
+              ),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                backgroundColor: const Color(0xFFEEF0EE),
+                foregroundColor: TovoTheme.ink,
+                shape: const StadiumBorder(),
+              ),
+              icon: const Icon(Icons.map_outlined, size: 19),
+              label: const Text(
+                'Suivre sur la carte',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+          if (annulable)
+            TextButton(
+              onPressed: () => widget.onInteraction(
+                TovoInteraction('cancel_order', {'order_id': _orderId}),
+              ),
+              // En rouge : une action qui défait la commande se reconnaît
+              // d'un coup d'œil (demande du fondateur, 05/10).
+              style: TextButton.styleFrom(
+                foregroundColor: TovoTheme.danger,
+                minimumSize: const Size.fromHeight(44),
+              ),
+              child: const Text(
+                'Annuler la commande',
+                style: TextStyle(fontSize: 16),
+              ),
+            ),
+          if (_statut == 'delivered') ...[
+            const SizedBox(height: 18),
+            _BlocNotation(
+              noteDeposee: _note,
+              onNoter: (note) {
+                setState(() => _note = note);
+                widget.onInteraction(
+                  TovoInteraction('rate_order', {
+                    'order_id': widget.component.str('order_id'),
+                    'rating': note,
+                  }),
+                );
+              },
+            ),
+          ],
+          if (!annulable && _statut != 'delivered') const SizedBox(height: 4),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colis = widget.component.str('type', '') == 'courier';
+    if (colis && !widget.grandFormat) return _suiviCourse();
     final etapes = colis
         ? (_recuperer ? _etapesRecuperationVisibles : _etapesColisVisibles)
         : _etapesCommandeVisibles;
@@ -767,6 +1067,30 @@ class _Etape extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Deux petits points entre deux étapes, sous l'icône (maquette V6).
+class _DeuxPoints extends StatelessWidget {
+  const _DeuxPoints();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(left: 11, top: 5, bottom: 5),
+    child: Column(
+      children: [
+        for (var i = 0; i < 2; i++)
+          Container(
+            width: 2,
+            height: 2,
+            margin: const EdgeInsets.symmetric(vertical: 2),
+            decoration: const BoxDecoration(
+              color: Color(0xFFB8BDBA),
+              shape: BoxShape.circle,
+            ),
+          ),
+      ],
+    ),
+  );
 }
 
 /// Cinq étoiles, et rien d'autre.

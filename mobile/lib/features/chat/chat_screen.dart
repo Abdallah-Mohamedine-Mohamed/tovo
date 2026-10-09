@@ -1426,6 +1426,10 @@ class _ChatScreenState extends State<ChatScreen> {
         if ((p['pickup_contact'] as String?)?.isNotEmpty ?? false)
           'pickup_contact': p['pickup_contact'],
         'parcel': p['parcel'] ?? 'small',
+        // La consigne pour le livreur (09/10) : elle part avec la course, et
+        // le livreur la lit dans son application.
+        if ((p['parcel_note'] as String?)?.isNotEmpty ?? false)
+          'parcel_note': p['parcel_note'],
         'payment_method': p['payment_method'] ?? 'cash',
         // Le numéro Nita qui paiera, quand il n'est pas celui du compte.
         if (p['payment_phone'] is String) 'payment_phone': p['payment_phone'],

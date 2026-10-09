@@ -28,6 +28,13 @@ export class Faits {
   /** Le client cherche autour d'un AUTRE lieu que lui (« vers Yantala ») : les distances partent de là. */
   private autourDUnLieu = false;
   /**
+   * Une consigne que la carte de course ne transmet PAS (09/10, R5) : ses
+   * mots. Une phrase qui en parle sans dire franchement qu'elle n'est pas
+   * transmise est retirée — quelle que soit la tournure (« prendra en compte
+   * votre consigne », « avec votre consigne »…).
+   */
+  consigneNonTransmise: string[] = [];
+  /**
    * Le lieu autour duquel on a cherché (« Yantala Bas ») quand les distances,
    * elles, partent du client : « à 3,2 km de Yantala » est alors faux.
    */
@@ -59,6 +66,10 @@ export class Faits {
       if (typeof o.order_id === 'string' || o.livreur_assigne === true) this.actions.add('commande');
       if (o.annulee === true || o.status === 'cancelled') this.actions.add('annulee');
       if (o.distances_depuis_le_lieu === true) this.autourDUnLieu = true;
+      if (o.consigne_transmise === false && typeof o.consigne_du_client === 'string') {
+        this.consigneNonTransmise = normaliserIntention(o.consigne_du_client).split(' ')
+          .filter((m) => m.length >= 4 && !MOTS_COURANTS.has(m));
+      }
       if (typeof o.autour_de === 'string' && o.autour_de.trim()) this.lieuCherche = o.autour_de;
       // Un lieu montré à moins de 2 km : « près de vous » devient vrai.
       if (typeof o.distance_m === 'number' && o.distance_m < 2000) this.actions.add('proche');
@@ -133,6 +144,12 @@ export interface Affirmation {
  * rien n'était enregistré ; « un livreur se rend à votre position » avant
  * tout toucher.
  */
+/**
+ * Le futur et la consigne « jointe » (09/10, R5) : « sera transmise au
+ * livreur », « avec votre consigne pour le portail bleu » — alors que la
+ * carte de course n'a aucune place pour une consigne.
+ */
+const DIT_TRANSMIS = /\b(?:(?:sera|seront) (?:transmise?s?|communiquée?s?|notée?s?)|avec (?:votre|vos) (?:consigne|instruction|précision|precision)s?)\b/i;
 const DIT_GARDE = /\b(?:c.est (?:bien )?(?:not[ée]|gard[ée]|enregistr[ée]|transmis)|(?:bien )?not[ée]e?(?![\wà-ÿ])|j.ai (?:bien )?(?:not[ée]|gard[ée]|enregistr[ée]|transmis|signal[ée])|je l.ai (?:not[ée]|transmis|signal[ée])|(?:est|a été|sont|ont été) (?:not[ée]e?s?|transmise?s?|enregistr[ée]e?s?|signal[ée]e?s?))/i;
 /**
  * ARTICLE 12 — la santé n'est pas notre métier : une dose, une posologie, un
@@ -172,7 +189,9 @@ const DIT_ANNULE = /\b(?:c.est (?:bien )?annul[ée]|j.ai (?:bien )?annul[ée]|(?
  */
 const ENVOIE_AILLEURS = /(?:je vous (?:invite|conseille|recommande)|vous (?:pouvez|pourriez) (?:essayer|consulter|vous rendre|aller|demander)|vous (?:en )?trouverez(?: probablement| sans doute| s[uû]rement)?|rendez-vous|essayez)[^.!?]*\b(?:librairies?|boutiques?|magasins?|pharmacies?|supermarch[ée]s?|march[ée]s?|commerces?|vendeurs?|[ée]piceries?|boulangeries?|quincailleries?)\b/i;
 const DIT_PROCHE = /(?:^|[\s,;(«'’])(?:pr[eè]s de (?:chez )?vous|[aà] proximit[ée]|tout pr[eè]s|non loin de (?:chez )?vous|pas loin de (?:chez )?vous|juste [aà] c[oô]t[ée])/i;
-const DIT_EN_ROUTE = /\b(?:(?:est|sont) en route|se rend\b|se rendra\b|se dirige|vous rejoint|est parti|arrive (?:chez|à) vous|vient chez vous)/i;
+// 09/10 : « je m'occupe de récupérer votre sac », « c'est lancé » — avant
+// tout toucher, la course n'existe pas (E2, relu).
+const DIT_EN_ROUTE = /\b(?:(?:est|sont) en route|se rend\b|se rendra\b|se dirige|vous rejoint|est parti|arrive (?:chez|à) vous|vient chez vous|je m.occupe|c.est lanc[ée]|je lance)/i;
 
 /**
  * « à 3,2 km de Yantala » quand on a cherché vers Yantala : aucune distance
@@ -188,6 +207,24 @@ export function distanceAuLieu(phrase: string, lieu: string | null): string | nu
   return m ? m[0] : null;
 }
 
+/** Des mots trop courants pour signaler qu'une phrase parle de LA consigne. */
+const MOTS_COURANTS = new Set(['livreur', 'client', 'colis', 'course', 'merci', 'avec', 'pour', 'dans', 'chez', 'vous', 'votre', 'dites', 'disez', 'quand', 'faut', 'bien', 'plait']);
+
+/**
+ * La phrase parle de la consigne non transmise (le mot « consigne » ou ses
+ * propres mots) sans dire franchement qu'elle ne l'est pas : elle laisse
+ * croire qu'elle l'est. Renvoie ce qui l'a trahie, ou null.
+ */
+function consigneDiteTransmise(phrase: string, mots: string[]): string | null {
+  if (mots.length === 0) return null;
+  const n = normaliserIntention(phrase);
+  const parle = /\b(?:consigne|instruction|precision)s?\b/.exec(n)?.[0]
+    ?? mots.find((m) => new RegExp(`\\b${m}\\b`).test(n));
+  if (!parle) return null;
+  const franc = /\b(?:pas encore|ne peut pas|ne peux pas|ne pouvons pas|pas de place|n est pas transmise?|dites la|donnez la|dites lui|donnez lui|indiquez la|indiquez lui|precisez la|precisez lui|a donner|a dire)\b/.test(n);
+  return franc ? null : parle;
+}
+
 /** Les affirmations d'une phrase qui ne viennent pas des faits. */
 export function affirmationsInventees(phrase: string, faits: Faits): Affirmation[] {
   const inventees: Affirmation[] = [];
@@ -198,6 +235,9 @@ export function affirmationsInventees(phrase: string, faits: Faits): Affirmation
     if (!faits.connaitNombre(Number(m[1]))) inventees.push({ genre: 'duree', valeur: m[0] });
   }
   if (DIT_GARDE.test(phrase) && !faits.confirme('gardee')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_GARDE)![0] });
+  if (DIT_TRANSMIS.test(phrase) && !faits.confirme('gardee')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_TRANSMIS)![0] });
+  const consigne = consigneDiteTransmise(phrase, faits.consigneNonTransmise);
+  if (consigne) inventees.push({ genre: 'action', valeur: consigne });
   if (DIT_EN_ROUTE.test(phrase) && !faits.confirme('commande')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_EN_ROUTE)![0] });
   if (DIT_PROCHE.test(phrase) && !faits.confirme('proche')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_PROCHE)![0] });
   if (ENVOIE_AILLEURS.test(phrase) && !faits.confirme('ailleurs')) inventees.push({ genre: 'action', valeur: phrase.match(ENVOIE_AILLEURS)![0] });

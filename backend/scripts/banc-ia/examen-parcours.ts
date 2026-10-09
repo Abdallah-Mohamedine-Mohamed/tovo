@@ -2,6 +2,7 @@
  * L'EXAMEN PAR PARCOURS (02/10) — la référence avant toute refonte.
  *
  *   npx tsx --env-file=.env scripts/banc-ia/examen-parcours.ts
+ *   … --seulement=S        (les scénarios S1, S2…, ou --seulement=S2,M6)
  *
  * Contrairement à examen-reponses.ts, il passe par la VRAIE route POST /chat
  * (app.inject, comme l'application), avec un vrai client de test. Il mesure
@@ -40,16 +41,24 @@ const DOSSIER = 'scripts/banc-ia/resultats';
 
 type Composant = { type: string; data: Record<string, unknown> };
 interface Reponse { statut: number; texte: string; composants: Composant[] }
-interface Contexte { client: TestUser; reponses: Reponse[] }
+interface Contexte { client: TestUser; reponses: Reponse[]; conversationId?: string }
 type Verification = [libelle: string, test: (r: Reponse, c: Contexte) => boolean | Promise<boolean>];
 interface Etape {
   /** Ce que le client écrit… */
   dire?: string;
   /** … ou ce qu'il touche, d'après la réponse précédente (null : rien à toucher → échec). */
   toucher?: (precedente: Reponse) => { action: string; payload: Record<string, unknown> } | null;
+  /** Toucher « Commander un livreur » sur la dernière carte de course, comme l'application. */
+  commander?: boolean;
+  /** Préparer la base avant de parler (ex. vieillir la conversation). */
+  avant?: (c: Contexte) => Promise<void>;
   verifier: Verification[];
 }
-interface Scenario { id: string; parcours: 'A' | 'B' | 'C' | 'G'; titre: string; etapes: Etape[] }
+interface Scenario {
+  id: string; parcours: 'A' | 'B' | 'C' | 'G'; titre: string; etapes: Etape[];
+  /** La version de l'application simulée (en-tête x-tovo-contract) ; 1 par défaut. */
+  contrat?: number;
+}
 
 // --- Lecture de ce que voit le client --------------------------------------
 
@@ -110,6 +119,64 @@ const pasDeLivreurEnRoute: Verification = ['ne dit pas qu’un livreur est déj�
 /** La carte de course porte ce que le client a dit (lieu, nom, numéro). */
 const carteAvec = (motif: RegExp, quoi: string): Verification => [`la carte de course porte ${quoi}`, (r) =>
   r.composants.some((c) => c.type === 'courier_form' && motif.test(sansAccents(JSON.stringify(c.data))))];
+/** La carte de course dont les données vérifient `test`. */
+const carte = (r: Reponse, test: (d: Record<string, unknown>) => boolean) =>
+  r.composants.some((c) => c.type === 'courier_form' && test(c.data));
+/**
+ * Un trajet entre deux lieux (09/10) : jamais une carte qui en commanderait
+ * un autre. Soit la carte porte EXACTEMENT ce départ et cette arrivée, soit il
+ * n'y a pas de carte de course, et Tovo ne l'annonce pas.
+ */
+const trajetFidele = (depart: RegExp, arrivee: RegExp): Verification[] => [
+  ['jamais une carte qui contredit le trajet demandé', (r) =>
+    !carte(r, (d) => !depart.test(texteDe(d.pickup)) || !arrivee.test(texteDe(d.dropoff)))],
+  ['le trajet exact sur la carte, ou pas de course annoncée', (r) =>
+    carte(r, (d) => depart.test(texteDe(d.pickup)) && arrivee.test(texteDe(d.dropoff)))
+    || !/voici (?:votre|la) course|course (?:est )?pr[eê]te|touchez \*?\*?commander/i.test(r.texte)],
+];
+const texteDe = (x: unknown) => sansAccents(typeof x === 'string' ? x : JSON.stringify(x ?? '')).replace(/[^a-z0-9]+/g, ' ');
+/** La réponse (phrase ou cartes) nomme ce commerce ou ce produit. */
+const mentionne = (r: Reponse, n: string) => {
+  const cle = texteDe(n).trim();
+  return cle.length > 0 && ` ${texteDe(r.texte)} ${texteDe(r.composants)} `.includes(cle);
+};
+const YANTALA = { lat: 13.5297, lng: 2.0781 };
+const metres = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
+  const rad = Math.PI / 180;
+  const x = (b.lng - a.lng) * rad * Math.cos(((a.lat + b.lat) / 2) * rad);
+  return Math.hypot(x, (b.lat - a.lat) * rad) * 6_371_000;
+};
+async function articlesAuPanier(client: TestUser): Promise<Array<{ product_id: string }>> {
+  const { data: paniers } = await admin.from('carts').select('id').eq('user_id', client.id);
+  const ids = (paniers ?? []).map((p) => p.id as string);
+  if (!ids.length) return [];
+  const { data } = await admin.from('cart_items').select('product_id').in('cart_id', ids);
+  return (data ?? []) as Array<{ product_id: string }>;
+}
+/** Recule de `heures` tous les messages de la conversation (E2 : un écran trop ancien ne vaut plus). */
+const vieillir = (heures: number) => async (c: Contexte) => {
+  if (!c.conversationId) return;
+  const { data } = await admin.from('messages').select('id, created_at').eq('conversation_id', c.conversationId);
+  for (const m of data ?? []) {
+    await admin.from('messages')
+      .update({ created_at: new Date(Date.parse(m.created_at as string) - heures * 3_600_000).toISOString() })
+      .eq('id', m.id);
+  }
+};
+/** La dernière course du client, telle qu'en base (ce que lit le livreur). */
+async function courseEnBase(client: TestUser): Promise<Record<string, unknown> | null> {
+  const { data: o } = await admin.from('orders').select('id, dropoff_hint, status')
+    .eq('user_id', client.id).eq('type', 'courier').order('placed_at', { ascending: false }).limit(1).maybeSingle();
+  if (!o) return null;
+  const { data: cd } = await admin.from('courier_details')
+    .select('pickup_hint, parcel_note, mode, pickup_contact, dropoff_contact').eq('order_id', o.id).maybeSingle();
+  return { ...o, ...(cd ?? {}) };
+}
+const enBase = (libelle: string, test: (course: Record<string, unknown>) => boolean): Verification =>
+  [`en base : ${libelle}`, async (_r, c) => { const x = await courseEnBase(c.client); return Boolean(x) && test(x!); }];
+/** Le suivi renvoyé après la commande : la même fonction (order_tracking) que lit l'application du livreur. */
+const suiviPorte = (motif: RegExp, quoi: string): Verification => [`le suivi porte ${quoi}`, (r) =>
+  r.composants.some((c) => c.type === 'order_tracking' && motif.test(texteDe(c.data)))];
 const pasDAvancePromise: Verification = ['ne promet pas que le livreur avance l’achat', (r) => !/\bavance|rembours/i.test(r.texte)];
 
 // --- Les scénarios -----------------------------------------------------------
@@ -462,6 +529,199 @@ const SCENARIOS: Scenario[] = [
   ] }] },
 
   // G — Conversation : rien à afficher.
+  // S — L'état de parcours (09/10, docs/ETAT-DE-PARCOURS.md) : écrits AVANT
+  // toute correction, un par limite soupçonnée (L1–L6), décisions E1–E4.
+  { id: 'S1', parcours: 'B', titre: 'L1 : une question au milieu de la course', etapes: [
+    { dire: 'Je veux un livreur', verifier: [] },
+    { dire: 'c’est combien la livraison ?', verifier: [aucuneCommande] },
+    { dire: 'c’est pour Gamkalley', verifier: [aucuneCommande, pasDeLivreurEnRoute, carteAvec(/gamkalley/, 'Gamkalley')] },
+  ] },
+  { id: 'S2', parcours: 'B', titre: 'L2 : compléter la carte sans perdre le lieu', etapes: [
+    { dire: 'Va chercher un sac chez ma tante à Yantala', verifier: [] },
+    { dire: 'son numéro c’est le 90 12 34 56', verifier: [
+      aucuneCommande, carteAvec(/yantala/, 'Yantala, toujours'), carteAvec(/90\s?12\s?34\s?56/, 'le numéro'),
+    ] },
+  ] },
+  { id: 'S3', parcours: 'B', titre: 'L2 : changer le lieu par la parole (E3)', etapes: [
+    { dire: 'J’ai un colis à déposer à Gamkalley', verifier: [] },
+    { dire: 'non, plutôt à Koira Kano', verifier: [
+      aucuneCommande, carteAvec(/koira ?kano/, 'Koira Kano'),
+      ['plus Gamkalley sur la carte', (r) => !carte(r, (d) => /gamkalley/.test(texteDe(d)))],
+    ] },
+  ] },
+  { id: 'S4', parcours: 'B', titre: 'L3 : départ et arrivée dans la même phrase', etapes: [
+    { dire: 'Va chercher un sac chez ma tante à Yantala et apporte-le à Gamkalley', verifier: [
+      aucuneCommande, pasDeLivreurEnRoute, ...trajetFidele(/yantala/, /gamkalley/),
+    ] },
+  ] },
+  { id: 'S5', parcours: 'C', titre: 'L4 : « le deuxième » dans une liste de commerces', etapes: [
+    { dire: 'une pharmacie près de moi', verifier: [['une liste de commerces', (r) => commerces(r).length >= 2]] },
+    { dire: 'le deuxième, il est où ?', verifier: [
+      // Dans l'ordre de l'ÉCRAN : une boutique Tovo affichée avant la liste
+      // compte (relu le 09/10 : « PARAPHARMACIE », puis les pharmacies).
+      ['parle du 2e commerce à l’écran', (r, c) => {
+        const ecran = c.reponses[0]!.composants.flatMap((x) => x.type === 'merchant_card'
+          ? [String(x.data.name ?? '')]
+          : x.type === 'commerces_hors_tovo' ? commerces({ ...c.reponses[0]!, composants: [x] }).map(nom) : []);
+        return Boolean(ecran[1]) && mentionne(r, ecran[1]!);
+      }],
+      ['pas une nouvelle recherche de produits', (r) => produits(r).length === 0],
+      aucuneCommande,
+    ] },
+  ] },
+  { id: 'S6', parcours: 'C', titre: 'L4 : un lieu dit après coup', etapes: [
+    { dire: 'Je cherche un supermarché', verifier: [['des commerces', (r) => commerces(r).length > 0]] },
+    { dire: 'et vers Yantala ?', verifier: [
+      ['des commerces plus près de Yantala que la première liste', (r, c) => {
+        const moyenne = (l: Array<Record<string, unknown>>) => {
+          const p = l.filter((i) => typeof i.lat === 'number' && typeof i.lng === 'number');
+          return p.length ? p.reduce((t, i) => t + metres(YANTALA, { lat: i.lat as number, lng: i.lng as number }), 0) / p.length : Infinity;
+        };
+        const ici = moyenne(commerces(r));
+        return Number.isFinite(ici) && ici < moyenne(commerces(c.reponses[0]!));
+      }],
+      ['jamais des produits à la place', (r) => produits(r).length === 0],
+    ] },
+  ] },
+  { id: 'S7', parcours: 'C', titre: 'L1, L4 : « le premier » après un merci', etapes: [
+    { dire: 'des chaussures de sport', verifier: [] },
+    { dire: 'merci', verifier: [] },
+    { dire: 'le premier, c’est combien ?', verifier: [
+      ['parle du premier montré', (r, c) => {
+        const premier = commerces(c.reponses[0]!)[0] ?? produits(c.reponses[0]!)[0];
+        return Boolean(premier) && mentionne(r, nom(premier!));
+      }],
+      // Un commerce hors Tovo n'a pas de prix connu : aucun montant inventé.
+      ['aucun prix inventé pour un commerce hors Tovo', (r, c) =>
+        commerces(c.reponses[0]!).length === 0 || !/\d[\d\s.]*\s?(f\b|fcfa|francs?|cfa)/i.test(r.texte)],
+    ] },
+  ] },
+  { id: 'S8', parcours: 'A', titre: 'L5 : « le premier » sur un écran de la veille (E2 : 6 h)', etapes: [
+    { dire: 'pizza', verifier: [['une liste de pizzas', (r) => produits(r).length >= 2]] },
+    { avant: vieillir(24), dire: 'le premier', verifier: [
+      ['rien ajouté au panier', async (_r, c) => (await articlesAuPanier(c.client)).length === 0],
+      ['ne choisit pas la pizza de la veille', (r, c) => {
+        const p = produits(c.reponses[0]!)[0];
+        return !p || !r.composants.some((x) => ['option_selector', 'product_card'].includes(x.type) && JSON.stringify(x.data).includes(String(p.id)));
+      }],
+      aucuneCommande,
+    ] },
+  ] },
+  { id: 'S9', parcours: 'A', titre: 'L6 : « la moins chère » dans une liste', etapes: [
+    { dire: 'pizza', verifier: [['une liste de pizzas', (r) => produits(r).length >= 2]] },
+    { dire: 'je prends la moins chère', verifier: [
+      ['la moins chère de la liste, montrée ou au panier', async (r, c) => {
+        const liste = produits(c.reponses[0]!).filter((i) => typeof i.price === 'number');
+        if (!liste.length) return false;
+        const min = Math.min(...liste.map((i) => i.price as number));
+        const ids = liste.filter((i) => i.price === min).map((i) => String(i.id));
+        const montree = r.composants.some((x) => ['option_selector', 'product_card', 'cart_summary'].includes(x.type)
+          && ids.some((id) => JSON.stringify(x.data).includes(id)));
+        return montree || (await articlesAuPanier(c.client)).some((a) => ids.includes(String(a.product_id)));
+      }],
+      aucuneCommande, panierSansOptionsOubliees,
+    ] },
+  ] },
+  { id: 'S10', parcours: 'A', titre: 'contrôle : la précision reste, la suite est cherchée', etapes: [
+    { dire: 'Je veux un tacos chez Otakoss centre aéré', verifier: [] },
+    { dire: 'sans oignons s’il vous plaît', verifier: [] },
+    { dire: 'et un coca', verifier: [
+      ['la note « sans oignons » est toujours là', async (_r, c) => /oignon/i.test(await noteEnBase(c.client))],
+      ['du coca', produitsSurtout(/coca/, 0.5)],
+      // O'Takoss Centre Aéré vend du Coca (700 F) : celui d'une autre boutique
+      // ferait deux livraisons (relu le 09/10 : WORLD JUS proposé).
+      ['le coca de la boutique en cours, d’abord', (r) => {
+        const p = produits(r)[0];
+        return Boolean(p) && /takoss/.test(sansAccents(String(p!.merchant_name ?? ''))) && /centre/.test(sansAccents(String(p!.merchant_name ?? '')));
+      }],
+      aucuneCommande,
+    ] },
+  ] },
+
+  // R — Les questions du fondateur (09/10) : commander sans se tromper, et
+  // ce qui arrive vraiment au livreur.
+  { id: 'R1', parcours: 'A', titre: 'choisir une pizza par son nom', etapes: [
+    { dire: 'Je veux une pizza de chez Maison Grill', verifier: [] },
+    { dire: 'je prends la pizza margherita', verifier: [
+      ['la Margherita de Maison Grill, montrée ou au panier', async (r, c) =>
+        (/margh?erita/.test(texteDe(r.composants)) && /maison grill/.test(texteDe(r.composants)))
+        || ((await articlesAuPanier(c.client)).length > 0 && /margh?erita/.test(texteDe(r.texte)))],
+      aucuneCommande, panierSansOptionsOubliees,
+    ] },
+  ] },
+  { id: 'R2', parcours: 'A', titre: 'un produit, une boutique et le lieu de livraison, en une phrase', etapes: [
+    { dire: 'Je veux la pizza margherita de chez Maison Grill, livrée à Yantala', verifier: [
+      ['la Margherita de Maison Grill', async (r, c) =>
+        (/margh?erita/.test(texteDe(r.composants)) && /maison grill/.test(texteDe(r.composants)))
+        || (await articlesAuPanier(c.client)).length > 0],
+      aucuneCommande,
+      ['Yantala gardé pour la livraison (sur une carte)', (r) => /yantala/.test(texteDe(r.composants))],
+    ] },
+  ] },
+  { id: 'R3', parcours: 'B', titre: 'aller chercher à Harobanda, livrer chez moi', etapes: [
+    { dire: 'Je veux qu’un livreur aille me chercher un colis à Harobanda et me l’amène ici', verifier: [
+      aucuneCommande, pasDeLivreurEnRoute,
+      ['départ : Harobanda', (r) => carte(r, (d) => /harobanda/.test(texteDe(d.pickup)))],
+      ['mode « aller chercher »', (r) => carte(r, (d) => d.mode === 'recuperer')],
+    ] },
+  ] },
+  { id: 'R4', parcours: 'B', titre: 'aller chercher à Harobanda, livrer à Banifandou', etapes: [
+    { dire: 'Je veux qu’un livreur aille chercher un colis à Harobanda et l’amène à Banifandou', verifier: [
+      aucuneCommande, pasDeLivreurEnRoute, ...trajetFidele(/harobanda/, /banifandou/),
+    ] },
+  ] },
+  { id: 'R5', parcours: 'B', titre: 'une consigne pour le livreur d’une course', contrat: 2, etapes: [
+    { dire: 'Je veux un livreur pour déposer un colis à Banifandou, dites-lui de sonner au portail bleu', verifier: [
+      aucuneCommande, carteAvec(/banifandou/, 'Banifandou'),
+      // Protection (étape 1) : jamais dite transmise tant qu'elle ne l'est pas.
+      ['la consigne n’est pas dite transmise', (r) =>
+        carte(r, (d) => /portail bleu/.test(texteDe(d))) || !/transmi|not[ée]|avec votre consigne|sera communiqu/i.test(r.texte)],
+      // Objectif (étape 2, nouvelle carte) : la consigne part avec la course.
+      ['la consigne « portail bleu » est sur la carte', (r) => carte(r, (d) => /portail bleu/.test(texteDe(d)))],
+    ] },
+  ] },
+  { id: 'R6', parcours: 'A', titre: 'une consigne pour le livreur d’un repas', etapes: [
+    { dire: 'Je veux un tacos chez Otakoss centre aéré', verifier: [] },
+    { dire: 'dites au livreur de m’appeler en arrivant', verifier: [
+      ['la consigne est gardée (note de commande, lue en base)', async (_r, c) => /appel/i.test(await noteEnBase(c.client))],
+      aucuneCommande,
+    ] },
+  ] },
+
+  // E — De bout en bout (09/10, demande de l'autre agent) : la carte de la
+  // NOUVELLE application (contrat 2), le toucher, la course créée en base et
+  // le suivi que lit aussi le livreur. Jusqu'où va ce que le client a dit.
+  { id: 'E1', parcours: 'B', titre: 'Harobanda → Banifandou, avec consigne, jusqu’au livreur', contrat: 2, etapes: [
+    { dire: 'Je veux qu’un livreur aille chercher un colis à Harobanda et l’amène à Banifandou, dites-lui de sonner au portail bleu', verifier: [
+      aucuneCommande, pasDeLivreurEnRoute,
+      ['la carte : départ Harobanda', (r) => carte(r, (d) => /harobanda/.test(texteDe(d.pickup)))],
+      ['la carte : arrivée Banifandou', (r) => carte(r, (d) => /banifandou/.test(texteDe(d.dropoff)))],
+      ['la carte : la consigne', (r) => carte(r, (d) => /portail bleu/.test(texteDe(d.consigne)))],
+    ] },
+    { commander: true, verifier: [
+      enBase('départ Harobanda', (x) => /harobanda/.test(texteDe(x.pickup_hint))),
+      enBase('arrivée Banifandou', (x) => /banifandou/.test(texteDe(x.dropoff_hint))),
+      enBase('la consigne pour le livreur', (x) => /portail bleu/.test(texteDe(x.parcel_note))),
+      suiviPorte(/portail bleu/, 'la consigne'),
+      suiviPorte(/banifandou/, 'l’arrivée'),
+      ['la phrase dit le délai une fois, sans « en route »', (r) => /7 minutes/.test(r.texte) && !/est en route|se dirige/.test(r.texte)],
+    ] },
+  ] },
+  { id: 'E2', parcours: 'B', titre: 'aller chercher chez ma tante, livrer chez moi, jusqu’au livreur', contrat: 2, etapes: [
+    { dire: 'Va chercher un sac chez ma tante à Yantala', verifier: [aucuneCommande, carteAvec(/yantala/, 'Yantala')] },
+    { commander: true, verifier: [
+      enBase('« aller chercher »', (x) => x.mode === 'recuperer'),
+      enBase('départ chez la tante, à Yantala', (x) => /yantala/.test(texteDe(x.pickup_hint))),
+    ] },
+  ] },
+  { id: 'E3', parcours: 'B', titre: 'un colis de chez moi à Banifandou, jusqu’au livreur', contrat: 2, etapes: [
+    { dire: 'Je veux un livreur pour déposer un colis à Banifandou', verifier: [aucuneCommande, carteAvec(/banifandou/, 'Banifandou')] },
+    { commander: true, verifier: [
+      enBase('départ chez le client', (x) => x.mode === 'deposer' && /chez le client/.test(texteDe(x.pickup_hint))),
+      enBase('arrivée Banifandou', (x) => /banifandou/.test(texteDe(x.dropoff_hint))),
+    ] },
+  ] },
+
   { id: 'G1', parcours: 'G', titre: 'remarque', etapes: [{ dire: 'Tu es sourd ?', verifier: [
     ['aucun produit', (r) => produits(r).length === 0], ['une phrase', (r) => r.texte.trim().length > 0],
   ] }] },
@@ -480,15 +740,15 @@ const SCENARIOS: Scenario[] = [
  * connexion à Supabase expire parfois (ConnectTimeoutError, vu le 02/10).
  * Un vrai défaut de Tovo échoue aussi la seconde fois, et reste compté.
  */
-async function parler(app: FastifyInstance, client: TestUser, conversationId: string | undefined, corps: Record<string, unknown>): Promise<{ r: Reponse; conversationId: string | undefined }> {
-  const premier = await parlerUneFois(app, client, conversationId, corps);
-  return premier.r.statut >= 500 ? parlerUneFois(app, client, conversationId, corps) : premier;
+async function parler(app: FastifyInstance, client: TestUser, conversationId: string | undefined, corps: Record<string, unknown>, contrat?: number): Promise<{ r: Reponse; conversationId: string | undefined }> {
+  const premier = await parlerUneFois(app, client, conversationId, corps, contrat);
+  return premier.r.statut >= 500 ? parlerUneFois(app, client, conversationId, corps, contrat) : premier;
 }
 
-async function parlerUneFois(app: FastifyInstance, client: TestUser, conversationId: string | undefined, corps: Record<string, unknown>): Promise<{ r: Reponse; conversationId: string | undefined }> {
+async function parlerUneFois(app: FastifyInstance, client: TestUser, conversationId: string | undefined, corps: Record<string, unknown>, contrat?: number): Promise<{ r: Reponse; conversationId: string | undefined }> {
   const res = await app.inject({
     method: 'POST', url: '/chat',
-    headers: { authorization: `Bearer ${client.accessToken}` },
+    headers: { authorization: `Bearer ${client.accessToken}`, ...(contrat ? { 'x-tovo-contract': String(contrat) } : {}) },
     payload: { client_message_id: randomUUID(), context: POSITION, ...(conversationId ? { conversation_id: conversationId } : {}), ...corps },
   });
   const json = res.statusCode === 200 ? res.json() as { conversation_id?: string; content?: string; components?: Composant[] } : null;
@@ -498,9 +758,63 @@ async function parlerUneFois(app: FastifyInstance, client: TestUser, conversatio
   };
 }
 
-const resume = (r: Reponse) => `${r.texte.replace(/\s+/g, ' ').slice(0, 160)} || ${r.composants.map((c) => {
+/**
+ * Le toucher « Commander un livreur », tel que le fait l'application :
+ * courier_form.dart (_appeler) puis chat_screen.dart (_envoyerColis). C'est
+ * la MÊME règle, vérifiée côté application par test/courier_form_test.dart
+ * sur les mêmes cartes. La commande part vraiment (POST /orders) ; aucun
+ * livreur réel n'est prévenu (dispatch remplacé plus haut).
+ */
+async function commanderLaCarte(app: FastifyInstance, client: TestUser, conversationId: string | undefined, derniere: Reponse | undefined): Promise<Reponse> {
+  const carte = derniere?.composants.find((x) => x.type === 'courier_form')?.data;
+  if (!carte) return { statut: 0, texte: 'aucune carte de course à toucher', composants: [] };
+  type Bout = { chez_moi?: boolean; hint?: string; lat?: number; lng?: number } | null | undefined;
+  const p = carte.pickup as Bout;
+  const a = carte.dropoff as Bout;
+  const ici = (carte.position as { lat: number; lng: number } | undefined) ?? POSITION;
+  const departChezMoi = p?.chez_moi === true;
+  const arriveeChezMoi = a?.chez_moi === true;
+  const recuperer = !departChezMoi && arriveeChezMoi;
+  const departPoint = departChezMoi || recuperer || p?.lat == null ? ici : { lat: p.lat, lng: p.lng! };
+  const departReel = departChezMoi || p?.lat != null;
+  const arriveePoint = arriveeChezMoi ? ici : a?.lat != null && departReel && !recuperer ? { lat: a.lat, lng: a.lng! } : null;
+  // Une erreur serveur est retentée UNE fois, avec le MÊME identifiant : la
+  // base n'en fait pas deux commandes (client_order_id), comme dans l'app.
+  const idCommande = randomUUID();
+  const envoyer = () => app.inject({
+    method: 'POST', url: '/orders',
+    headers: { authorization: `Bearer ${client.accessToken}` },
+    payload: {
+      type: 'courier', client_order_id: idCommande,
+      ...(conversationId ? { conversation_id: conversationId } : {}),
+      pickup_hint: departChezMoi ? 'Chez le client' : p?.hint ?? '',
+      pickup: departPoint,
+      dropoff_hint: arriveeChezMoi ? 'Chez le client' : a?.hint ?? '',
+      ...(arriveePoint ? { dropoff: arriveePoint } : {}),
+      ...(carte.pickup_contact ? { pickup_contact: carte.pickup_contact } : {}),
+      ...(carte.dropoff_contact ? { dropoff_contact: carte.dropoff_contact } : {}),
+      ...(carte.consigne ? { parcel_note: carte.consigne } : {}),
+      ...(recuperer ? { mode: 'recuperer' } : {}),
+      parcel: 'small', payment_method: 'cash',
+    },
+  });
+  let res = await envoyer();
+  if (res.statusCode >= 500) {
+    console.log(`
+commande : HTTP ${res.statusCode} ${res.body.slice(0, 300)} — nouvelle tentative`);
+    res = await envoyer();
+  }
+  const json = res.statusCode === 201 ? res.json() as { content?: string; components?: Composant[] } : null;
+  return { statut: res.statusCode, texte: json?.content ?? res.body.slice(0, 200), composants: json?.components ?? [] };
+}
+
+const resume = (r: Reponse) => `${r.texte.replace(/\s+/g, ' ').slice(0, 320)} || ${r.composants.map((c) => {
   const items = Array.isArray(c.data.items) ? (c.data.items as Array<Record<string, unknown>>) : [];
-  return `${c.type}${c.data.name ? ` « ${String(c.data.name)} »` : ''}${items.length ? ` [${items.slice(0, 4).map(nom).join(' ; ')}${items.length > 4 ? ' …' : ''}]` : ''}`;
+  // La carte de course : son trajet, pour relire ce que le client commanderait.
+  const trajet = c.type === 'courier_form'
+    ? ` (${String(c.data.mode ?? '')} : ${String((c.data.pickup as { hint?: unknown } | null)?.hint ?? '—')} → ${String((c.data.dropoff as { hint?: unknown } | null)?.hint ?? '—')}${c.data.pickup_contact || c.data.dropoff_contact ? ` · tél. ${String(c.data.pickup_contact ?? c.data.dropoff_contact)}` : ''})`
+    : '';
+  return `${c.type}${trajet}${c.data.name ? ` « ${String(c.data.name)} »` : ''}${items.length ? ` [${items.slice(0, 4).map(nom).join(' ; ')}${items.length > 4 ? ' …' : ''}]` : ''}`;
 }).join(' | ') || 'aucune carte'}`;
 
 /** Un client de test ; une coupure réseau passagère ne fait pas tout échouer. */
@@ -520,7 +834,15 @@ interface Resultat {
   technique?: string | null;
 }
 const resultats: Resultat[] = [];
-const file = [...SCENARIOS];
+// --seulement=S (S1, S2…) ou --seulement=S2,M6 : une partie des scénarios.
+const seulement = process.argv.find((a) => a.startsWith('--seulement='))?.slice('--seulement='.length).split(',').filter(Boolean);
+const choisis = seulement
+  ? SCENARIOS.filter((s) => seulement.some((x) => s.id === x || (/^[A-Z]+$/.test(x) && new RegExp(`^${x}\\d+$`).test(s.id))))
+  : SCENARIOS;
+if (!choisis.length) throw new Error(`aucun scénario pour --seulement=${seulement?.join(',')}`);
+// Un passage partiel ne devient pas la référence des passages complets.
+const partiel = choisis.length < SCENARIOS.length;
+const file = [...choisis];
 // Le nettoyage (clients de test et leurs commandes) a lieu même en cas d'erreur.
 try {
 await Promise.all(Array.from({ length: 4 }, async () => {
@@ -539,17 +861,27 @@ await Promise.all(Array.from({ length: 4 }, async () => {
     const debut = Date.now();
     try {
     for (const [n, etape] of s.etapes.entries()) {
-      let corps: Record<string, unknown> | null = etape.dire ? { text: etape.dire } : null;
-      if (!corps && etape.toucher) {
-        const geste = etape.toucher(contexte.reponses.at(-1)!);
-        if (geste) corps = { interaction: geste };
+      let r: Reponse;
+      let c = conversationId;
+      if (etape.commander) {
+        if (etape.avant) await etape.avant(contexte);
+        r = await commanderLaCarte(app, client, conversationId, contexte.reponses.at(-1));
+      } else {
+        let corps: Record<string, unknown> | null = etape.dire ? { text: etape.dire } : null;
+        if (!corps && etape.toucher) {
+          const geste = etape.toucher(contexte.reponses.at(-1)!);
+          if (geste) corps = { interaction: geste };
+        }
+        if (!corps) { echecs.push(`étape ${n + 1} : rien à toucher`); break; }
+        if (etape.avant) await etape.avant(contexte);
+        ({ r, conversationId: c } = await parler(app, client, conversationId, corps, s.contrat));
       }
-      if (!corps) { echecs.push(`étape ${n + 1} : rien à toucher`); break; }
-      const { r, conversationId: c } = await parler(app, client, conversationId, corps);
       conversationId = c;
+      if (c) contexte.conversationId = c;
       contexte.reponses.push(r);
-      vu.push(`${etape.dire ? `« ${etape.dire} »` : '[toucher]'} → ${r.statut !== 200 ? `HTTP ${r.statut} ` : ''}${resume(r)}`);
-      if (r.statut !== 200) { echecs.push(`étape ${n + 1} : HTTP ${r.statut}`); break; }
+      const geste = etape.commander ? '[Commander un livreur]' : etape.dire ? `« ${etape.dire} »` : '[toucher]';
+      vu.push(`${geste} → ${r.statut === 200 || r.statut === 201 ? '' : `HTTP ${r.statut} `}${resume(r)}`);
+      if (r.statut !== 200 && r.statut !== 201) { echecs.push(`étape ${n + 1} : HTTP ${r.statut}`); break; }
       for (const [libelle, test] of etape.verifier) {
         if (!(await test(r, contexte))) echecs.push(`étape ${n + 1} : ${libelle}`);
       }
@@ -607,7 +939,7 @@ for (const r of jugeables.filter((x) => !x.reussi)) {
 }
 
 mkdirSync(DOSSIER, { recursive: true });
-const fichier = `${DOSSIER}/parcours-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
+const fichier = `${DOSSIER}/${partiel ? 'partiel-' : ''}parcours-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
 writeFileSync(fichier, JSON.stringify({ bilan, resultats }, null, 1));
 console.log(`\nDétail : ${fichier}`);
 process.exit(0);

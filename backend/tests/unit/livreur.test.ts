@@ -173,8 +173,10 @@ describe('les deux sortes de livreur', () => {
     expect(carte.data.pickup_contact).toBe('90 12 34 56');
     // L'arrivée : chez le client.
     expect(carte.data.dropoff).toMatchObject({ lat: NIAMEY.lat, lng: NIAMEY.lng });
-    // Article 4 : rien ne part avant le toucher, et la phrase le dit.
-    expect(res.json().content).toContain('Commander le livreur');
+    // Article 4 : rien ne part avant le toucher. Depuis la maquette V6
+    // (09/10), la phrase est courte et courtoise ; le bouton de la carte dit
+    // le geste. Elle ne prétend jamais qu'un livreur est en route.
+    expect(res.json().content).toContain('Avec plaisir');
     expect(res.json().content).not.toMatch(/se rend|est en route|vient chez vous/);
     expect(db.rpc).not.toHaveBeenCalledWith('place_courier_order', expect.anything());
     await app.close();

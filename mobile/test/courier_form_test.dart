@@ -24,65 +24,66 @@ Future<List<TovoInteraction>> _afficher(
   return gestes;
 }
 
+Future<void> _commander(WidgetTester tester) async {
+  await tester.ensureVisible(find.text('Commander un livreur'));
+  await tester.tap(find.text('Commander un livreur'));
+  await tester.pump();
+}
+
+const _client = {'lat': 13.51, 'lng': 2.11};
+
 void main() {
-  testWidgets('un seul geste : la position suffit, espèces par défaut', (
-    tester,
-  ) async {
+  testWidgets('un seul geste : chez moi, espèces par défaut', (tester) async {
     final gestes = await _afficher(tester, {
-      'pickup': {'lat': 13.51, 'lng': 2.11, 'hint': 'Ma position actuelle'},
+      'pickup': {..._client, 'hint': 'Ma position actuelle'},
       'estimate': {'price': 1000, 'flat': true},
       'callback_minutes': 7,
     });
 
-    expect(find.text('Ma position actuelle'), findsOneWidget);
-    expect(find.textContaining('7 minutes'), findsOneWidget);
+    expect(find.text('Récupérer à'), findsOneWidget);
+    expect(find.text('Chez moi'), findsOneWidget);
+    expect(find.text('Où l’apporter ?'), findsOneWidget);
     expect(find.text('Course en ville'), findsOneWidget);
-    // Rien à remplir : pas de champ visible avant « Ajouter des détails ».
+    // Le délai n'est plus dit sur la carte : la phrase de Tovo le dit.
+    expect(find.textContaining('7 minutes'), findsNothing);
     expect(find.byType(TextField), findsNothing);
 
-    await tester.tap(find.text('Commander le livreur'));
-    await tester.pump();
+    await _commander(tester);
 
     expect(gestes, hasLength(1));
     expect(gestes.single.action, 'submit_courier');
-    expect(gestes.single.payload['pickup'], containsPair('lat', 13.51));
-    expect(gestes.single.payload['payment_method'], 'cash');
-    expect(gestes.single.payload.containsKey('dropoff'), isFalse);
+    final p = gestes.single.payload;
+    expect(p['pickup'], containsPair('lat', 13.51));
+    expect(p['payment_method'], 'cash');
+    expect(p.containsKey('mode'), isFalse);
+    expect(p.containsKey('dropoff'), isFalse);
 
-    // En attente du serveur : bouton bloqué (pas de second livreur), et
-    // jamais « Livreur commandé » avant sa confirmation.
+    // En attente du serveur : bouton bloqué, pas de second livreur.
     expect(find.text('Je commande le livreur…'), findsOneWidget);
     expect(
       tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNull,
     );
-    expect(
-      find.textContaining('Livreur commandé', findRichText: true),
-      findsNothing,
-    );
   });
 
-  testWidgets('rouverte après la commande, la carte reste éteinte', (
+  testWidgets('commandée : la carte s’efface, le suivi prend le relais', (
     tester,
   ) async {
     await _afficher(tester, {
-      'pickup': {'lat': 13.51, 'lng': 2.11},
+      'pickup': _client,
       'callback_minutes': 7,
       'utilise': true,
     });
-    expect(find.text('Commander le livreur'), findsNothing);
+    expect(find.text('Commander un livreur'), findsNothing);
     expect(find.byType(FilledButton), findsNothing);
-    expect(
-      find.textContaining('Livreur commandé', findRichText: true),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Livreur commandé'), findsNothing);
   });
 
-  testWidgets('ce que le client a dit est repris, détails ouverts', (
+  testWidgets('ancienne carte : la destination et le destinataire repris', (
     tester,
   ) async {
     final gestes = await _afficher(tester, {
-      'pickup': {'lat': 13.51, 'lng': 2.11},
+      'pickup': _client,
       'dropoff': {'hint': 'Harobanda'},
       'dropoff_contact': '90123456',
     });
@@ -90,7 +91,7 @@ void main() {
     expect(find.text('Harobanda'), findsOneWidget);
     expect(find.text('90123456'), findsOneWidget);
 
-    await tester.tap(find.text('Commander le livreur'));
+    await _commander(tester);
     expect(gestes.single.payload['dropoff_hint'], 'Harobanda');
     expect(gestes.single.payload['dropoff_contact'], '90123456');
   });
@@ -102,17 +103,15 @@ void main() {
         'mode': 'recuperer',
         'pickup': {'hint': 'Chez Awa, Yantala'},
         'pickup_contact': '90 12 34 56',
-        'dropoff': {'lat': 13.51, 'lng': 2.11, 'hint': 'Chez vous'},
+        'dropoff': {..._client, 'hint': 'Chez vous'},
         'estimate': {'price': 1000, 'flat': true},
       });
 
-      expect(find.text('Un livreur va chercher pour vous'), findsOneWidget);
       expect(find.text('Chez Awa, Yantala'), findsOneWidget);
       expect(find.text('90 12 34 56'), findsOneWidget);
-      expect(find.text('Livré à ma position'), findsOneWidget);
+      expect(find.text('Chez moi'), findsOneWidget);
 
-      await tester.tap(find.text('Commander le livreur'));
-      await tester.pump();
+      await _commander(tester);
       final p = gestes.single.payload;
       expect(p['mode'], 'recuperer');
       expect(p['pickup'], containsPair('hint', 'Chez Awa, Yantala'));
@@ -122,30 +121,99 @@ void main() {
     },
   );
 
-  testWidgets('on change de sorte d’un geste', (tester) async {
-    final gestes = await _afficher(tester, {
-      'pickup': {'lat': 13.51, 'lng': 2.11},
-    });
-    expect(find.text('Un livreur vient chez vous'), findsOneWidget);
-    await tester.tap(find.text('Aller chercher'));
-    await tester.pump();
-    expect(find.text('Un livreur va chercher pour vous'), findsOneWidget);
-    await tester.enterText(
-      find.widgetWithText(TextField, 'Où aller chercher ?'),
-      'Au grand marché',
-    );
-    await tester.tap(find.text('Commander le livreur'));
-    await tester.pump();
-    expect(gestes.single.payload['mode'], 'recuperer');
-    expect(
-      gestes.single.payload['pickup'],
-      containsPair('hint', 'Au grand marché'),
-    );
-  });
-
-  testWidgets('sans position, le bouton attend « Ma position »', (
+  testWidgets('Harobanda → Banifandou : le trajet exact, et la consigne', (
     tester,
   ) async {
+    final gestes = await _afficher(tester, {
+      'mode': 'deposer',
+      'pickup': {
+        'chez_moi': false,
+        'hint': 'Harobanda',
+        'lat': 13.49,
+        'lng': 2.10,
+      },
+      'dropoff': {
+        'chez_moi': false,
+        'hint': 'Banifandou',
+        'lat': 13.54,
+        'lng': 2.14,
+      },
+      'position': _client,
+      'consigne': 'Sonner au portail bleu',
+      'estimate': {'price': 2750, 'distance_m': 6814},
+    });
+
+    expect(find.text('Harobanda'), findsOneWidget);
+    expect(find.text('Banifandou'), findsOneWidget);
+    expect(find.text('Pour le livreur'), findsOneWidget);
+    expect(find.text('Sonner au portail bleu'), findsOneWidget);
+    expect(find.textContaining('Course ·'), findsOneWidget);
+    expect(find.text(Money.format(2750)), findsOneWidget);
+
+    await _commander(tester);
+    final p = gestes.single.payload;
+    expect(p.containsKey('mode'), isFalse);
+    expect(p['pickup'], {'lat': 13.49, 'lng': 2.10, 'hint': 'Harobanda'});
+    expect(p['dropoff'], {'lat': 13.54, 'lng': 2.14});
+    expect(p['dropoff_hint'], 'Banifandou');
+    expect(p['parcel_note'], 'Sonner au portail bleu');
+  });
+
+  testWidgets(
+    'un départ que l’on ne sait pas situer : le livreur est cherché près du '
+    'client, et aucune distance fausse',
+    (tester) async {
+      final gestes = await _afficher(tester, {
+        'pickup': {'chez_moi': false, 'hint': 'Chez Moussa'},
+        'dropoff': {
+          'chez_moi': false,
+          'hint': 'Banifandou',
+          'lat': 13.54,
+          'lng': 2.14,
+        },
+        'position': _client,
+      });
+      await _commander(tester);
+      final p = gestes.single.payload;
+      expect(p['pickup'], {'lat': 13.51, 'lng': 2.11, 'hint': 'Chez Moussa'});
+      expect(p.containsKey('dropoff'), isFalse);
+      expect(p['dropoff_hint'], 'Banifandou');
+    },
+  );
+
+  testWidgets('la consigne s’ajoute d’un geste et part avec la course', (
+    tester,
+  ) async {
+    final gestes = await _afficher(tester, {'pickup': _client});
+    expect(find.text('Aucune consigne'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Ajouter').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Appeler en arrivant');
+    await tester.tap(find.text('Valider'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Appeler en arrivant'), findsOneWidget);
+    await _commander(tester);
+    expect(gestes.single.payload['parcel_note'], 'Appeler en arrivant');
+  });
+
+  testWidgets('Nita : choisi d’un toucher, le numéro avant de commander', (
+    tester,
+  ) async {
+    await _afficher(tester, {'pickup': _client, 'mobile_money': true});
+    expect(find.text('Espèces'), findsOneWidget);
+    await tester.tap(find.text('Nita'));
+    await tester.pump();
+    final bouton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Commander un livreur'),
+    );
+    expect(bouton.onPressed, isNull);
+    // Le numéro retenu se lit en arrière-plan (1 s au plus).
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('sans position, « Ma position » est proposé', (tester) async {
     await _afficher(tester, const {});
     // La position est cherchée d'office, sans geste du client…
     expect(find.text('Recherche…'), findsOneWidget);
@@ -157,40 +225,31 @@ void main() {
     // … et si elle est introuvable, le bouton reste là, sans message.
     expect(find.text('Ma position'), findsOneWidget);
     expect(find.byType(SnackBar), findsNothing);
-    final bouton = tester.widget<FilledButton>(find.byType(FilledButton));
+    final bouton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Commander un livreur'),
+    );
     expect(bouton.onPressed, isNull);
   });
 
-  // « Je veux un livreur », sans plus : le client l'a déjà dit. Dès que la
-  // position est là, la carte commande d'elle-même — aucun bouton à toucher.
-  testWidgets('« je veux un livreur » : commandé sans second geste', (
+  // Une ancienne conversation peut porter une carte « auto » (avant D1).
+  testWidgets('ancienne carte « auto » : commandée sans second geste', (
     tester,
   ) async {
     final gestes = await _afficher(tester, {
       'auto': true,
-      'pickup': {'lat': 13.51, 'lng': 2.11, 'hint': 'Ma position actuelle'},
+      'pickup': {..._client, 'hint': 'Ma position actuelle'},
       'callback_minutes': 7,
     });
     await tester.pump();
     expect(gestes.single.action, 'submit_courier');
-    expect(gestes.single.payload['pickup'], containsPair('lat', 13.51));
     expect(find.text('Je commande le livreur…'), findsOneWidget);
-    expect(
-      find.textContaining('Livreur commandé', findRichText: true),
-      findsNothing,
-    );
   });
 
   // Le résultat vient de l'écran, qui a la réponse du serveur : la carte
   // reçoit `utilise` (confirmé) ou `echec` (pas partie).
-  testWidgets('« Livreur commandé » seulement quand le serveur a confirmé', (
-    tester,
-  ) async {
-    final data = <String, dynamic>{
-      'auto': true,
-      'pickup': {'lat': 13.51, 'lng': 2.11},
-      'callback_minutes': 7,
-    };
+  testWidgets('échec : la carte le dit, le bouton revient ; confirmée : elle '
+      's’efface', (tester) async {
+    final data = <String, dynamic>{'pickup': _client, 'callback_minutes': 7};
     late StateSetter reconstruire;
     final gestes = <TovoInteraction>[];
     await tester.pumpWidget(
@@ -213,40 +272,21 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
+    await _commander(tester);
     expect(gestes, hasLength(1));
 
-    // Échec : la carte le dit, le bouton revient, rien ne repart tout seul.
     reconstruire(() => data['echec'] = 1);
     await tester.pump();
     expect(find.byKey(const Key('livreur-echec')), findsOneWidget);
-    expect(find.text('Commander le livreur'), findsOneWidget);
+    expect(find.text('Commander un livreur'), findsOneWidget);
     expect(gestes, hasLength(1));
 
-    // Le client réessaie ; cette fois le serveur confirme.
-    await tester.tap(find.text('Commander le livreur'));
-    await tester.pump();
+    await _commander(tester);
     expect(gestes, hasLength(2));
     expect(find.byKey(const Key('livreur-echec')), findsNothing);
     reconstruire(() => data['utilise'] = true);
     await tester.pump();
-    expect(
-      find.textContaining('Livreur commandé', findRichText: true),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('rouverte après un échec : pas de nouvel essai automatique', (
-    tester,
-  ) async {
-    final gestes = await _afficher(tester, {
-      'auto': true,
-      'echec': 1,
-      'pickup': {'lat': 13.51, 'lng': 2.11},
-    });
-    await tester.pump();
-    expect(gestes, isEmpty);
-    expect(find.byKey(const Key('livreur-echec')), findsOneWidget);
+    expect(find.text('Commander un livreur'), findsNothing);
   });
 
   testWidgets('« aller chercher » attend toujours le geste du client', (
@@ -255,21 +295,25 @@ void main() {
     final gestes = await _afficher(tester, {
       'auto': true,
       'mode': 'recuperer',
-      'dropoff': {'lat': 13.51, 'lng': 2.11},
+      'dropoff': _client,
     });
     await tester.pump();
     // Il faut d'abord dire où aller chercher : rien ne part tout seul.
     expect(gestes, isEmpty);
-    expect(find.text('Commander le livreur'), findsOneWidget);
+    expect(find.text('Où aller chercher ?'), findsOneWidget);
+    final bouton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Commander un livreur'),
+    );
+    expect(bouton.onPressed, isNull);
   });
 
   testWidgets('même bouton que « Commander » sur la fiche produit', (
     tester,
   ) async {
-    await _afficher(tester, {
-      'pickup': {'lat': 13.51, 'lng': 2.11},
-    });
-    final bouton = tester.widget<FilledButton>(find.byType(FilledButton));
+    await _afficher(tester, {'pickup': _client});
+    final bouton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Commander un livreur'),
+    );
     expect(bouton.style!.backgroundColor!.resolve({}), TovoTheme.teal);
     expect(bouton.style!.foregroundColor!.resolve({}), Colors.white);
   });

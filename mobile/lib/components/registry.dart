@@ -20,7 +20,7 @@ import 'package:flutter/widgets.dart';
 /// Version du contrat comprise par ce client.
 /// Envoyée au backend dans l'en-tête `X-Tovo-Contract` ; le backend n'émet
 /// que des composants supportés par cette version.
-const int kTovoContractVersion = 1;
+const int kTovoContractVersion = 2;
 
 // -----------------------------------------------------------------------------
 // Modèles

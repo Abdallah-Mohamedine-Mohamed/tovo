@@ -20,6 +20,7 @@ import { serviceClient } from '../services/supabase.js';
 import { horsTovo, cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, merchantMenu, type CatalogueIntent } from '../services/catalogue.js';
 import { decrireImageDepuisOctets } from '../services/vision.js';
 import { offreVille } from '../services/livreur.js';
+import { reperer } from '../services/lieux.js';
 import { paiementMobileActif } from '../config/env.js';
 import {
   demandeDeProximite,
@@ -62,6 +63,13 @@ export interface ToolContext {
   rayonId?: string | undefined;
   catalogueIntent?: CatalogueIntent | undefined;
   position?: { lat: number; lng: number } | undefined;
+  /** La précision comprise par le cerveau pour une course (« sonnez au portail bleu »). */
+  consigne?: string | undefined;
+  /**
+   * L'application sait montrer un trajet entre deux lieux et porter la
+   * consigne (contrat 2, en-tête x-tovo-contract, 09/10).
+   */
+  trajetLibre?: boolean | undefined;
 }
 
 export interface ToolOutcome {
@@ -1171,19 +1179,83 @@ const historiqueCommandes: Executor = async (args, ctx) => {
  * Le client peut toujours changer sur la carte. Le livreur appelle pour le
  * reste.
  */
+/** « chez moi », « ici », « ma position » (ou rien) : le client lui-même, pas un autre lieu. */
+function chezLeClient(lieu: string): boolean {
+  const n = normaliserIntention(lieu);
+  return !n || /\b(chez moi|chez nous|ici|ma position|ma maison|a la maison|mon domicile|mon adresse|moi|chez vous|ma position actuelle)\b/.test(n);
+}
+
 const preparerCourse: Executor = async (args, ctx) => {
   const message = ctx.currentMessage ?? '';
   const modeDonne = texte(args, 'mode');
-  const mode = modeDonne === 'recuperer' || modeDonne === 'deposer'
+  let mode = modeDonne === 'recuperer' || modeDonne === 'deposer'
     ? modeDonne
     : demandeDeRecuperation(message) ? 'recuperer' : 'deposer';
+
+  // CE QUE LA CARTE SAIT MONTRER (09/10, docs/ETAT-DE-PARCOURS.md) :
+  // l'application, anciennes versions comprises, livre TOUJOURS chez le
+  // client en « Aller chercher » et part TOUJOURS de chez lui en « Venir chez
+  // moi ». Un trajet entre deux lieux qui ne sont pas le client n'a donc pas
+  // de carte : en montrer une ferait commander un autre trajet que celui
+  // demandé (S4, R4 : « de Harobanda à Banifandou » → livré chez le client).
+  const departDit = mode === 'recuperer'
+    ? texte(args, 'ou_recuperer') || lieuDeRecuperation(message) || ''
+    : String((args.depart as { hint?: unknown } | undefined)?.hint ?? '').trim();
+  const arriveeDite = String((args.arrivee as { hint?: unknown } | undefined)?.hint ?? '').trim();
+  // La NOUVELLE carte (contrat 2 de l'application, 09/10) montre tout
+  // trajet, d'un lieu à un autre compris, et porte la consigne jusqu'au
+  // livreur. Les anciennes applications gardent la protection ci-dessous.
+  if (ctx.trajetLibre) {
+    const telephone = /(?:\+?227\s?)?\d{2}(?:[\s.]?\d{2}){3}/;
+    const lieuPropre = (l: string) => l.replace(telephone, '').replace(/\s+(?:au|a|à)\s*$/i, '').trim();
+    return carteDeTrajet(ctx, {
+      depart: chezLeClient(departDit) ? null : lieuPropre(departDit),
+      arrivee: chezLeClient(arriveeDite) ? null : lieuPropre(arriveeDite),
+      allerChercher: mode === 'recuperer',
+      contactDepart: texte(args, 'contact_sur_place')
+        || (mode === 'recuperer' ? telephone.exec(message)?.[0] ?? '' : ''),
+      destinataire: texte(args, 'destinataire'),
+      consigne: texte(args, 'consigne') || (ctx.consigne ?? '').trim(),
+      colis: texte(args, 'colis') || 'small',
+    });
+  }
+  if (!chezLeClient(departDit) && !chezLeClient(arriveeDite)) {
+    return {
+      summary: {
+        trajet_demande: { depart: departDit, arrivee: arriveeDite },
+        carte_possible: false,
+        a_dire:
+          'La carte de course ne fait pas encore un trajet d’un endroit à un autre sans passer par le client. ' +
+          'Le dire simplement, sans promettre de course, puis proposer les deux choix affichés.',
+      },
+      components: [quickReplies([
+        { label: `Chercher à ${departDit}, livrer chez moi`.slice(0, 60), value: `Va chercher le colis à ${departDit} et apporte-le moi` },
+        { label: `Venir chez moi, livrer à ${arriveeDite}`.slice(0, 60), value: `Viens prendre un colis chez moi pour le livrer à ${arriveeDite}` },
+      ])],
+    };
+  }
+  // « Venir chez moi » avec un départ ailleurs : la carte partirait de chez
+  // le client. C'est en fait « aller chercher » là-bas et lui apporter.
+  if (mode === 'deposer' && !chezLeClient(departDit)) mode = 'recuperer';
+
+  // Une consigne pour le livreur (« sonnez au portail bleu ») : la carte de
+  // course n'a pas encore où la mettre. Elle n'est donc jamais dite transmise.
+  const consigne = texte(args, 'consigne') || (ctx.consigne ?? '').trim();
+  const pourLaConsigne = consigne
+    ? {
+      consigne_du_client: consigne,
+      consigne_transmise: false,
+      a_dire_sur_la_consigne: 'La carte de course n’a pas encore de place pour une consigne : le client la donnera au livreur quand il l’appellera. Ne jamais dire qu’elle est notée ou transmise.',
+    }
+    : {};
+
   if (mode === 'recuperer') {
     const offre = await offreVille(ctx.db);
     // Un numéro dit dans la phrase (« au 90 12 34 56 ») : celui de la
     // personne qui remet le colis — et il n'a rien à faire dans le lieu.
     const telephone = /(?:\+?227\s?)?\d{2}(?:[\s.]?\d{2}){3}/;
     const contact = texte(args, 'contact_sur_place') || (telephone.exec(message)?.[0] ?? '');
-    const ou = (texte(args, 'ou_recuperer') || lieuDeRecuperation(message) || '')
+    const ou = (departDit || texte(args, 'ou_recuperer') || lieuDeRecuperation(message) || '')
       .replace(telephone, '')
       .replace(/\s+(?:au|a|à)\s*$/i, '')
       .trim();
@@ -1194,6 +1266,7 @@ const preparerCourse: Executor = async (args, ctx) => {
         contact_sur_place: contact || null,
         position_connue: Boolean(ctx.position),
         consigne: 'La carte suffit : le client touche « Commander le livreur ». Ne pose aucune question.',
+        ...pourLaConsigne,
       },
       components: [
         {
@@ -1260,6 +1333,7 @@ const preparerCourse: Executor = async (args, ctx) => {
       destinataire: destinataire || null,
       estimation: estimate?.price ?? null,
       consigne: 'La carte suffit : le client touche « Commander le livreur ». Ne pose aucune question.',
+      ...pourLaConsigne,
     },
     components: [
       {
@@ -1278,6 +1352,85 @@ const preparerCourse: Executor = async (args, ctx) => {
     ],
   };
 };
+
+/**
+ * La carte « Récupérer à → Livrer à » (maquette V6, 09/10) : chaque bout du
+ * trajet est le client (« Chez moi »), un lieu dit (situé si l'annuaire des
+ * lieux le connaît), ou vide (« Où l'apporter ? », facultatif). Le prix est
+ * celui que la base calculera : à la distance quand les deux bouts sont
+ * situés et que le départ n'est pas « aller chercher », sinon le forfait.
+ */
+async function carteDeTrajet(ctx: ToolContext, t: {
+  depart: string | null;
+  arrivee: string | null;
+  allerChercher: boolean;
+  contactDepart: string;
+  destinataire: string;
+  consigne: string;
+  colis: string;
+}): Promise<ToolOutcome> {
+  const offre = await offreVille(ctx.db);
+  const client = ctx.position ?? null;
+  const departChezMoi = t.depart === null && !t.allerChercher;
+  const arriveeChezMoi = t.arrivee === null && (t.allerChercher || t.depart !== null);
+  const situe = (lieu: string | null) => (lieu ? reperer(lieu).point : null);
+  const pDepart = departChezMoi ? client : situe(t.depart);
+  const pArrivee = arriveeChezMoi ? client : situe(t.arrivee);
+  // La sorte que la base connaît (0059) : « récupérer » quand le client est
+  // à l'arrivée seulement — elle facture alors le forfait.
+  const recuperer = !departChezMoi && arriveeChezMoi;
+
+  let estimate: Record<string, unknown> | null = offre.prix === null ? null : { price: offre.prix, flat: true };
+  if (!recuperer && pDepart && pArrivee) {
+    const distance = Math.round(distanceMetres(pDepart.lat, pDepart.lng, pArrivee.lat, pArrivee.lng));
+    const { data } = await ctx.db.rpc('courier_price', { p_distance_m: distance, p_parcel: t.colis });
+    if (typeof data === 'number') estimate = { price: data, distance_m: distance };
+  }
+
+  const point = (p: { lat: number; lng: number } | null) => (p ? { lat: p.lat, lng: p.lng } : {});
+  const pickup = departChezMoi
+    ? { chez_moi: true, hint: 'Chez le client', ...point(client) }
+    : { chez_moi: false, hint: t.depart ?? '', ...point(pDepart) };
+  const dropoff = arriveeChezMoi
+    ? { chez_moi: true, hint: 'Chez le client', ...point(client) }
+    : t.arrivee
+      ? { chez_moi: false, hint: t.arrivee, ...point(pArrivee) }
+      : null;
+
+  return {
+    summary: {
+      trajet: {
+        depart: departChezMoi ? 'chez le client' : t.depart || 'à préciser',
+        arrivee: arriveeChezMoi ? 'chez le client' : t.arrivee || 'à préciser au livreur',
+      },
+      estimation: estimate?.price ?? null,
+      ...(t.consigne ? { consigne_pour_le_livreur: t.consigne, consigne_sur_la_carte: true } : {}),
+      consigne: 'La carte suffit : le client touche « Commander un livreur ». Ne pose aucune question.',
+      // Le ton voulu par le fondateur (maquette V6, 09/10).
+      a_dire: 'Une seule phrase, courte et courtoise, par exemple « Avec plaisir, voici votre course. » '
+        + 'La carte dit le reste : ne décris ni le bouton, ni le trajet, ni le prix. '
+        + 'Rien ne part avant le bouton : ne dis jamais « je m’occupe », « c’est transmis » ni « c’est lancé ».',
+    },
+    components: [
+      {
+        type: 'courier_form',
+        data: {
+          mode: recuperer ? 'recuperer' : 'deposer',
+          pickup,
+          dropoff,
+          ...(client ? { position: { lat: client.lat, lng: client.lng } } : {}),
+          pickup_contact: t.contactDepart || null,
+          dropoff_contact: t.destinataire || null,
+          consigne: t.consigne || null,
+          parcel: t.colis,
+          estimate,
+          callback_minutes: offre.minutes,
+          mobile_money: paiementMobileActif,
+        },
+      },
+    ],
+  };
+}
 
 /** Haversine — suffisant pour une estimation, la base fait foi au final. */
 function distanceMetres(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -1513,7 +1666,7 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
         },
         arrivee: {
           type: 'object',
-          description: 'Destination, seulement si le client la donne',
+          description: 'Destination, seulement si le client la donne — aussi pour « recuperer » quand ce n’est pas chez lui (« amène-le à Banifandou »)',
           properties: { lat: S.number('Latitude'), lng: S.number('Longitude'), hint: S.string('Repère') },
         },
         destinataire: S.string('Numéro de téléphone du destinataire, seulement si le client le donne'),
@@ -1523,6 +1676,7 @@ export const TOOL_DEFINITIONS: LlmToolDefinition[] = [
         ),
         ou_recuperer: S.string('Pour « recuperer » : où aller chercher, tel que le client l\'a dit (« chez Moussa, Harobanda »)'),
         contact_sur_place: S.string('Pour « recuperer » : le numéro de la personne qui remet le colis, seulement si donné'),
+        consigne: S.string('Une consigne que le client donne pour le livreur (« sonnez au portail bleu »), mot pour mot, seulement si donnée'),
       },
     },
   },

@@ -73,24 +73,36 @@ void main() {
     },
   );
 
-  testWidgets('un livreur : trois étapes, et il va vous appeler', (
+  testWidgets('une course demandée : le titre, les étapes, rien de répété', (
     tester,
   ) async {
-    await afficherSuivi(tester, type: 'courier', statut: 'pending');
+    final gestes = await afficherSuivi(
+      tester,
+      type: 'courier',
+      statut: 'pending',
+      extra: {'total': 1000},
+    );
 
-    expect(find.text('Un livreur va vous appeler'), findsOneWidget);
-    expect(find.textContaining('7 minutes'), findsOneWidget);
-    // Trois étapes, de haut en bas.
-    expect(find.text('Livreur en route'), findsOneWidget);
-    expect(find.text('Colis récupéré'), findsOneWidget);
+    expect(find.text('Votre livraison'), findsOneWidget);
+    expect(find.text('Livreur demandé'), findsOneWidget);
+    // Le délai est dit dans la phrase de Tovo, pas sur la carte.
+    expect(find.textContaining('7 minutes'), findsNothing);
+    // Trois étapes, avec leurs lieux et leurs icônes au trait.
+    expect(find.text('Récupération chez vous'), findsOneWidget);
+    expect(find.text('En route'), findsOneWidget);
     expect(find.text('Livré'), findsOneWidget);
-    expect(find.text('Destination à préciser au livreur'), findsOneWidget);
-    expect(find.text('En préparation'), findsNothing);
-    // Personne à appeler tant qu'aucun livreur n'est assigné.
+    expect(find.byIcon(Icons.inventory_2_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.two_wheeler_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.location_on_outlined), findsOneWidget);
+    expect(find.text('Espèces'), findsOneWidget);
+    // Personne à appeler tant qu'aucun livreur n'est assigné ; on peut
+    // encore annuler.
     expect(find.byIcon(Icons.call), findsNothing);
+    await tester.tap(find.text('Annuler la commande'));
+    expect(gestes.single.action, 'cancel_order');
   });
 
-  testWidgets('livreur assigné : un vrai bouton pour l’appeler', (
+  testWidgets('livreur assigné : l’appeler, le suivre, plus d’annulation', (
     tester,
   ) async {
     final gestes = await afficherSuivi(
@@ -103,33 +115,60 @@ void main() {
     );
 
     expect(find.text('Moussa arrive'), findsOneWidget);
+    expect(find.text('Votre livraison'), findsNothing);
+    expect(find.byIcon(Icons.call), findsOneWidget);
+    expect(find.byIcon(Icons.map_outlined), findsOneWidget);
+    expect(find.text('Suivre sur la carte'), findsOneWidget);
+    expect(find.text('Annuler la commande'), findsNothing);
     await tester.tap(find.text('Appeler Moussa'));
     expect(gestes.single.action, 'call_driver');
     expect(gestes.single.payload['phone'], '+22790000000');
   });
 
-  testWidgets('« aller chercher » : il part le chercher, puis vous l’apporte', (
+  testWidgets(
+    '« aller chercher » : le titre et les étapes ne se répètent pas',
+    (tester) async {
+      await afficherSuivi(
+        tester,
+        type: 'courier',
+        statut: 'assigned',
+        extra: {
+          'mode': 'recuperer',
+          'pickup': {'hint': 'Chez Awa, Yantala'},
+          'driver': {'name': 'Moussa Issoufou', 'phone': '+22790000000'},
+        },
+      );
+      expect(find.text('Moussa part le chercher'), findsOneWidget);
+      expect(find.text('Il part le chercher'), findsNothing);
+      expect(find.text('Récupération à Chez Awa, Yantala'), findsOneWidget);
+      expect(find.text('En route vers vous'), findsOneWidget);
+    },
+  );
+
+  testWidgets('Harobanda → Banifandou, et la consigne rattachée au trajet', (
     tester,
   ) async {
     await afficherSuivi(
       tester,
       type: 'courier',
-      statut: 'assigned',
+      statut: 'ready',
       extra: {
-        'mode': 'recuperer',
-        'pickup': {'hint': 'Chez Awa, Yantala'},
-        'driver': {'name': 'Moussa Issoufou', 'phone': '+22790000000'},
+        'mode': 'deposer',
+        'pickup': {'hint': 'Harobanda'},
+        'dropoff': {'hint': 'Banifandou'},
+        'parcel_note': 'Sonner au portail bleu',
+        'total': 2750,
       },
     );
-    expect(find.text('Moussa part le chercher'), findsOneWidget);
-    expect(find.text('Il part le chercher'), findsOneWidget);
-    expect(find.text('Livré chez vous'), findsOneWidget);
-    // Où il va, et pas une « destination » qui est chez le client.
+    expect(find.text('Récupération à Harobanda'), findsOneWidget);
+    expect(find.text('En route vers Banifandou'), findsOneWidget);
     expect(
-      find.textContaining('À récupérer : Chez Awa, Yantala'),
+      find.textContaining(
+        'Pour le livreur : « Sonner au portail bleu »',
+        findRichText: true,
+      ),
       findsOneWidget,
     );
-    expect(find.textContaining('Destination'), findsNothing);
   });
 
   testWidgets('un colis livré est nommé comme tel', (tester) async {
@@ -159,7 +198,7 @@ void main() {
         },
       );
       expect(find.textContaining('À voir avec le client'), findsNothing);
-      expect(find.text('Destination à préciser au livreur'), findsOneWidget);
+      expect(find.text('En route'), findsOneWidget);
     },
   );
 

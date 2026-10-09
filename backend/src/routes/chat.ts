@@ -368,6 +368,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // répond peut-être à « Où récupérer le colis ? ».
     // AIGUILLAGE=cascade : l'ancien aiguillage (classifieur local + Jev).
     const cerveau = Boolean(body.data.text) && cerveauActif();
+    // L'application sait montrer un trajet entre deux lieux et porter la
+    // consigne jusqu'au livreur (contrat 2, 09/10). Une ancienne version
+    // garde la protection : aucune carte qui contredit le trajet demandé.
+    const trajetLibre = Number(request.headers['x-tovo-contract']) >= 2;
     // En même temps : le dernier message de Tovo, et les phrases validées de
     // la banque les plus proches (ai/banc/exemples.ts, ~20 ms, sans réseau).
     const decisionCerveau = cerveau
@@ -712,6 +716,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           userId,
           currentMessage: texteClient,
           ...(body.data.context ? { position: body.data.context } : {}),
+          trajetLibre,
         },
       );
       // Plus de carte qui commande d'elle-même (« auto ») : décision D1, la
@@ -719,7 +724,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // La carte prend la position d'elle-même : plus de « Touchez Ma
       // position », qui restait affiché même une fois le livreur demandé.
       // Article 4 : rien ne bouge avant le toucher — la phrase le dit.
-      const prevue = 'Voici votre course. Vérifiez-la, puis touchez **Commander le livreur** : le livreur ne part qu’à ce moment-là, et il vous appelle.';
+      // Pas de carte (un trajet qu'elle ne sait pas montrer, 09/10) : aucune
+      // course n'est annoncée, seulement les deux choix proposés.
+      const sansCarte = !resultat.components.some((c) => c.type === 'courier_form');
+      // Une phrase courte et courtoise : la carte dit le reste (V6, 09/10).
+      const prevue = sansCarte
+        ? 'Je ne peux pas encore préparer une course d’un endroit à un autre sans passer par vous. Choisissez une des deux possibilités ci-dessous.'
+        : 'Avec plaisir, voici votre course.';
 
       emit({ type: 'conversation', conversation_id: conversationId });
       emit({ type: 'results', components: resultat.components });
@@ -916,6 +927,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         position: autour ? { ...autour.point, depuis: body.data.context ?? null } : body.data.context,
         ...(autour ? { autourDe: autour.nom } : {}),
         ...(streaming ? { onEvent: emit } : {}),
+        trajetLibre,
       });
 
       if (resultat.rejected.length > 0) {
@@ -981,13 +993,22 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
  */
 function argumentsDeCourse(d: Details | undefined): Record<string, unknown> {
   if (!d) return {};
+  // Départ ET arrivée, quand le client a dit les deux (09/10, S4) :
+  // preparer_course juge si la carte peut les montrer. Et la consigne, qu'il
+  // ne doit jamais dire transmise sans place pour elle.
+  const consigne = d.precision ? { consigne: d.precision } : {};
   if (d.depart) {
-    return { mode: 'recuperer', ou_recuperer: d.depart, ...(d.telephone ? { contact_sur_place: d.telephone } : {}) };
+    return {
+      mode: 'recuperer', ou_recuperer: d.depart,
+      ...(d.arrivee ? { arrivee: { hint: d.arrivee } } : {}),
+      ...(d.telephone ? { contact_sur_place: d.telephone } : {}),
+      ...consigne,
+    };
   }
   if (d.arrivee) {
-    return { mode: 'deposer', arrivee: { hint: d.arrivee }, ...(d.telephone ? { destinataire: d.telephone } : {}) };
+    return { mode: 'deposer', arrivee: { hint: d.arrivee }, ...(d.telephone ? { destinataire: d.telephone } : {}), ...consigne };
   }
-  return d.telephone ? { destinataire: d.telephone } : {};
+  return { ...(d.telephone ? { destinataire: d.telephone } : {}), ...consigne };
 }
 
 async function dernierMessageTovo(

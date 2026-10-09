@@ -36,7 +36,9 @@ export async function offreVille(db: SupabaseClient): Promise<OffreVille> {
 
 export async function messageLivreurEnRoute(db: SupabaseClient, nita = false): Promise<string> {
   const { minutes } = await offreVille(db);
-  const base = `C’est parti. Un livreur vous appelle dans les **${minutes} minutes**.`;
+  // Le délai n'est dit qu'ICI : ni la carte de suivi ni une ligne « Livreur
+  // commandé » ne le répètent plus (maquette V6, 09/10).
+  const base = `C’est noté. Un livreur vous appelle dans les **${minutes} minutes**.`;
   // Sans code ni jargon : la demande attend le client dans MyNita.
   return nita ? `${base} Confirmez le paiement dans MyNita, ou payez au livreur.` : base;
 }
