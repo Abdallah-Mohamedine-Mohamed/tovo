@@ -41,7 +41,7 @@ void main() {
     });
 
     expect(find.text('Récupérer à'), findsOneWidget);
-    expect(find.text('Chez moi'), findsOneWidget);
+    expect(find.text('Ma position'), findsOneWidget);
     expect(find.text('Où l’apporter ?'), findsOneWidget);
     expect(find.text('Course en ville'), findsOneWidget);
     // Le délai n'est plus dit sur la carte : la phrase de Tovo le dit.
@@ -109,7 +109,7 @@ void main() {
 
       expect(find.text('Chez Awa, Yantala'), findsOneWidget);
       expect(find.text('90 12 34 56'), findsOneWidget);
-      expect(find.text('Chez moi'), findsOneWidget);
+      expect(find.text('Ma position'), findsOneWidget);
 
       await _commander(tester);
       final p = gestes.single.payload;
@@ -181,6 +181,66 @@ void main() {
     },
   );
 
+  testWidgets(
+    'ma position : le quartier sur la même ligne, lu par le livreur',
+    (tester) async {
+      final gestes = await _afficher(tester, {
+        'mode': 'recuperer',
+        'pickup': {
+          'chez_moi': false,
+          'hint': 'Bobiel',
+          'lat': 13.55,
+          'lng': 2.09,
+        },
+        'dropoff': {
+          ..._client,
+          'chez_moi': true,
+          'hint': 'Chez le client',
+          'quartier': 'Niamey 2000',
+        },
+        'position': _client,
+      });
+      expect(find.text('Ma position · Niamey 2000'), findsOneWidget);
+      expect(find.textContaining('Chez moi'), findsNothing);
+      await _commander(tester);
+      expect(
+        gestes.single.payload['dropoff_hint'],
+        'Position du client · Niamey 2000',
+      );
+    },
+  );
+
+  testWidgets('avec un devis, modifier un lieu ne change pas le prix', (
+    tester,
+  ) async {
+    final gestes = await _afficher(tester, {
+      'pickup': _client,
+      'dropoff': {
+        'chez_moi': false,
+        'hint': 'Banifandou',
+        'lat': 13.54,
+        'lng': 2.14,
+      },
+      'estimate': {'price': 2750, 'distance_m': 6814, 'devis': 'devis-1'},
+    });
+    expect(find.text(Money.format(2750)), findsOneWidget);
+
+    // Le client change l'arrivée : le prix affiché reste celui du devis.
+    // Le second « Modifier » : celui de l'arrivée.
+    await tester.tap(find.widgetWithText(TextButton, 'Modifier').at(1));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'Koira Kano');
+    await tester.tap(find.text('Valider'));
+    await tester.pumpAndSettle();
+    expect(find.text('Koira Kano'), findsOneWidget);
+    expect(find.text(Money.format(2750)), findsOneWidget);
+    expect(find.text('Prix calculé à la commande'), findsNothing);
+
+    await _commander(tester);
+    expect(gestes.single.payload['devis'], 'devis-1');
+    expect(gestes.single.payload['dropoff_hint'], 'Koira Kano');
+  });
+
   testWidgets('la consigne s’ajoute d’un geste et part avec la course', (
     tester,
   ) async {
@@ -223,7 +283,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     // … et si elle est introuvable, le bouton reste là, sans message.
-    expect(find.text('Ma position'), findsOneWidget);
+    expect(find.text('Me localiser'), findsOneWidget);
     expect(find.byType(SnackBar), findsNothing);
     final bouton = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, 'Commander un livreur'),

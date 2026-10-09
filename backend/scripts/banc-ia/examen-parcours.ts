@@ -50,6 +50,8 @@ interface Etape {
   toucher?: (precedente: Reponse) => { action: string; payload: Record<string, unknown> } | null;
   /** Toucher « Commander un livreur » sur la dernière carte de course, comme l'application. */
   commander?: boolean;
+  /** Avant de commander, le client modifie l'arrivée (« Modifier », un lieu écrit). */
+  modifierArrivee?: string;
   /** Préparer la base avant de parler (ex. vieillir la conversation). */
   avant?: (c: Contexte) => Promise<void>;
   verifier: Verification[];
@@ -165,7 +167,7 @@ const vieillir = (heures: number) => async (c: Contexte) => {
 };
 /** La dernière course du client, telle qu'en base (ce que lit le livreur). */
 async function courseEnBase(client: TestUser): Promise<Record<string, unknown> | null> {
-  const { data: o } = await admin.from('orders').select('id, dropoff_hint, status')
+  const { data: o } = await admin.from('orders').select('id, dropoff_hint, status, total')
     .eq('user_id', client.id).eq('type', 'courier').order('placed_at', { ascending: false }).limit(1).maybeSingle();
   if (!o) return null;
   const { data: cd } = await admin.from('courier_details')
@@ -722,6 +724,21 @@ const SCENARIOS: Scenario[] = [
     ] },
   ] },
 
+  { id: 'E4', parcours: 'B', titre: 'l’arrivée modifiée : le prix affiché reste le prix facturé (devis, 0079)', contrat: 2, etapes: [
+    { dire: 'Je veux un livreur pour déposer un colis à Banifandou', verifier: [aucuneCommande, carteAvec(/banifandou/, 'Banifandou')] },
+    { commander: true, modifierArrivee: 'Koira Kano', verifier: [
+      enBase('l’arrivée modifiée', (x) => /koira kano/.test(texteDe(x.dropoff_hint))),
+      ['en base : le prix facturé est celui de la carte', async (_r, c) => {
+        const prixCarte = (c.reponses[0]!.composants.find((x) => x.type === 'courier_form')?.data.estimate as { price?: number } | undefined)?.price;
+        const course = await courseEnBase(c.client);
+        const devis = (c.reponses[0]!.composants.find((x) => x.type === 'courier_form')?.data.estimate as { devis?: string } | undefined)?.devis;
+        if (Number(course?.total) !== prixCarte) console.log(`
+E4 : carte ${prixCarte} F, devis ${devis ?? 'aucun'}, facturé ${course?.total} F`);
+        return typeof prixCarte === 'number' && Number(course?.total) === prixCarte;
+      }],
+    ] },
+  ] },
+
   { id: 'G1', parcours: 'G', titre: 'remarque', etapes: [{ dire: 'Tu es sourd ?', verifier: [
     ['aucun produit', (r) => produits(r).length === 0], ['une phrase', (r) => r.texte.trim().length > 0],
   ] }] },
@@ -765,9 +782,12 @@ async function parlerUneFois(app: FastifyInstance, client: TestUser, conversatio
  * sur les mêmes cartes. La commande part vraiment (POST /orders) ; aucun
  * livreur réel n'est prévenu (dispatch remplacé plus haut).
  */
-async function commanderLaCarte(app: FastifyInstance, client: TestUser, conversationId: string | undefined, derniere: Reponse | undefined): Promise<Reponse> {
-  const carte = derniere?.composants.find((x) => x.type === 'courier_form')?.data;
-  if (!carte) return { statut: 0, texte: 'aucune carte de course à toucher', composants: [] };
+async function commanderLaCarte(app: FastifyInstance, client: TestUser, conversationId: string | undefined, derniere: Reponse | undefined, modifierArrivee?: string): Promise<Reponse> {
+  const lue = derniere?.composants.find((x) => x.type === 'courier_form')?.data;
+  if (!lue) return { statut: 0, texte: 'aucune carte de course à toucher', composants: [] };
+  // « Modifier » l'arrivée, comme l'application : un lieu écrit, sans position.
+  const carte = modifierArrivee ? { ...lue, dropoff: { chez_moi: false, hint: modifierArrivee } } : lue;
+  const devis = (lue.estimate as { devis?: unknown } | null | undefined)?.devis;
   type Bout = { chez_moi?: boolean; hint?: string; lat?: number; lng?: number } | null | undefined;
   const p = carte.pickup as Bout;
   const a = carte.dropoff as Bout;
@@ -794,6 +814,7 @@ async function commanderLaCarte(app: FastifyInstance, client: TestUser, conversa
       ...(carte.pickup_contact ? { pickup_contact: carte.pickup_contact } : {}),
       ...(carte.dropoff_contact ? { dropoff_contact: carte.dropoff_contact } : {}),
       ...(carte.consigne ? { parcel_note: carte.consigne } : {}),
+      ...(typeof devis === 'string' ? { devis } : {}),
       ...(recuperer ? { mode: 'recuperer' } : {}),
       parcel: 'small', payment_method: 'cash',
     },
@@ -865,7 +886,7 @@ await Promise.all(Array.from({ length: 4 }, async () => {
       let c = conversationId;
       if (etape.commander) {
         if (etape.avant) await etape.avant(contexte);
-        r = await commanderLaCarte(app, client, conversationId, contexte.reponses.at(-1));
+        r = await commanderLaCarte(app, client, conversationId, contexte.reponses.at(-1), etape.modifierArrivee);
       } else {
         let corps: Record<string, unknown> | null = etape.dire ? { text: etape.dire } : null;
         if (!corps && etape.toucher) {

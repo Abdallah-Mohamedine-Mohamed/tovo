@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 
 import '../../core/api.dart';
@@ -10,7 +11,7 @@ import 'numero_nita.dart';
 /// `courier_form` — la carte livreur : RÉCUPÉRER À → LIVRER À.
 ///
 /// Maquette « Carte de course Tovo », version 6 validée le 09/10 : un trajet,
-/// deux lieux qu'on touche pour les modifier (« Chez moi » prérempli), une
+/// deux lieux qu'on touche pour les modifier (« Ma position » prérempli), une
 /// consigne pour le livreur, espèces ou Nita, le prix, puis « Commander un
 /// livreur ». Style iOS : sections très claires, icônes au trait noir,
 /// aucun trait de séparation.
@@ -89,13 +90,17 @@ class _CourierFormState extends State<CourierForm> {
 
   static double? _num(Object? v) => (v as num?)?.toDouble();
 
-  static bool _hintChezClient(String hint) => const {
-    _chezLeClient,
-    'Chez vous',
-    'Chez moi',
-    'Position du client',
-    'Ma position actuelle',
-  }.contains(hint.trim());
+  static bool _hintChezClient(String hint) =>
+      const {
+        _chezLeClient,
+        'Chez vous',
+        'Chez moi',
+        'Position du client',
+        'Ma position actuelle',
+      }.contains(hint.trim()) ||
+      // « Chez le client · Niamey 2000 » : le client, avec son quartier.
+      hint.trim().startsWith(_chezLeClient) ||
+      hint.trim().startsWith('Position du client');
 
   _Lieu _lire(
     Map<String, dynamic> m, {
@@ -135,6 +140,12 @@ class _CourierFormState extends State<CourierForm> {
   /// Un lieu modifié : le prix estimé par le serveur ne vaut plus, la base
   /// recalcule à la commande.
   bool _prixAJour = true;
+
+  /// Le devis du serveur (migration 0079, 09/10) : la base facture le prix
+  /// affiché, même si le client modifie un lieu. Le prix ne bouge donc pas.
+  /// Sans devis (serveur ancien), un lieu modifié rend le prix incertain.
+  String? get _devis => widget.component.map('estimate')['devis'] as String?;
+  bool get _prixGarde => _devis != null || _prixAJour;
 
   /// Le numéro Nita qui paiera (8 chiffres), quand le paiement est Nita.
   String? _numeroNita;
@@ -330,7 +341,13 @@ class _CourierFormState extends State<CourierForm> {
     // chercher » quand le client est à l'arrivée seulement ; sinon
     // « déposer », départ et arrivée tels quels (un trajet A → B compris).
     final recuperer = !depart.chezMoi && arrivee.chezMoi;
-    final ici = _lieuClient ?? _chezLeClient;
+    // Le livreur lit aussi le quartier : « Position du client · Niamey
+    // 2000 » (« chez » ferait penser au domicile).
+    final ici =
+        _lieuClient ??
+        (_quartierClient != null
+            ? 'Position du client · $_quartierClient'
+            : _chezLeClient);
 
     // Le départ : chez le client, sa position ; ailleurs, la position du lieu
     // si elle est connue, sinon celle du client, autour de laquelle un
@@ -360,6 +377,7 @@ class _CourierFormState extends State<CourierForm> {
         if (arrivee.contact.isNotEmpty) 'dropoff_contact': arrivee.contact,
         if (_consigne.trim().isNotEmpty) 'parcel_note': _consigne.trim(),
         'payment_method': _paiement,
+        if (_devis != null) 'devis': _devis,
         if (_paiement == 'mobile_money' && _numeroNita != null)
           'payment_phone': _numeroNita,
       }),
@@ -373,7 +391,7 @@ class _CourierFormState extends State<CourierForm> {
     if (_commandee) return const SizedBox.shrink();
 
     final estimation = widget.component.map('estimate');
-    final prix = _prixAJour ? (estimation['price'] as num?)?.toInt() : null;
+    final prix = _prixGarde ? (estimation['price'] as num?)?.toInt() : null;
     final forfait = estimation['flat'] == true;
     final distance = (estimation['distance_m'] as num?)?.toInt();
     final mobileMoney = widget.component.data['mobile_money'] == true;
@@ -407,10 +425,10 @@ class _CourierFormState extends State<CourierForm> {
             child: Column(
               children: [
                 _LigneLieu(
-                  icone: Icons.inventory_2_outlined,
+                  icone: CupertinoIcons.cube_box,
                   libelle: 'Récupérer à',
                   valeur: _depart.chezMoi
-                      ? 'Chez moi'
+                      ? _maPosition
                       : (_depart.texte.isEmpty
                             ? 'Où aller chercher ?'
                             : _depart.texte),
@@ -426,7 +444,7 @@ class _CourierFormState extends State<CourierForm> {
                   icone: Icons.location_on_outlined,
                   libelle: _arrivee.vide ? 'Livrer à · facultatif' : 'Livrer à',
                   valeur: _arrivee.chezMoi
-                      ? 'Chez moi'
+                      ? _maPosition
                       : (_arrivee.texte.isEmpty
                             ? 'Où l’apporter ?'
                             : _arrivee.texte),
@@ -512,7 +530,7 @@ class _CourierFormState extends State<CourierForm> {
             Center(
               child: TextButton(
                 onPressed: _localisation ? null : () => _prendreMaPosition(),
-                child: Text(_localisation ? 'Recherche…' : 'Ma position'),
+                child: Text(_localisation ? 'Recherche…' : 'Me localiser'),
               ),
             ),
           ],
@@ -542,8 +560,20 @@ class _CourierFormState extends State<CourierForm> {
     );
   }
 
-  /// Sous « Chez moi » : l'endroit choisi sur la carte, s'il y en a un.
+  /// Sous « Ma position » : l'endroit choisi sur la carte, s'il y en
+  /// a un (le quartier est déjà sur la ligne).
   String _detailClient() => _lieuClient ?? '';
+
+  /// « Ma position · Niamey 2000 » : sa position, pas son domicile
+  /// (« Chez moi » prêtait à confusion, décision du fondateur le 09/10).
+  String get _maPosition => _quartierClient == null
+      ? 'Ma position'
+      : 'Ma position · $_quartierClient';
+
+  /// Le quartier du client, donné par le serveur d'après sa position
+  /// (OpenStreetMap, 09/10).
+  late final String? _quartierClient =
+      (_pickup['quartier'] ?? _dropoff['quartier']) as String?;
 }
 
 // ------------------------------------------------------------------ morceaux
@@ -794,7 +824,7 @@ class _FeuilleState extends State<_Feuille> {
           const SizedBox(height: 14),
           _BoutonFeuille(
             icone: Icons.my_location,
-            libelle: 'Chez moi',
+            libelle: 'Ma position',
             onTap: () => _rendre('chez_moi'),
           ),
           _BoutonFeuille(

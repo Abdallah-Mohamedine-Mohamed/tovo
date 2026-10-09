@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Faits, FluxVerifie, verifierTexte } from '../../src/ai/verificateur.js';
+import { avecPreuves, Faits, FluxVerifie, verifierTexte } from '../../src/ai/verificateur.js';
 
 /** Ce que les outils ont renvoyé pendant le tour. */
 function faitsDuTour(): Faits {
@@ -94,16 +94,44 @@ describe('article 4 de la constitution : rien n’est dit fait s’il ne l’est
     expect(verifierTexte('Bien noté pour sans oignons !', new Faits()).texte).toBe('');
     expect(verifierTexte('Je l’ai transmis à l’équipe.', new Faits()).texte).toBe('');
     const garde = new Faits();
-    garde.ajouter({ precision: 'sans oignons', enregistree: true });
+    garde.ajouter(avecPreuves({ precision: 'sans oignons' }, 'precision_enregistree'));
     expect(verifierTexte('C’est noté : sans oignons.', garde).texte).toContain('noté');
     // Un conseil n'est pas une affirmation.
     expect(verifierTexte('Vous pouvez noter votre adresse.', new Faits()).texte).toContain('noter');
   });
-  it('« en route » seulement si une commande existe', () => {
+  it('les anciens champs devinés ne prouvent plus rien (étape 3, 09/10)', () => {
+    const devine = new Faits();
+    devine.ajouter({ enregistree: true, signale: true, order_id: 'c1', livreur_assigne: true, annulee: true });
+    expect(verifierTexte('C’est noté.', devine).texte).toBe('');
+    expect(verifierTexte('Votre livreur est en route.', devine).texte).toBe('');
+    expect(verifierTexte('C’est annulé.', devine).texte).toBe('');
+  });
+  it('« en route » seulement si un livreur bouge VRAIMENT (la carte de suivi le dit)', () => {
     expect(verifierTexte('Un livreur se rend à votre position.', new Faits()).texte).toBe('');
+    const attente = new Faits();
+    attente.composant({ type: 'order_tracking', data: { order_id: 'c1', status: 'ready' } });
+    expect(verifierTexte('Votre livreur est en route.', attente).texte).toBe('');
     const suivi = new Faits();
-    suivi.ajouter({ order_id: 'c1', status: 'picked_up' });
+    suivi.composant({ type: 'order_tracking', data: { order_id: 'c1', status: 'picked_up', driver: { name: 'Moussa' } } });
     expect(verifierTexte('Votre livreur est en route.', suivi).texte).toContain('en route');
+  });
+  it('« c’est dans votre panier » seulement si l’article y est', () => {
+    expect(verifierTexte('C’est dans votre panier.', new Faits()).texte).toBe('');
+    // S10, relu le 09/10 : « C'est ajouté. », sans rien d'ajouté.
+    expect(verifierTexte('C’est ajouté. Vous trouverez votre boisson chez O’Takoss.', new Faits()).texte).not.toContain('ajouté');
+    expect(verifierTexte('C’est fait.', new Faits()).texte).toBe('');
+    const annulee = new Faits();
+    annulee.ajouter(avecPreuves({}, 'commande_annulee'));
+    expect(verifierTexte('C’est fait, votre commande est annulée.', annulee).texte).not.toBe('');
+    const panier = new Faits();
+    panier.ajouter(avecPreuves({ total: 3500 }, 'ajoute_au_panier'));
+    expect(verifierTexte('C’est dans votre panier.', panier).texte).not.toBe('');
+  });
+  it('« la carte qui s’affiche », « ci-dessous » seulement avec une carte (S1)', () => {
+    expect(verifierTexte('Ajustez l’adresse sur la carte qui s’affiche.', new Faits()).texte).toBe('');
+    const carte = new Faits();
+    carte.composant({ type: 'courier_form', data: {} });
+    expect(verifierTexte('Touchez le bouton ci-dessous.', carte).texte).not.toBe('');
   });
 });
 
@@ -111,7 +139,7 @@ describe('article 4 : « annulé » seulement si une annulation a eu lieu', () =
   it('sans commande annulée, la phrase est retirée', () => {
     expect(verifierTexte('Ça marche, c’est annulé.', new Faits()).texte).toBe('');
     const annulee = new Faits();
-    annulee.ajouter({ order_id: 'c1', status: 'cancelled' });
+    annulee.composant({ type: 'order_tracking', data: { order_id: 'c1', status: 'cancelled' } });
     expect(verifierTexte('Votre commande a été annulée.', annulee).texte).toContain('annulée');
   });
 });

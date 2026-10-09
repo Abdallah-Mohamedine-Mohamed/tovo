@@ -15,16 +15,49 @@ import { normaliserIntention } from './intents.js';
  * redemandé au modèle.
  */
 
+/**
+ * LES PREUVES (article 4, étape 3 du 09/10, docs/ETAT-DE-PARCOURS.md).
+ *
+ * Une action n'est dite faite que si le CODE qui l'a faite l'a déclaré,
+ * pendant ce tour, par `preuves: [...]` dans ses données (ou par une carte
+ * de suivi affichée, qui dit l'état réel de la commande). Avant, le
+ * vérificateur devinait à partir de noms de champs : n'importe quel
+ * `order_id` rendait « votre livreur est en route » vrai.
+ */
+export const PREUVES = [
+  /** La note de commande est enregistrée (« sans oignons ») : elle partira avec la commande. */
+  'precision_enregistree',
+  /** Le problème est enregistré pour l'équipe (table signalements). */
+  'signalement_transmis',
+  /** L'article est réellement dans le panier. */
+  'ajoute_au_panier',
+  /** Une commande existe (créée, ou en cours et affichée). */
+  'commande_existe',
+  /** Un livreur est assigné et bouge (assigned, picked_up, delivering). */
+  'livreur_en_route',
+  /** La commande est annulée. */
+  'commande_annulee',
+  /** La consigne est sur la carte de course : elle partira avec la course au toucher. */
+  'consigne_sur_la_carte',
+] as const;
+export type Preuve = (typeof PREUVES)[number];
+
+/** Ajoute des preuves au résumé d'une action réellement faite. */
+export function avecPreuves<T extends Record<string, unknown>>(resume: T, ...preuves: Preuve[]): T & { preuves: Preuve[] } {
+  const deja = Array.isArray(resume.preuves) ? (resume.preuves as Preuve[]) : [];
+  return { ...resume, preuves: [...new Set([...deja, ...preuves])] };
+}
+
 /** Ce qui est vrai pendant ce tour : nombres et noms, tels que la base les a donnés. */
 export class Faits {
   private readonly nombres = new Set<number>();
   private readonly textes: string[] = [];
-  /**
-   * Les actions que les données CONFIRMENT (article 4 de la constitution) :
-   * « gardee » (une précision enregistrée, un signalement transmis),
-   * « commande » (une commande ou une course existe).
-   */
-  private readonly actions = new Set<'gardee' | 'commande' | 'annulee' | 'proche' | 'ailleurs'>();
+  /** Les preuves déclarées par le code pendant ce tour. */
+  private readonly preuves = new Set<Preuve>();
+  /** Des cartes sont réellement affichées avec la phrase (« ci-dessous »). */
+  private cartes = 0;
+  /** Ce que les données montrent (pas des actions) : un lieu proche, des commerces hors Tovo. */
+  private readonly actions = new Set<'proche' | 'ailleurs'>();
   /** Le client cherche autour d'un AUTRE lieu que lui (« vers Yantala ») : les distances partent de là. */
   private autourDUnLieu = false;
   /**
@@ -62,9 +95,9 @@ export class Faits {
     }
     if (typeof valeur === 'object') {
       const o = valeur as Record<string, unknown>;
-      if (o.enregistree === true || o.signale === true) this.actions.add('gardee');
-      if (typeof o.order_id === 'string' || o.livreur_assigne === true) this.actions.add('commande');
-      if (o.annulee === true || o.status === 'cancelled') this.actions.add('annulee');
+      if (Array.isArray(o.preuves)) {
+        for (const p of o.preuves) if ((PREUVES as readonly unknown[]).includes(p)) this.preuves.add(p as Preuve);
+      }
       if (o.distances_depuis_le_lieu === true) this.autourDUnLieu = true;
       if (o.consigne_transmise === false && typeof o.consigne_du_client === 'string') {
         this.consigneNonTransmise = normaliserIntention(o.consigne_du_client).split(' ')
@@ -79,11 +112,35 @@ export class Faits {
     }
   }
 
-  confirme(action: 'gardee' | 'commande' | 'annulee' | 'proche' | 'ailleurs'): boolean {
+  confirme(action: 'proche' | 'ailleurs'): boolean {
     // Mesurées depuis le lieu demandé, les distances ne disent rien de la
     // proximité du CLIENT : « près de vous » n'est jamais confirmé.
     if (action === 'proche' && this.autourDUnLieu) return false;
     return this.actions.has(action);
+  }
+
+  /** L'une de ces preuves a été déclarée pendant ce tour. */
+  prouve(...preuves: Preuve[]): boolean {
+    return preuves.some((p) => this.preuves.has(p));
+  }
+
+  /**
+   * Une carte réellement affichée avec la phrase. Celle du SUIVI dit l'état
+   * réel de la commande : c'est une preuve, lue dans la base au moment même.
+   */
+  composant(c: { type: string; data: Record<string, unknown> }): void {
+    this.cartes++;
+    this.ajouter(c.data);
+    if (c.type !== 'order_tracking') return;
+    const statut = String(c.data.status ?? '');
+    if (statut === 'cancelled') this.preuves.add('commande_annulee');
+    else if (statut && statut !== 'delivered') this.preuves.add('commande_existe');
+    if (['assigned', 'picked_up', 'delivering'].includes(statut) && c.data.driver) this.preuves.add('livreur_en_route');
+  }
+
+  /** Des cartes accompagnent la phrase : « ci-dessous », « touchez » ont un objet. */
+  get carteAffichee(): boolean {
+    return this.cartes > 0;
   }
 
   /**
@@ -191,7 +248,20 @@ const ENVOIE_AILLEURS = /(?:je vous (?:invite|conseille|recommande)|vous (?:pouv
 const DIT_PROCHE = /(?:^|[\s,;(«'’])(?:pr[eè]s de (?:chez )?vous|[aà] proximit[ée]|tout pr[eè]s|non loin de (?:chez )?vous|pas loin de (?:chez )?vous|juste [aà] c[oô]t[ée])/i;
 // 09/10 : « je m'occupe de récupérer votre sac », « c'est lancé » — avant
 // tout toucher, la course n'existe pas (E2, relu).
-const DIT_EN_ROUTE = /\b(?:(?:est|sont) en route|se rend\b|se rendra\b|se dirige|vous rejoint|est parti|arrive (?:chez|à) vous|vient chez vous|je m.occupe|c.est lanc[ée]|je lance)/i;
+const DIT_EN_ROUTE = /\b(?:(?:est|sont) en route|se rend\b|se rendra\b|se dirige|vous rejoint|est parti|arrive (?:chez|à) vous|vient chez vous)/i;
+/** Une course ou une commande dite lancée : il faut qu'elle existe. */
+const DIT_LANCE = /\b(?:je m.occupe|c.est lanc[ée]|je lance|c.est parti)/i;
+/** « C'est dans votre panier » : il faut que l'article y soit. */
+// « C'est ajouté. » (S10, relu le 09/10 : rien n'était ajouté).
+const DIT_PANIER = /\b(?:c.est (?:bien )?dans votre panier|c.est (?:bien )?ajouté(?:e|s|es)?|(?:est|sont|a été|ont été) ajouté(?:e|s|es)? (?:à|au|dans) (?:votre )?panier|j.ai ajouté)/i;
+/** « C'est fait », « c'est réglé » : il faut qu'une action ait eu lieu, quelle qu'elle soit. */
+const DIT_FAIT = /\bc.est (?:bien )?(?:fait|réglé|regle)\b/i;
+/**
+ * Une phrase qui montre une carte (« le bouton ci-dessous », « la carte qui
+ * s'affiche ») : il faut une carte. Relu le 09/10 (S1) : « ajustez l'adresse
+ * sur la carte qui s'affiche », sans aucune carte.
+ */
+const DIT_CARTE = /(?:ci-dessous|ci-après|qui s.affiche|touchez|appuyez sur)/i;
 
 /**
  * « à 3,2 km de Yantala » quand on a cherché vers Yantala : aucune distance
@@ -234,17 +304,28 @@ export function affirmationsInventees(phrase: string, faits: Faits): Affirmation
   for (const m of phrase.matchAll(DUREE)) {
     if (!faits.connaitNombre(Number(m[1]))) inventees.push({ genre: 'duree', valeur: m[0] });
   }
-  if (DIT_GARDE.test(phrase) && !faits.confirme('gardee')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_GARDE)![0] });
-  if (DIT_TRANSMIS.test(phrase) && !faits.confirme('gardee')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_TRANSMIS)![0] });
+  // Chaque action dite faite exige SA preuve (étape 3, 09/10).
+  const exige = (motif: RegExp, prouvee: boolean) => {
+    const m = motif.exec(phrase);
+    if (m && !prouvee) inventees.push({ genre: 'action', valeur: m[0] });
+  };
+  exige(DIT_GARDE, faits.prouve('precision_enregistree', 'signalement_transmis'));
+  exige(DIT_TRANSMIS, faits.prouve('precision_enregistree', 'signalement_transmis', 'consigne_sur_la_carte'));
   const consigne = consigneDiteTransmise(phrase, faits.consigneNonTransmise);
   if (consigne) inventees.push({ genre: 'action', valeur: consigne });
-  if (DIT_EN_ROUTE.test(phrase) && !faits.confirme('commande')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_EN_ROUTE)![0] });
+  exige(DIT_EN_ROUTE, faits.prouve('livreur_en_route'));
+  exige(DIT_LANCE, faits.prouve('commande_existe'));
+  exige(DIT_PANIER, faits.prouve('ajoute_au_panier'));
+  exige(DIT_FAIT, faits.prouve(
+    'precision_enregistree', 'signalement_transmis', 'ajoute_au_panier', 'commande_annulee', 'consigne_sur_la_carte',
+  ));
+  exige(DIT_CARTE, faits.carteAffichee);
   if (DIT_PROCHE.test(phrase) && !faits.confirme('proche')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_PROCHE)![0] });
   if (ENVOIE_AILLEURS.test(phrase) && !faits.confirme('ailleurs')) inventees.push({ genre: 'action', valeur: phrase.match(ENVOIE_AILLEURS)![0] });
   // Une distance attribuée au lieu cherché : toutes partent du client (07/10).
   const auLieu = distanceAuLieu(phrase, faits.lieuCherche);
   if (auLieu) inventees.push({ genre: 'donnees', valeur: auLieu });
-  if (DIT_ANNULE.test(phrase) && !faits.confirme('annulee')) inventees.push({ genre: 'action', valeur: phrase.match(DIT_ANNULE)![0] });
+  exige(DIT_ANNULE, faits.prouve('commande_annulee'));
   if (CONSEIL_MEDICAL.test(phrase)) inventees.push({ genre: 'sante', valeur: CONSEIL_MEDICAL.match(phrase)?.[0] ?? phrase });
   if (TUTOIEMENT.test(phrase)) inventees.push({ genre: 'ton', valeur: phrase.match(TUTOIEMENT)![0].trim() });
   for (const t of telephonesDans(phrase)) {

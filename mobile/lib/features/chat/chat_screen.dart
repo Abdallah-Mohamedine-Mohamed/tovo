@@ -1430,6 +1430,8 @@ class _ChatScreenState extends State<ChatScreen> {
         // le livreur la lit dans son application.
         if ((p['parcel_note'] as String?)?.isNotEmpty ?? false)
           'parcel_note': p['parcel_note'],
+        // Le devis : la base facture le prix affiché sur la carte (0079).
+        if (p['devis'] is String) 'devis': p['devis'],
         'payment_method': p['payment_method'] ?? 'cash',
         // Le numéro Nita qui paiera, quand il n'est pas celui du compte.
         if (p['payment_phone'] is String) 'payment_phone': p['payment_phone'],

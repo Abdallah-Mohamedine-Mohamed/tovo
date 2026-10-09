@@ -13,6 +13,7 @@ import {
   demandeUnLivreur,
   referenceAuxResultats,
   requeteProduitUtilisateur,
+  normaliserIntention,
 } from '../ai/intents.js';
 import { signaler } from '../lib/observability.js';
 import { env } from '../config/env.js';
@@ -31,6 +32,10 @@ import { rechercheProduitRapide } from '../ai/orchestrator.js';
 import { cataloguePage, HORS_TOVO_NON, HORS_TOVO_OUI, reponseHorsTovo, type CataloguePage } from '../services/catalogue.js';
 import { demandeDeGarde, reponseGarde } from '../services/pharmaciesGarde.js';
 import { reperer } from '../services/lieux.js';
+import { avecPreuves } from '../ai/verificateur.js';
+import {
+  argumentsDeLaCourse, completerCourse, decrireMemoire, DUREE_DE_VIE_MS, lireConversation, type Ligne, type Memoire,
+} from '../ai/conversation.js';
 import { rediger } from '../ai/redacteur.js';
 import { serviceClient } from '../services/supabase.js';
 import { orderTracking, type Component } from '../components/builders.js';
@@ -374,13 +379,23 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const trajetLibre = Number(request.headers['x-tovo-contract']) >= 2;
     // En même temps : le dernier message de Tovo, et les phrases validées de
     // la banque les plus proches (ai/banc/exemples.ts, ~20 ms, sans réseau).
+    // LA MÉMOIRE DE CONVERSATION (étape 4, 09/10) : la course ou le repas en
+    // cours, et la dernière liste affichée, relus dans les derniers messages
+    // (ai/conversation.ts). Au-delà de 6 heures, plus rien ne compte.
+    const sansMemoire: Memoire = { tache: null, ecran: null };
+    const memoire: Promise<Memoire> = body.data.conversation_id
+      ? lignesRecentes(db, body.data.conversation_id).then((l) => lireConversation(l)).catch(() => sansMemoire)
+      : Promise.resolve(sansMemoire);
     const decisionCerveau = cerveau
       ? Promise.all([
         dernierMessageTovo(db, body.data.conversation_id).catch(() => null),
         etatDuParcours(db, body.data.conversation_id),
         env.CERVEAU_EXEMPLES === 'oui' ? exemplesPour(body.data.text!).catch(() => []) : Promise.resolve([]),
+        memoire,
       ])
-        .then(([avant, etat, exemples]) => comprendre(body.data.text!, { avant, etat, exemples }))
+        .then(([avant, etat, exemples, m]) => comprendre(body.data.text!, {
+          avant, etat: [decrireMemoire(m), etat].filter(Boolean).join(' '), exemples,
+        }))
         .catch(() => null)
       : Promise.resolve(null);
     const decisionCascade = body.data.text && !cerveau && cascadeActive()
@@ -597,6 +612,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         const d = await decisionCerveau;
         // Article 3 : on ne propose d'agir que sur ce qui existe.
         route = d ? routeDuCerveau(d, body.data.text, { commande: await commandeEnCours(db) }) : { type: 'habituel', decision: null };
+        // Une course est déjà ouverte : redemander un livreur ne fait que la
+        // remontrer (la carte, sans commande) — rien à faire confirmer (M8).
+        if (route.type === 'clarifier' && (d?.intention === 'livreur' || d?.intention === 'colis')
+          && (await memoire).tache?.genre === 'course') {
+          route = { type: 'intention', intention: d.intention, decision: route.decision };
+        }
         requeteCerveau = d?.produit || undefined;
         rayonCerveau = d?.rayon;
         suiteCerveau = d?.suite === true;
@@ -703,14 +724,22 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // « Va chercher un colis chez Moussa au 90 12 34 56 » : les détails sont
     // extraits sans modèle (lieu, numéro), la voie rapide suffit.
     const recuperation = texteClient ? demandeDeRecuperation(texteClient) : false;
-    if (texteClient && (!detailsDeColis || recuperation) && (parJev
+    // Une course est en cours (sa carte n'est pas commandée) : un lieu, un
+    // numéro, ou une nouvelle demande de livreur la COMPLÈTE — même après une
+    // question entre deux (S1, S2). Ce que le client redit remplace l'ancien.
+    const memoireLue = await memoire;
+    const courseEnCours = memoireLue.tache?.genre === 'course' ? memoireLue.tache.course : null;
+    const ditPourLaCourse = Boolean(detailsCerveau?.depart || detailsCerveau?.arrivee || detailsCerveau?.telephone);
+    const suiteDeCourse = Boolean(texteClient && courseEnCours && parJev
+      && (intention === 'colis' || intention === 'livreur' || ditPourLaCourse));
+    if (texteClient && (suiteDeCourse || ((!detailsDeColis || recuperation) && (parJev
       ? intention === 'colis' || intention === 'livreur'
-      : demandeUnColis(texteClient) || demandeUnLivreur(texteClient))) {
+      : demandeUnColis(texteClient) || demandeUnLivreur(texteClient))))) {
       const executer = EXECUTORS['preparer_course'];
       if (!executer) throw new Error('outil preparer_course absent');
 
       const resultat = await executer(
-        argumentsDeCourse(detailsCerveau),
+        courseEnCours ? argumentsDeLaCourse(completerCourse(courseEnCours, detailsCerveau ?? {})) : argumentsDeCourse(detailsCerveau),
         {
           db,
           userId,
@@ -800,7 +829,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         : `Désolé pour ce souci. Je l’ai transmis à l’équipe Tovo, qui va s’en occuper.${orderId ? ' Voici la commande concernée.' : ''}`;
       emit({ type: 'conversation', conversation_id: conversationId });
       emit({ type: 'results', components: composants });
-      const contenu = await enMots(prevue, { signale: !erreurSignalement, commande_concernee: Boolean(orderId) }, composants);
+      const signalement = { signale: !erreurSignalement, commande_concernee: Boolean(orderId) };
+      const contenu = await enMots(prevue, erreurSignalement ? signalement : avecPreuves(signalement, 'signalement_transmis'), composants);
       emit({ type: 'text', text: contenu });
       await db.from('messages').insert({
         conversation_id: conversationId, role: 'user', content: contenuClient, client_message_id: body.data.client_message_id,
@@ -906,6 +936,27 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         ? reperer(lieuCerveau) : null;
       const autour = situe?.point && situe.description ? { point: situe.point, nom: situe.description } : null;
       if (lieuCerveau) request.log.info({ ref: body.data.client_message_id, lieu: lieuCerveau, situe: autour?.nom ?? null }, 'lieu de recherche');
+
+      // Un repas en cours chez une boutique (S10) : un produit demandé se
+      // cherche d'abord CHEZ ELLE (« et un coca » chez O'Takoss).
+      const repas = memoireLue.tache?.genre === 'repas' ? memoireLue.tache.boutique : null;
+      // « et un coca » est parfois lu comme une désignation : ce n'en est une
+      // que s'il désigne ce qui est affiché (« le premier », « celui-là »).
+      const designeVraiment = intention === 'designe' && Boolean(texteClient && referenceAuxResultats(texteClient));
+      if (repas && !designeVraiment && (intention === 'recherche' || intention === 'boutique' || intention === 'envie' || intention === 'designe')) {
+        // Ce qu'il cherche, sans le nom de la boutique (« coca O'Takoss » → « coca »).
+        const nomBoutique = new Set(normaliserIntention(repas.nom).split(' '));
+        const q = normaliserIntention(requeteCerveau ?? texteClient ?? '').split(' ')
+          .filter((m) => m && !nomBoutique.has(m)).join(' ');
+        const chezElle = q
+          ? await cataloguePage(db, { q, merchant_ids: [repas.id], limit: 8 }, false).catch(() => null)
+          : null;
+        if (chezElle && chezElle.total > 0 && chezElle.match_type !== 'similar') {
+          intention = 'recherche';
+          requeteCerveau = q;
+          pageInitiale = chezElle;
+        }
+      }
 
       output.emit({ type: 'conversation', conversation_id: conversationId });
       const resultat = await orchestrate({
@@ -1018,12 +1069,30 @@ async function dernierMessageTovo(
   if (!conversationId) return null;
   const { data } = await db
     .from('messages')
-    .select('content')
+    .select('content, created_at')
     .eq('conversation_id', conversationId)
     .eq('role', 'assistant')
     .order('created_at', { ascending: false })
     .limit(1);
-  return (data?.[0]?.content as string | undefined) ?? null;
+  const dernier = data?.[0] as { content?: string; created_at?: string } | undefined;
+  // Plus de 6 heures : il ne compte plus (décision E2, S8).
+  if (!dernier || Date.now() - Date.parse(dernier.created_at ?? '') > DUREE_DE_VIE_MS) return null;
+  return dernier.content ?? null;
+}
+
+/** Les derniers messages, du plus récent au plus ancien : la mémoire s'y relit. */
+async function lignesRecentes(
+  db: import('@supabase/supabase-js').SupabaseClient,
+  conversationId: string,
+): Promise<Ligne[]> {
+  const { data } = await db
+    .from('messages')
+    .select('role, content, components, created_at')
+    .eq('conversation_id', conversationId)
+    .in('role', ['user', 'assistant'])
+    .order('created_at', { ascending: false })
+    .limit(12);
+  return (data ?? []) as Ligne[];
 }
 
 /**

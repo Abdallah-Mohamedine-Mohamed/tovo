@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -416,15 +417,18 @@ class _OrderTrackingState extends State<OrderTracking>
 
   /// Le lieu est le client lui-même (ce que la base ou la carte écrivent),
   /// pas un endroit à nommer.
-  static bool _chezLeClient(String lieu) => const {
-    '',
-    'Chez le client',
-    'Chez vous',
-    'Chez moi',
-    'Position du client',
-    'Ma position actuelle',
-    _destinationInconnue,
-  }.contains(lieu.trim());
+  static bool _chezLeClient(String lieu) =>
+      const {
+        '',
+        'Chez le client',
+        'Chez vous',
+        'Chez moi',
+        'Position du client',
+        'Ma position actuelle',
+        _destinationInconnue,
+      }.contains(lieu.trim()) ||
+      lieu.trim().startsWith('Chez le client') ||
+      lieu.trim().startsWith('Position du client');
 
   /// Le suivi d'une COURSE dans le fil (maquette « Carte de course Tovo »,
   /// V6, 09/10) : le titre d'état, les trois étapes AVEC leurs lieux, la
@@ -463,9 +467,9 @@ class _OrderTrackingState extends State<OrderTracking>
     // Les étapes portent les lieux : le titre ne se répète plus.
     final etapes = <(IconData, String)>[
       (
-        Icons.inventory_2_outlined,
+        CupertinoIcons.cube_box,
         departClient
-            ? 'Récupération chez vous'
+            ? 'Récupération à votre position'
             : depart.isEmpty || _chezLeClient(depart)
             ? 'Récupération du colis'
             : 'Récupération à $depart',

@@ -22,7 +22,7 @@ import type { Rayon, TypeCommerceCherche } from './decideur.js';
 import { idDuRayon } from '../services/catalogue.js';
 import type { PointDeRecherche } from '../services/commerces.js';
 import { avecOuvertureReelle } from '../services/ouverture.js';
-import { Faits, FluxVerifie, verifierTexte, type Verification } from './verificateur.js';
+import { avecPreuves, Faits, FluxVerifie, verifierTexte, type Verification } from './verificateur.js';
 import { rediger, redigerEtJuger, sansPromesseVide } from './redacteur.js';
 
 /**
@@ -412,7 +412,9 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
         content: note
           ? `C’est gardé pour votre commande : « ${note} ». La boutique le verra avec la commande, et vous pouvez le modifier au panier.`
           : 'Je n’arrive pas à garder cette précision pour le moment. Vous pourrez l’écrire dans la note au moment de commander.',
-        summary: { precision: input.precision, enregistree: Boolean(note), note_de_commande: note },
+        summary: note
+          ? avecPreuves({ precision: input.precision, enregistree: true, note_de_commande: note }, 'precision_enregistree')
+          : { precision: input.precision, enregistree: false },
         components: panier?.components ?? [],
       });
     }
@@ -676,7 +678,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
         }
         faits.ajouter(resultat.summary);
         faits.ajouter(resultat.content);
-        for (const composant of resultat.components) faits.ajouter(composant.data);
+        for (const composant of resultat.components) faits.composant(composant);
         // Des ressemblances seulement (« console de jeu » pour « livres pour
         // enfants ») : jugées plus bas, avant d'être montrées (article 6).
         if (appel.name === 'rechercher_produits' && (resultat.summary as { suggestions?: unknown } | undefined)?.suggestions === true) {
@@ -909,13 +911,15 @@ async function chargerHistorique(
 ): Promise<{ history: LlmTurn[]; pending?: PendingMerchantChoice; affichage: boolean; dernierAffichage: Component[] }> {
   const { data } = await db
     .from('messages')
-    .select('role, content, components')
+    .select('role, content, components, created_at')
     .eq('conversation_id', conversationId)
     .in('role', ['user', 'assistant'])
     .order('created_at', { ascending: false })
     .limit(HISTORIQUE);
 
-  const latest = data?.[0];
+  // Plus de 6 heures : la conversation ne compte plus (décision E2, S8).
+  const fraiches = (data ?? []).filter((m) => !m.created_at || Date.now() - Date.parse(m.created_at as string) <= 6 * 3_600_000);
+  const latest = fraiches[0];
   const choices = latest?.role === 'assistant' && Array.isArray(latest.components)
     ? (latest.components as Component[]).filter((component) => component.type === 'merchant_card' && component.data.choose_branch === true)
     : [];
@@ -924,7 +928,7 @@ async function chargerHistorique(
   // récent qui en affichait. Un seul résumé, pas un par tour — le client
   // désigne ce qu'il a sous les yeux, et chaque tour résumé coûterait des
   // tokens à chaque appel.
-  const lignes = data ?? [];
+  const lignes = fraiches;
   let resume: string | null = null;
   let indexAffiche = -1;
   for (let i = 0; i < lignes.length; i++) {

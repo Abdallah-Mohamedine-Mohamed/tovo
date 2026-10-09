@@ -191,7 +191,7 @@ async function appeler(r: ARediger, delaiMs: number): Promise<string | null> {
   faits.ajouter(prevue);
   // Le client : ses mots pour les noms, jamais pour un nombre (verificateur.ts).
   faits.ajouterParole(r.message);
-  for (const c of r.composants ?? []) faits.ajouter(c.data);
+  for (const c of r.composants ?? []) faits.composant(c);
 
   const entree = JSON.stringify({
     ...(r.avant ? { dernier_message_de_tovo: r.avant.slice(0, 400) } : {}),

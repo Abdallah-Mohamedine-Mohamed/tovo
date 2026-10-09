@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tovo/components/registry.dart';
@@ -88,10 +89,10 @@ void main() {
     // Le délai est dit dans la phrase de Tovo, pas sur la carte.
     expect(find.textContaining('7 minutes'), findsNothing);
     // Trois étapes, avec leurs lieux et leurs icônes au trait.
-    expect(find.text('Récupération chez vous'), findsOneWidget);
+    expect(find.text('Récupération à votre position'), findsOneWidget);
     expect(find.text('En route'), findsOneWidget);
     expect(find.text('Livré'), findsOneWidget);
-    expect(find.byIcon(Icons.inventory_2_outlined), findsOneWidget);
+    expect(find.byIcon(CupertinoIcons.cube_box), findsOneWidget);
     expect(find.byIcon(Icons.two_wheeler_outlined), findsOneWidget);
     expect(find.byIcon(Icons.location_on_outlined), findsOneWidget);
     expect(find.text('Espèces'), findsOneWidget);

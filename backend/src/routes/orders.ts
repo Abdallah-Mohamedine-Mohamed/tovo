@@ -92,6 +92,11 @@ const courierSchema = z.object({
    * sa position, départ décrit par pickup_hint). Migration 0059.
    */
   mode: z.enum(['deposer', 'recuperer']).default('deposer'),
+  /**
+   * Le devis de la carte (migration 0079) : la base facture le prix que le
+   * client a lu, même s'il a modifié le trajet. Seul le serveur en crée.
+   */
+  devis: z.string().uuid().nullable().default(null),
 });
 
 /**
@@ -245,6 +250,9 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
             // ne connaît pas ce paramètre, et « déposer » doit continuer de
             // fonctionner.
             ...(body.data.mode === 'recuperer' ? { p_mode: 'recuperer' } : {}),
+            // Seulement avec un devis : il n'en existe qu'une fois la
+            // migration 0079 appliquée (sinon le paramètre serait inconnu).
+            ...(body.data.devis ? { p_devis: body.data.devis } : {}),
           });
 
     if (error) {

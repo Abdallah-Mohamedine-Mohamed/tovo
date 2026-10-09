@@ -20,7 +20,8 @@ import { serviceClient } from '../services/supabase.js';
 import { horsTovo, cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, merchantMenu, type CatalogueIntent } from '../services/catalogue.js';
 import { decrireImageDepuisOctets } from '../services/vision.js';
 import { offreVille } from '../services/livreur.js';
-import { reperer } from '../services/lieux.js';
+import { avecPreuves } from './verificateur.js';
+import { autourDe, reperer } from '../services/lieux.js';
 import { paiementMobileActif } from '../config/env.js';
 import {
   demandeDeProximite,
@@ -833,7 +834,9 @@ const ajouterAuPanier: Executor = async (args, ctx) => {
     return { summary: { erreur: error.message }, components: [] };
   }
 
-  return panierCourant(ctx);
+  // L'article est dans le panier : la preuve de « c'est dans votre panier ».
+  const panier = await panierCourant(ctx);
+  return { ...panier, summary: avecPreuves((panier.summary ?? {}) as Record<string, unknown>, 'ajoute_au_panier') };
 };
 
 const voirPanier: Executor = async (_args, ctx) => panierCourant(ctx);
@@ -898,7 +901,7 @@ const annulerCommande: Executor = async (args, ctx) => {
   }
   const { data: suivi } = await ctx.db.rpc('order_tracking', { p_order_id: orderId });
   return {
-    summary: { confirmation_demandee: true, order_id: orderId },
+    summary: avecPreuves({ confirmation_demandee: true, order_id: orderId }, 'commande_existe'),
     content: 'Voulez-vous vraiment annuler cette commande ?',
     components: [
       ...(suivi ? [orderTracking(suivi as Record<string, unknown>)] : []),
@@ -931,7 +934,7 @@ export async function annulerConfirme(ctx: ToolContext, orderId: string): Promis
   const { data: suivi } = await ctx.db.rpc('order_tracking', { p_order_id: orderId });
 
   return {
-    summary: { annulee: true, order_id: orderId },
+    summary: avecPreuves({ annulee: true, order_id: orderId }, 'commande_annulee'),
     components: suivi ? [orderTracking(suivi as Record<string, unknown>)] : [],
     content: 'C’est fait, votre commande est annulée.',
   };
@@ -1217,6 +1220,7 @@ const preparerCourse: Executor = async (args, ctx) => {
       destinataire: texte(args, 'destinataire'),
       consigne: texte(args, 'consigne') || (ctx.consigne ?? '').trim(),
       colis: texte(args, 'colis') || 'small',
+      message,
     });
   }
   if (!chezLeClient(departDit) && !chezLeClient(arriveeDite)) {
@@ -1368,14 +1372,29 @@ async function carteDeTrajet(ctx: ToolContext, t: {
   destinataire: string;
   consigne: string;
   colis: string;
+  message?: string;
 }): Promise<ToolOutcome> {
   const offre = await offreVille(ctx.db);
   const client = ctx.position ?? null;
-  const departChezMoi = t.depart === null && !t.allerChercher;
-  const arriveeChezMoi = t.arrivee === null && (t.allerChercher || t.depart !== null);
-  const situe = (lieu: string | null) => (lieu ? reperer(lieu).point : null);
-  const pDepart = departChezMoi ? client : situe(t.depart);
-  const pArrivee = arriveeChezMoi ? client : situe(t.arrivee);
+  // Le quartier et le repère du client, d'après sa position (OpenStreetMap,
+  // 09/10) : « Chez moi · Niamey 2000 », et le livreur le lit aussi.
+  const ici = client ? autourDe(client) : null;
+  const situeDepart = t.depart ? await situer(ctx.db, t.depart) : null;
+  const situeArrivee = t.arrivee ? await situer(ctx.db, t.arrivee) : null;
+  // « à Niamey 2000, ici à ma position » : un lieu dit qui EST le client —
+  // il dit « ici », « ma position », « chez moi », et le lieu est son quartier
+  // ou à moins de 1,5 km de lui (09/10, capture du fondateur).
+  const ditIci = /\b(?:ici|ma position|chez moi|chez nous)\b/.test(normaliserIntention(t.message ?? ''));
+  const cEstLeClient = (lieu: string | null, p: { lat: number; lng: number } | null) => Boolean(
+    lieu && ditIci && client
+    && ((p && distanceMetres(p.lat, p.lng, client.lat, client.lng) <= 1500)
+      || (ici?.quartier && normaliserIntention(lieu) === normaliserIntention(ici.quartier))),
+  );
+  const arriveeEstLeClient = cEstLeClient(t.arrivee, situeArrivee);
+  const departChezMoi = (t.depart === null && !t.allerChercher) || (!arriveeEstLeClient && cEstLeClient(t.depart, situeDepart));
+  const arriveeChezMoi = (t.arrivee === null && (t.allerChercher || t.depart !== null)) || arriveeEstLeClient;
+  const pDepart = departChezMoi ? client : situeDepart;
+  const pArrivee = arriveeChezMoi ? client : situeArrivee;
   // La sorte que la base connaît (0059) : « récupérer » quand le client est
   // à l'arrivée seulement — elle facture alors le forfait.
   const recuperer = !departChezMoi && arriveeChezMoi;
@@ -1386,13 +1405,34 @@ async function carteDeTrajet(ctx: ToolContext, t: {
     const { data } = await ctx.db.rpc('courier_price', { p_distance_m: distance, p_parcel: t.colis });
     if (typeof data === 'number') estimate = { price: data, distance_m: distance };
   }
+  // Le DEVIS (migration 0079, décision du fondateur le 09/10) : le prix
+  // affiché, calculé depuis les réglages de l'admin, est gardé ; si le client
+  // modifie un lieu, la course garde ce prix. Écrit avec la clé de service :
+  // le client ne peut pas fabriquer de devis. Sans la table (migration pas
+  // encore appliquée), la base calcule le prix comme avant.
+  if (estimate && typeof estimate.price === 'number') {
+    const ecrire = () => serviceClient().from('devis_courses').insert({
+      user_id: ctx.userId,
+      prix: estimate!.price,
+      distance_m: typeof estimate!.distance_m === 'number' ? estimate!.distance_m : null,
+    }).select('id').single();
+    try {
+      // Une coupure passagère : une seconde tentative (vu le 09/10, E4).
+      let { data } = await ecrire();
+      if (!data?.id) ({ data } = await ecrire());
+      if (data?.id) estimate = { ...estimate, devis: data.id as string };
+    } catch {
+      // Pas de devis : le prix reste celui de la base, comme avant.
+    }
+  }
 
   const point = (p: { lat: number; lng: number } | null) => (p ? { lat: p.lat, lng: p.lng } : {});
+  const chezMoi = { chez_moi: true, hint: 'Chez le client', ...point(client), quartier: ici?.quartier ?? null };
   const pickup = departChezMoi
-    ? { chez_moi: true, hint: 'Chez le client', ...point(client) }
+    ? chezMoi
     : { chez_moi: false, hint: t.depart ?? '', ...point(pDepart) };
   const dropoff = arriveeChezMoi
-    ? { chez_moi: true, hint: 'Chez le client', ...point(client) }
+    ? chezMoi
     : t.arrivee
       ? { chez_moi: false, hint: t.arrivee, ...point(pArrivee) }
       : null;
@@ -1404,7 +1444,7 @@ async function carteDeTrajet(ctx: ToolContext, t: {
         arrivee: arriveeChezMoi ? 'chez le client' : t.arrivee || 'à préciser au livreur',
       },
       estimation: estimate?.price ?? null,
-      ...(t.consigne ? { consigne_pour_le_livreur: t.consigne, consigne_sur_la_carte: true } : {}),
+      ...(t.consigne ? { consigne_pour_le_livreur: t.consigne, consigne_sur_la_carte: true, preuves: ['consigne_sur_la_carte'] } : {}),
       consigne: 'La carte suffit : le client touche « Commander un livreur ». Ne pose aucune question.',
       // Le ton voulu par le fondateur (maquette V6, 09/10).
       a_dire: 'Une seule phrase, courte et courtoise, par exemple « Avec plaisir, voici votre course. » '
@@ -1430,6 +1470,39 @@ async function carteDeTrajet(ctx: ToolContext, t: {
       },
     ],
   };
+}
+
+/**
+ * Un lieu dit, situé : un quartier ou un repère (OpenStreetMap), sinon une
+ * boutique TOVO nommée — sa vraie position (09/10 : « BOBA » restait sans
+ * position, le prix tombait au forfait). Plusieurs agences et aucune
+ * précisée : on ne devine pas.
+ */
+async function situer(db: SupabaseClient, lieu: string): Promise<{ lat: number; lng: number } | null> {
+  const repere = reperer(lieu).point;
+  if (repere) return repere;
+  try {
+    const { data } = await db.from('merchants').select('id, name, search_aliases').eq('is_approved', true).limit(400);
+    const dit = ` ${normaliserIntention(lieu)} `;
+    const ditColle = dit.replace(/ /g, '');
+    // Le nom, ou l'un de ses alias (« OTAKOSS », « O takos ») ; collé, pour
+    // que « Otakoss » reconnaisse « O'TAKOSS ».
+    const reconnu = (n: string) => n.length >= 3
+      && (dit.includes(` ${n} `) || (n.replace(/ /g, '').length >= 5 && ditColle.includes(n.replace(/ /g, ''))));
+    const boutiques = ((data ?? []) as Array<{ id: string; name: string; search_aliases?: string | null }>).map((m) => ({
+      id: m.id,
+      noms: [m.name.replace(/\([^)]*\)/g, ' '), ...(m.search_aliases ?? '').split(';')].map((n) => normaliserIntention(n)).filter(Boolean),
+      agence: normaliserIntention((/\(([^)]*)\)/.exec(m.name)?.[1]) ?? ''),
+    })).filter((b) => b.noms.some(reconnu));
+    const precisees = boutiques.filter((b) => b.agence && dit.includes(` ${b.agence} `));
+    const choisies = precisees.length ? precisees : boutiques;
+    if (choisies.length !== 1) return null;
+    const { data: positions } = await db.rpc('merchants_positions', { ids: [choisies[0]!.id] });
+    const p = (positions as Array<{ lat: number | null; lng: number | null }> | null)?.[0];
+    return p?.lat != null && p?.lng != null ? { lat: p.lat, lng: p.lng } : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Haversine — suffisant pour une estimation, la base fait foi au final. */

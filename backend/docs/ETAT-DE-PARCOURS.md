@@ -326,6 +326,40 @@ Maquette validée : « Carte de course Tovo », version 6 (https://claude.ai/art
 - **Ton** : « Avec plaisir, voici votre course. » ; le vérificateur retire désormais « je m'occupe », « c'est lancé », « je lance » tant qu'aucune commande n'existe.
 - **Mesures** : application 200 tests (2 échecs anciens connus, accueil du 01/10), analyse propre ; serveur 359/359. Examen : scénarios **de bout en bout** E1–E3 (contrat 2 : la carte, le toucher, la course **en base**, et le suivi que lit le livreur) réussis ; passage complet 70/76, **aucune régression** sur la référence. Échecs restants : S1, S8, S10, R2 (mémoire, étape 4 ; recherche « Margherita »), S5 (instable, réussi 2 fois ce matin, raté 2 fois l'après-midi, chemin non touché), E2 une fois HTTP 500 passager (réussi aux 5 autres passages, cause non trouvée).
 
+### Étape 3 faite : des réponses fondées sur des preuves (09/10)
+
+Le vérificateur ne devine plus une action à partir de noms de champs (un `order_id` quelconque rendait « votre livreur est en route » vrai). Une action n'est dite faite que si le CODE qui l'a faite l'a déclaré pendant le tour (`preuves`, `verificateur.ts`), ou si une carte de suivi affichée le montre (état lu en base au même moment).
+
+| Ce que dit la phrase | La preuve exigée | Déclarée par |
+|---|---|---|
+| « c'est noté », « gardé », « enregistré » | `precision_enregistree` ou `signalement_transmis` | la note de commande enregistrée (`orchestrator.ts`) ; le signalement inséré (`chat.ts`) |
+| « sera transmise », « avec votre consigne » | les mêmes, ou `consigne_sur_la_carte` | la carte de trajet qui porte la consigne (`carteDeTrajet`) |
+| « est en route », « se rend », « vient chez vous » | `livreur_en_route` | une carte de suivi : livreur assigné, statut assigned / picked_up / delivering |
+| « je m'occupe », « c'est lancé », « je lance », « c'est parti » | `commande_existe` | la demande d'annulation, une carte de suivi d'une commande en cours |
+| « c'est dans votre panier », « j'ai ajouté » | `ajoute_au_panier` | l'ajout réussi (`ajouterAuPanier`) |
+| « annulé » | `commande_annulee` | l'annulation réussie, ou une carte de suivi annulée |
+| « ci-dessous », « qui s'affiche », « touchez » | une carte réellement affichée | les cartes du tour (S1 : « la carte qui s'affiche », sans carte) |
+
+Mesures : serveur 362/362 (dont les anciens champs qui ne prouvent plus rien, et chaque règle ci-dessus). Examen complet : 69/76, aucune réponse vidée. Écarts relus : S2 (Yantala perdu, mémoire, déjà instable), S7 (réponse juste — pas de prix inventé, boutique hors Tovo comprise — mais sans nommer « Amimi-Scarf »), S1, S5, S8, S10, R2 inchangés (étape 4 et recherche).
+
+**Complément du 09/10 :**
+- **Trou refermé** (relu dans S10 : « C'est ajouté. », rien d'ajouté) : « c'est ajouté » exige `ajoute_au_panier` ; « c'est fait », « c'est réglé » exigent une action réelle du tour.
+- **Le prix affiché est le prix facturé** (décision du fondateur : « ne fais pas changer le prix même si le trajet change ; les prix, je les configure depuis l'admin »). Migration **0079** : un DEVIS est écrit par le serveur quand la carte s'affiche (prix calculé depuis les réglages de l'admin), la base le facture à la commande, même si le client a modifié un lieu. Le client ne peut ni créer ni lire un devis (RLS sans règle ; lecture par `prendre_devis_course`, son devis, non expiré — 6 h —, une seule fois). Sans la migration, tout fonctionne comme avant. Scénario E4 (arrivée modifiée, prix en base = prix de la carte) : échoue tant que 0079 n'est pas appliquée (table absente, vérifié), à relancer ensuite.
+
+### Étape 4 faite : la mémoire de conversation (09/10)
+
+**Un écart assumé avec la version 2 écrite** : pas de nouvelle colonne. La mémoire est **relue** à chaque message dans les 12 derniers messages de la conversation, qui enregistrent déjà chaque carte, son contenu et son heure (`ai/conversation.ts`, code pur). Rien en double, aucune écriture concurrente possible : l'objection de l'autre agent est réglée par construction. Le panier, les commandes et les prix restent dans leurs tables.
+
+- **La tâche en cours** : une course pas encore commandée (le contenu de sa dernière carte : départ, arrivée, numéros, consigne) ou un repas chez une boutique (la seule boutique de la dernière liste). Fermée par une commande (carte de suivi), une carte éteinte, ou une recherche qui mêle plusieurs boutiques.
+- **L'écran** : la dernière liste réellement affichée, dans l'ordre de l'écran (boutiques Tovo, produits, commerces hors Tovo).
+- **6 heures** (E2) : au-delà, ni la tâche, ni l'écran, ni l'historique de l'assistant, ni le dernier message de Tovo ne comptent plus.
+- **Le cerveau lit** la tâche et l'écran en clair. **Le serveur complète** la course en cours avec ce que le client ajoute, champ par champ (E3), même après une question entre deux ; une nouvelle demande de livreur pendant une course ouverte ne fait plus hésiter (M8). **Le repas en cours** : un produit demandé se cherche d'abord dans sa boutique (« et un coca » lu comme une désignation n'en est une que s'il désigne l'écran).
+- L'assistant voit aussi les commerces hors Tovo affichés, numérotés à la suite des boutiques (`memoire.ts`).
+
+Mesures : serveur 371/371 (dont 9 tests de la mémoire, un par scénario). Examen complet **74/77** ; nouvelles réussites **S1, S2, S5, S7, S8, S10**. Relu : M4 (HTTP 401 technique, réussi à la relance), R6 (cassé par ma première formulation « une commande chez… » — corrigé : « le client compose un repas, rien n'est commandé » —, 2/2 ensuite), S10 (4 réussites sur 5, un échec non expliqué), R2 (recherche « Margherita », non traité).
+
+Pas fait, à dire : `etat.ts` et le résumé de `memoire.ts` restent (complétés, pas remplacés) ; le champ `tache` du cerveau n'a pas été ajouté (le serveur déduit la suite de course de l'intention et des précisions ; aucun échec mesuré ne l'exige) ; « laisse tomber » ne ferme pas la course dans la mémoire (M7 passe grâce à `etat.ts`) ; la boutique du repas vient de la liste affichée, pas encore du panier.
+
 ### Les décisions qui vous reviennent
 
 - **G1** : adopter cette version 2 (mémoire limitée, sans données métier) à la place de la version 1. *Recommandation : oui.*

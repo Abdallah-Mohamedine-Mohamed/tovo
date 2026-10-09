@@ -78,14 +78,17 @@ export async function etatDuParcours(db: SupabaseClient, conversationId: string 
   try {
     const [dernier, commande] = await Promise.all([
       conversationId
-        ? db.from('messages').select('components').eq('conversation_id', conversationId).eq('role', 'assistant')
+        ? db.from('messages').select('components, created_at').eq('conversation_id', conversationId).eq('role', 'assistant')
           .order('created_at', { ascending: false }).limit(1)
         : Promise.resolve({ data: null }),
       db.from('orders').select('status, type').not('status', 'in', '(delivered,cancelled)')
         .gte('placed_at', new Date(Date.now() - 48 * 3_600_000).toISOString())
         .order('placed_at', { ascending: false }).limit(1),
     ]);
-    const ecran = decrireEcran((dernier.data as Array<{ components?: unknown }> | null)?.[0]?.components);
+    const ligne = (dernier.data as Array<{ components?: unknown; created_at?: string }> | null)?.[0];
+    // Un écran de plus de 6 heures ne vaut plus (décision E2, S8).
+    const frais = ligne && Date.now() - Date.parse(ligne.created_at ?? '') <= 6 * 3_600_000;
+    const ecran = decrireEcran(frais ? ligne.components : undefined);
     const enCours = (commande.data as Array<{ status: string; type: string }> | null)?.[0];
     return [
       ...(ecran.length ? ['À l’écran :', ...ecran] : ['Rien n’est à l’écran.']),

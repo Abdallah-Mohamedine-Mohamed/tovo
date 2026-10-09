@@ -125,8 +125,9 @@ function fausseBase() {
             // Une commande en cours (pour l'annulation), et le dernier
             // message de Tovo (lu seul, pour le contexte du cerveau).
             : table === 'orders' ? { data: [{ id: COMMANDE }], error: null }
-              : table === 'messages' && colonnes === 'content'
-                ? { data: [{ content: 'Où le livreur doit-il récupérer le colis ?' }], error: null }
+              : table === 'messages' && colonnes === 'content, created_at'
+                // Un message récent : au-delà de 6 heures il ne compterait plus.
+                ? { data: [{ content: 'Où le livreur doit-il récupérer le colis ?', created_at: new Date().toISOString() }], error: null }
                 : { data: null, error: null },
         );
       }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { EXECUTORS } from '../../src/ai/tools.js';
-import { Faits, verifierTexte } from '../../src/ai/verificateur.js';
+import { avecPreuves, Faits, verifierTexte } from '../../src/ai/verificateur.js';
 
 /** La base ne sert qu'au tarif ville : sans réponse, la carte reste sans prix. */
 const db = { rpc: async () => ({ data: null, error: null }) } as unknown as SupabaseClient;
@@ -74,6 +74,23 @@ describe('la nouvelle carte (contrat 2) : tout trajet, consigne comprise (09/10)
     expect(d.estimate).toMatchObject({ price: 1000, flat: true });
   });
 
+  it('« à Niamey 2000, ici à ma position » : c’est chez le client, avec son quartier (09/10)', async () => {
+    // Le client est à Niamey 2000 (centre du quartier dans OpenStreetMap).
+    const { chargerLieux } = await import('../../src/services/lieux.js');
+    const n2000 = chargerLieux().find((l) => l.genre === 'quartier' && l.nom === 'Niamey 2000')!;
+    const r = await EXECUTORS.preparer_course!(
+      { mode: 'recuperer', ou_recuperer: 'Bobiel', arrivee: { hint: 'Niamey 2000' } },
+      {
+        db: base, userId: 'u1', trajetLibre: true, position: { lat: n2000.lat, lng: n2000.lng },
+        currentMessage: 'Je veux qu’un livreur aille chercher un colis à Bobiel et me l’amène à Niamey 2000, ici à ma position',
+      },
+    );
+    const d = carte(r)!;
+    expect(d.dropoff).toMatchObject({ chez_moi: true, quartier: 'Niamey 2000' });
+    expect(d.pickup).toMatchObject({ chez_moi: false, hint: 'Bobiel' });
+    expect(d.mode).toBe('recuperer');
+  });
+
   it('« je veux un livreur » : départ chez moi, arrivée à préciser', async () => {
     const d = carte(await trajet({}))!;
     expect(d.pickup).toMatchObject({ chez_moi: true });
@@ -104,13 +121,13 @@ describe('le vérificateur : « sera transmise », « avec votre consigne » (09
     expect(verifierTexte('Avec plaisir, je m’occupe de récupérer votre sac à Yantala.', faits).texte).toBe('');
     expect(verifierTexte('C’est lancé !', faits).texte).toBe('');
     const commande = new Faits();
-    commande.ajouter({ order_id: 'o1' });
+    commande.ajouter(avecPreuves({ order_id: 'o1' }, 'commande_existe'));
     expect(verifierTexte('C’est lancé !', commande).texte).not.toBe('');
   });
 
   it('gardés quand la précision est réellement enregistrée', () => {
     const faits = new Faits();
-    faits.ajouter({ enregistree: true, note_de_commande: 'appelez en arrivant' });
+    faits.ajouter(avecPreuves({ note_de_commande: 'appelez en arrivant' }, 'precision_enregistree'));
     expect(verifierTexte('Votre instruction sera transmise au livreur.', faits).texte).not.toBe('');
   });
 });
