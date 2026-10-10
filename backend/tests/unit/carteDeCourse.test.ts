@@ -91,6 +91,28 @@ describe('la nouvelle carte (contrat 2) : tout trajet, consigne comprise (09/10)
     expect(d.mode).toBe('recuperer');
   });
 
+  it('un quartier mal transcrit est situé, sans confondre une enseigne avec Garbado', async () => {
+    const boutiques = {
+      from: () => ({ select: () => ({ eq: () => ({ limit: async () => ({ data: [
+        { id: 'garba', name: "GARBA D'OR", search_aliases: 'Garbador' },
+      ] }) }) }) }),
+      rpc: async (nom: string) => nom === 'merchants_positions'
+        ? { data: [{ lat: 13.51, lng: 2.13 }] }
+        : { data: { price: 1000, callback_minutes: 7 } },
+    } as unknown as SupabaseClient;
+    const preparerAvecBoutiques = (lieu: string) => EXECUTORS.preparer_course!(
+      { mode: 'recuperer', ou_recuperer: lieu },
+      { db: boutiques, userId: 'u1', currentMessage: '', position, trajetLibre: true },
+    );
+
+    const quartier = carte(await preparerAvecBoutiques('Gobien'))!;
+    expect(quartier.pickup).toMatchObject({ hint: 'Bobiel', chez_moi: false });
+    expect(typeof (quartier.pickup as { lat?: unknown }).lat).toBe('number');
+
+    const enseigne = carte(await preparerAvecBoutiques('Garbador'))!;
+    expect(enseigne.pickup).toMatchObject({ hint: 'Garbador', chez_moi: false, lat: 13.51, lng: 2.13 });
+  });
+
   it('« je veux un livreur » : départ chez moi, arrivée à préciser', async () => {
     const d = carte(await trajet({}))!;
     expect(d.pickup).toMatchObject({ chez_moi: true });

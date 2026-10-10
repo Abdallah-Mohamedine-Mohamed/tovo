@@ -31,7 +31,7 @@ import { aiguiller, cascadeActive } from '../ai/cascade.js';
 import { rechercheProduitRapide } from '../ai/orchestrator.js';
 import { cataloguePage, HORS_TOVO_NON, HORS_TOVO_OUI, reponseHorsTovo, type CataloguePage } from '../services/catalogue.js';
 import { demandeDeGarde, reponseGarde } from '../services/pharmaciesGarde.js';
-import { reperer } from '../services/lieux.js';
+import { corrigerLieuxDuTexte, quartierApproche, reperer } from '../services/lieux.js';
 import { avecPreuves } from '../ai/verificateur.js';
 import {
   argumentsDeLaCourse, completerCourse, decrireMemoire, DUREE_DE_VIE_MS, lireConversation, type Ligne, type Memoire,
@@ -223,7 +223,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     try {
       // Plats locaux et noms des boutiques : MAI les écrit juste avec la liste.
       const mots = await vocabulaire(request.supabase!).catch(() => []);
-      const { texte: transcript, fournisseur } = await transcrire(body.data.audio, mots);
+      const { texte: brut, fournisseur } = await transcrire(body.data.audio, mots);
+      // Un nom de lieu mal entendu (« à Gobien » pour Bobiel, 10/10) est
+      // corrigé DANS le texte : le client lit le bon nom dans son message,
+      // le même que sur la carte (services/lieux.ts).
+      const transcript = corrigerLieuxDuTexte(brut, mots);
       // Qui a répondu, et en combien de temps : c'est ce qui dira, en
       // production, si le secours sert souvent et s'il faut changer de route.
       request.log.info(
@@ -934,7 +938,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // une recherche seulement : une course a son départ et son arrivée.
       const situe = lieuCerveau && (intention === 'recherche' || intention === 'boutique' || intention === 'envie' || commerceCerveau)
         ? reperer(lieuCerveau) : null;
-      const autour = situe?.point && situe.description ? { point: situe.point, nom: situe.description } : null;
+      // Un quartier mal transcrit (« vers Gobien » pour Bobiel, 10/10) : le
+      // nom connu le plus proche, s'il est le seul aussi proche.
+      const approche = situe && !situe.point && lieuCerveau ? quartierApproche(lieuCerveau) : null;
+      const autour = situe?.point && situe.description
+        ? { point: situe.point, nom: situe.description }
+        : approche ? { point: { lat: approche.lat, lng: approche.lng }, nom: approche.nom } : null;
       if (lieuCerveau) request.log.info({ ref: body.data.client_message_id, lieu: lieuCerveau, situe: autour?.nom ?? null }, 'lieu de recherche');
 
       // Un repas en cours chez une boutique (S10) : un produit demandé se

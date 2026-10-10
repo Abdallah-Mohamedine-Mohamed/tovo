@@ -21,7 +21,7 @@ import { horsTovo, cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, 
 import { decrireImageDepuisOctets } from '../services/vision.js';
 import { offreVille } from '../services/livreur.js';
 import { avecPreuves } from './verificateur.js';
-import { autourDe, reperer } from '../services/lieux.js';
+import { autourDe, quartierApproche, reperer } from '../services/lieux.js';
 import { chargerCommerces } from '../services/commerces.js';
 import { paiementMobileActif } from '../config/env.js';
 import {
@@ -1431,11 +1431,11 @@ async function carteDeTrajet(ctx: ToolContext, t: {
   const chezMoi = { chez_moi: true, hint: 'Chez le client', ...point(client), quartier: ici?.quartier ?? null };
   const pickup = departChezMoi
     ? chezMoi
-    : { chez_moi: false, hint: t.depart ?? '', ...point(pDepart) };
+    : { chez_moi: false, hint: situeDepart?.corrige ?? t.depart ?? '', ...point(pDepart) };
   const dropoff = arriveeChezMoi
     ? chezMoi
     : t.arrivee
-      ? { chez_moi: false, hint: t.arrivee, ...point(pArrivee) }
+      ? { chez_moi: false, hint: situeArrivee?.corrige ?? t.arrivee, ...point(pArrivee) }
       : null;
 
   return {
@@ -1480,7 +1480,7 @@ async function carteDeTrajet(ctx: ToolContext, t: {
  * ou relevé par les livreurs. Plusieurs candidats et aucun précisé (les
  * agences de BOBA) : on ne devine pas.
  */
-async function situer(db: SupabaseClient, lieu: string): Promise<{ lat: number; lng: number } | null> {
+async function situer(db: SupabaseClient, lieu: string): Promise<{ lat: number; lng: number; corrige?: string } | null> {
   const repere = reperer(lieu).point;
   if (repere) return repere;
   const dit = ` ${normaliserIntention(lieu)} `;
@@ -1494,7 +1494,12 @@ async function situer(db: SupabaseClient, lieu: string): Promise<{ lat: number; 
   // L'annuaire public et les commerces relevés sur le terrain.
   const commerces = chargerCommerces().filter((c) =>
     [c.nom_normalise, ...(c.alias ?? []).map((a) => normaliserIntention(a))].some(reconnu));
-  return commerces.length === 1 ? { lat: commerces[0]!.lat, lng: commerces[0]!.lng } : null;
+  if (commerces.length === 1) return { lat: commerces[0]!.lat, lng: commerces[0]!.lng };
+  if (commerces.length > 1) return null;
+  // En dernier : un quartier mal transcrit (« Gobien » → « Bobiel », 10/10),
+  // seulement si aucune vraie source ne le connaît. Le bon nom est rendu.
+  const approche = quartierApproche(lieu);
+  return approche ? { lat: approche.lat, lng: approche.lng, corrige: approche.nom } : null;
 }
 
 /**
@@ -1521,7 +1526,7 @@ async function boutiqueTovo(
     const p = (positions as Array<{ lat: number | null; lng: number | null }> | null)?.[0];
     return p?.lat != null && p?.lng != null ? { lat: p.lat, lng: p.lng } : null;
   } catch {
-    return undefined;
+    return null;
   }
 }
 

@@ -247,6 +247,177 @@ export function rechercherLieux(texte: string, lieux: Lieu[] = chargerLieux(), l
     .map(({ lieu }) => enLieuTrouve(lieu));
 }
 
+/** Le nombre de lettres à changer pour passer d'un mot à l'autre. */
+function distanceDEdition(a: string, b: string): number {
+  let precedente = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const courante = [i];
+    for (let j = 1; j <= b.length; j++) {
+      courante[j] = Math.min(precedente[j]! + 1, courante[j - 1]! + 1, precedente[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    precedente = courante;
+  }
+  return precedente[b.length]!;
+}
+
+/**
+ * Un quartier MAL TRANSCRIT (10/10 : « Bobiel » dit au téléphone devient
+ * « Gobien » ou « Gobiel ») : le quartier au nom le plus proche du lieu dit,
+ * à 1 lettre près jusqu'à 4 lettres, 2 au-delà — et le SEUL aussi proche,
+ * sinon on ne devine pas. À n'appeler qu'après les vraies sources (lieux
+ * exacts, boutiques Tovo, annuaire) : « Garbador » est un restaurant, pas
+ * le quartier Garbado.
+ */
+export function quartierApproche(texte: string, lieux: Lieu[] = chargerLieux()): { nom: string; lat: number; lng: number } | null {
+  const mots = normaliserIntention(texte).split(' ').filter(Boolean);
+  const candidats = new Set<string>();
+  for (let n = 1; n <= 3; n++) {
+    for (let i = 0; i + n <= mots.length; i++) {
+      // Un morceau qui commence ou finit par un petit mot (« à », « de »,
+      // « ma ») n'est pas un nom de lieu : « tante à » collé faisait hésiter.
+      if (n > 1 && (mots[i]!.length <= 2 || mots[i + n - 1]!.length <= 2)) continue;
+      const morceau = mots.slice(i, i + n).join('');
+      if (morceau.length < 4) continue;
+      let nom: string | null = null;
+      let plusProche = Infinity;
+      let hesite = false;
+      for (const [colle, forme] of nomsDeLieux(lieux)) {
+        const d = distanceDEdition(morceau, colle);
+        if (d > (Math.min(colle.length, morceau.length) <= 4 ? 1 : 2)) continue;
+        if (d < plusProche) {
+          plusProche = d;
+          nom = forme;
+          hesite = false;
+        } else if (d === plusProche && nom !== forme) {
+          hesite = true;
+        }
+      }
+      if (!nom || hesite) continue;
+      candidats.add(nom);
+    }
+  }
+  if (candidats.size !== 1) return null;
+  const meilleur = candidats.values().next().value!;
+  // Situé par la recherche habituelle : un quartier, ou une zone (Harobanda).
+  const situe = reperer(meilleur, lieux);
+  return situe.point ? { nom: meilleur, ...situe.point } : null;
+}
+
+/** Les petits mots après lesquels vient un lieu : « à Bobiel », « vers Yantala », « aux alentours de… ». */
+const AVANT_UN_LIEU = new Set(['a', 'au', 'aux', 'vers', 'de', 'du', 'des', 'quartier', 'cote']);
+
+/**
+ * Corrige DANS LE TEXTE transcrit un nom de lieu mal entendu (10/10 : le
+ * fondateur dit « Bobiel », la transcription écrit « Gobien »). Le client
+ * doit lire le bon nom dans son message, et le même sur la carte : sinon il
+ * croit s'être trompé.
+ *
+ * Prudent, pour ne jamais abîmer une phrase :
+ *  - seulement après un mot de lieu (« à », « vers », « de »…) ;
+ *  - seulement un nom écrit avec une majuscule (la transcription en met aux
+ *    noms propres : « à madame » n'est jamais touché) ;
+ *  - jamais un mot de la liste de la transcription (`proteges` : boutiques,
+ *    plats, quartiers connus) ;
+ *  - le lieu connu le plus proche, à 1 lettre près jusqu'à 4 lettres, 2
+ *    au-delà, et le SEUL aussi proche.
+ */
+export function corrigerLieuxDuTexte(texte: string, proteges: string[] = [], lieux: Lieu[] = chargerLieux()): string {
+  const parties = texte.split(/(\s+)/);
+  const mots = parties.map((p, i) => ({ p, i })).filter(({ p, i }) => i % 2 === 0 && p !== '').map(({ i }) => i);
+  const colle = (s: string) => normaliserIntention(s).replace(/ /g, '');
+  const proteges_ = new Set(proteges.map(colle));
+  const noms = nomsDeLieux(lieux);
+  for (let k = 1; k < mots.length; k++) {
+    if (!AVANT_UN_LIEU.has(normaliserIntention(parties[mots[k - 1]!]!))) continue;
+    for (let n = Math.min(3, mots.length - k); n >= 1; n--) {
+      const bruts = mots.slice(k, k + n).map((i) => parties[i]!);
+      if (!/^\p{Lu}/u.test(bruts[0]!)) break;
+      // Un nom en plusieurs mots : chacun avec une majuscule ou un chiffre
+      // (« Yantala Haut », « Niamey 2000 »), et aucune ponctuation avant le
+      // dernier — « Yantala Haut, de la part » perdait sa virgule et son « de ».
+      if (bruts.some((b, j) => !/^[\p{Lu}\d]/u.test(b) || (j < n - 1 && /[.,!?;:…»"]$/u.test(b)))) continue;
+      const fin = /[.,!?;:…»"]+$/u.exec(bruts[n - 1]!)?.[0] ?? '';
+      const morceau = colle(bruts.join(' '));
+      if (morceau.length < 4 || [...proteges_].some((protege) =>
+        distanceDEdition(morceau, protege) <= (Math.min(morceau.length, protege.length) <= 6 ? 1 : 2))) continue;
+      let nom: string | null = null;
+      let plusProche = Infinity;
+      let hesite = false;
+      for (const [c, forme] of noms) {
+        const d = distanceDEdition(morceau, c);
+        if (d > (Math.min(c.length, morceau.length) <= 4 ? 1 : 2)) continue;
+        if (d < plusProche) {
+          plusProche = d;
+          nom = forme;
+          hesite = false;
+        } else if (d === plusProche && nom !== forme) {
+          hesite = true;
+        }
+      }
+      if (!nom || hesite) continue;
+      parties[mots[k]!] = `${nom}${fin}`;
+      for (let j = 1; j < n; j++) {
+        parties[mots[k + j]!] = '';
+        parties[mots[k + j]! - 1] = '';
+      }
+      k += n - 1;
+      break;
+    }
+  }
+  return parties.join('');
+}
+
+let nomsEnCache: { lieux: Lieu[]; noms: Map<string, string> } | null = null;
+
+/**
+ * Les noms communs qui reviennent dans les noms de lieux (« Station Total »,
+ * « École de Talladjé ») : ce ne sont pas des noms de lieux, un mot ordinaire
+ * ne doit jamais être « corrigé » vers eux.
+ */
+const NOMS_COMMUNS = new Set([
+  'station', 'service', 'ecole', 'college', 'lycee', 'marche', 'maison', 'pharmacie', 'mosquee', 'eglise',
+  'boutique', 'restaurant', 'hotel', 'centre', 'clinique', 'hopital', 'banque', 'agence', 'bureau', 'cabinet',
+  'avenue', 'boulevard', 'place', 'route', 'quartier', 'village', 'stade', 'jardin', 'garage', 'atelier',
+  'societe', 'entreprise', 'groupe', 'complexe', 'espace', 'centre', 'primaire', 'publique', 'privee', 'prive',
+  'public', 'national', 'nationale', 'niger', 'niamey', 'commune', 'direction', 'ministere', 'superette',
+  'supermarche', 'alimentation', 'boulangerie', 'patisserie', 'librairie', 'quincaillerie', 'salon', 'coiffure',
+]);
+
+/**
+ * Les noms connus de LIEUX, collés et sans accents → leur forme lisible :
+ * les quartiers (sans numéro), et les mots qui reviennent dans au moins
+ * trois lieux (« Harobanda » : une station, une banque, les impôts… — un
+ * quartier qu'OpenStreetMap ne nomme pas comme tel). Sans lui, « Haroubanda »
+ * devenait « Gorou Banda » (10/10).
+ */
+function nomsDeLieux(lieux: Lieu[]): Map<string, string> {
+  if (nomsEnCache?.lieux === lieux) return nomsEnCache.noms;
+  const noms = new Map<string, string>();
+  for (const l of lieux) {
+    if (l.genre !== 'quartier' && l.genre !== 'village') continue;
+    const nom = l.nom.replace(/\s+\d+$/, '').trim();
+    const colle = normaliserIntention(nom).replace(/ /g, '');
+    if (colle.length >= 4) noms.set(colle, nom);
+  }
+  const frequence = new Map<string, { nb: number; forme: string }>();
+  for (const l of lieux) {
+    for (const mot of new Set(l.nom.split(/[\s,()'’-]+/))) {
+      const n = normaliserIntention(mot);
+      if (n.length < 5 || !/^[a-z]+$/.test(n)) continue;
+      const f = frequence.get(n) ?? { nb: 0, forme: mot };
+      f.nb++;
+      frequence.set(n, f);
+    }
+  }
+  // Un mot fréquent n'est un LIEU que si ses lieux sont regroupés au même
+  // endroit (une zone, comme Harobanda) ; un prénom (« Moussa ») est partout.
+  for (const [n, f] of frequence) {
+    if (f.nb >= 3 && !noms.has(n) && !NOMS_COMMUNS.has(n) && zone([n], lieux)) noms.set(n, f.forme);
+  }
+  nomsEnCache = { lieux, noms };
+  return noms;
+}
+
 function metresEntre(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const dLat = (b.lat - a.lat) * 111_320;
   const dLng = (b.lng - a.lng) * 111_320 * Math.cos((a.lat * Math.PI) / 180);

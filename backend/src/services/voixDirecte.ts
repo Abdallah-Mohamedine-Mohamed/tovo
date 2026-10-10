@@ -95,6 +95,12 @@ export function tropProches(a: string, b: string): boolean {
  * Mots locaux, quartiers, puis noms d'enseignes (sans le quartier entre
  * parenthèses). 10 min de cache.
  *
+ * PAR DÉFAUT SANS LES QUARTIERS (10/10, mesuré sur ses notes) : avec eux, le
+ * « Bobiel » du fondateur devenait « Goudel » — un vrai quartier, une erreur
+ * que rien ne peut voir. Sans eux, il devient « Gobien », que la correction
+ * du texte rattrape (corrigerLieuxDuTexte). `avecQuartiers: true` : la
+ * règle de cohabitation ci-dessous (banc de comparaison).
+ *
  * Quartiers et enseignes COHABITENT (09/10, demande du fondateur) : tous les
  * quartiers entrent, sauf ceux trop proches d'une enseigne ou de ses alias —
  * mesuré sur ses notes, « GARBA D'OR » devenait « Garbado » quand les deux y
@@ -103,8 +109,8 @@ export function tropProches(a: string, b: string): boolean {
  * (banc de comparaison).
  */
 export async function vocabulaire(db: SupabaseClient, options: { avecQuartiers?: boolean } = {}): Promise<string[]> {
-  const avecQuartiers = options.avecQuartiers ?? true;
-  if (avecQuartiers && vocabulaireEnCache && Date.now() - vocabulaireEnCache.quand < 10 * 60_000) return vocabulaireEnCache.mots;
+  const avecQuartiers = options.avecQuartiers ?? false;
+  if (!avecQuartiers && vocabulaireEnCache && Date.now() - vocabulaireEnCache.quand < 10 * 60_000) return vocabulaireEnCache.mots;
   const { data } = await db.from('merchants').select('name, search_aliases').eq('is_approved', true).limit(300);
   const lignes = (data ?? []) as Array<{ name: string; search_aliases?: string | null }>;
   const enseignes = lignes
@@ -124,7 +130,7 @@ export async function vocabulaire(db: SupabaseClient, options: { avecQuartiers?:
       .slice(0, LIMITE_MOTS_MAI - base.length)
     : [];
   const mots = [...MOTS_LOCAUX.filter((m) => base.includes(m)), ...quartiers, ...base.filter((m) => !MOTS_LOCAUX.includes(m))];
-  if (avecQuartiers) vocabulaireEnCache = { quand: Date.now(), mots };
+  if (!avecQuartiers) vocabulaireEnCache = { quand: Date.now(), mots };
   return mots;
 }
 
