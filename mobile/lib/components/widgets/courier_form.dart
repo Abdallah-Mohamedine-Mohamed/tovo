@@ -371,6 +371,11 @@ class _CourierFormState extends State<CourierForm> {
           ...departPoint,
           'hint': depart.chezMoi ? ici : depart.texte.trim(),
         },
+        // « Aller chercher » un lieu connu (une boutique, un repère) : le
+        // vrai point de retrait, où le livreur se rend (migration 0080).
+        // `pickup` reste la position du client, qui sert à trouver un livreur.
+        if (recuperer && depart.lat != null && depart.lng != null)
+          'retrait': {'lat': depart.lat, 'lng': depart.lng},
         if (depart.contact.isNotEmpty) 'pickup_contact': depart.contact,
         'dropoff_hint': arrivee.chezMoi ? ici : arrivee.texte.trim(),
         if (arriveePoint != null) 'dropoff': arriveePoint,

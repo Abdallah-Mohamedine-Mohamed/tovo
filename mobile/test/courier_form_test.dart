@@ -118,6 +118,35 @@ void main() {
       expect(p['pickup_contact'], '90 12 34 56');
       // Livré chez le client : sa position est l'arrivée.
       expect(p['dropoff'], {'lat': 13.51, 'lng': 2.11});
+      // Lieu sans position : pas de point de retrait inventé.
+      expect(p.containsKey('retrait'), isFalse);
+    },
+  );
+
+  testWidgets(
+    '« aller chercher » chez une boutique située : le vrai point de retrait '
+    'part à côté de la position du client (0080)',
+    (tester) async {
+      final gestes = await _afficher(tester, {
+        'mode': 'recuperer',
+        'pickup': {
+          'chez_moi': false,
+          'hint': 'BOBA Plateau',
+          'lat': 13.5283,
+          'lng': 2.1067,
+        },
+        'dropoff': {..._client, 'chez_moi': true, 'hint': 'Chez le client'},
+        'position': _client,
+        'estimate': {'price': 1000, 'flat': true},
+      });
+
+      await _commander(tester);
+      final p = gestes.single.payload;
+      expect(p['mode'], 'recuperer');
+      // La recherche du livreur part toujours du client…
+      expect(p['pickup'], containsPair('lat', 13.51));
+      // … et le livreur se rend à la boutique.
+      expect(p['retrait'], {'lat': 13.5283, 'lng': 2.1067});
     },
   );
 

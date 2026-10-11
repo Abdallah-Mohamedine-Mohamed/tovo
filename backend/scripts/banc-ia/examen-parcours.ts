@@ -809,6 +809,11 @@ E4 : carte ${prixCarte} F, devis ${devis ?? 'aucun'}, facturé ${course?.total} 
     ] },
     { commander: true, verifier: [
       enBase('« aller chercher » chez BOBA Plateau', (x) => x.mode === 'recuperer' && /boba plateau/.test(texteDe(x.pickup_hint))),
+      // Le livreur lit le suivi (order_tracking) : le départ est LA boutique (0080).
+      ['le livreur reçoit la position de BOBA Plateau', (r) => r.composants.some((c) => {
+        const p = c.type === 'order_tracking' ? (c.data.pickup as { lat?: number; lng?: number } | null) : null;
+        return Boolean(p) && Math.abs((p!.lat ?? 0) - 13.5283) < 0.001 && Math.abs((p!.lng ?? 0) - 2.1067) < 0.001;
+      })],
     ] },
   ] },
 
@@ -889,6 +894,8 @@ async function commanderLaCarte(app: FastifyInstance, client: TestUser, conversa
       ...(carte.consigne ? { parcel_note: carte.consigne } : {}),
       ...(typeof devis === 'string' ? { devis } : {}),
       ...(recuperer ? { mode: 'recuperer' } : {}),
+      // Le vrai point de retrait, comme courier_form.dart (migration 0080).
+      ...(recuperer && p?.lat != null && p?.lng != null ? { retrait: { lat: p.lat, lng: p.lng } } : {}),
       parcel: 'small', payment_method: 'cash',
     },
   });

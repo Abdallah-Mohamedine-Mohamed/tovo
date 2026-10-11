@@ -1423,6 +1423,8 @@ class _ChatScreenState extends State<ChatScreen> {
         'dropoff_contact': p['dropoff_contact'],
         // « Aller chercher » : où et qui appeler sur place.
         if (p['mode'] == 'recuperer') 'mode': 'recuperer',
+        // Le vrai point de retrait, s'il est connu (migration 0080).
+        if (p['retrait'] is Map) 'retrait': p['retrait'],
         if ((p['pickup_contact'] as String?)?.isNotEmpty ?? false)
           'pickup_contact': p['pickup_contact'],
         'parcel': p['parcel'] ?? 'small',

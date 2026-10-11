@@ -97,6 +97,12 @@ const courierSchema = z.object({
    * client a lu, même s'il a modifié le trajet. Seul le serveur en crée.
    */
   devis: z.string().uuid().nullable().default(null),
+  /**
+   * « Aller chercher » : le vrai point de retrait, quand Tovo connaît le lieu
+   * (migration 0080). `pickup` reste la position du client, qui sert à
+   * trouver un livreur ; celui-ci se rend ici.
+   */
+  retrait: positionSchema.nullable().default(null),
 });
 
 /**
@@ -222,7 +228,39 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
 
     // Aucun montant n'est accepté du client : les fonctions ci-dessous ne
     // prennent pas de total en paramètre, elles le calculent.
-    const { data: orderId, error } =
+    // Le vrai point de retrait (migration 0080), pour « aller chercher » chez
+    // un lieu connu. Sans la migration, la base ne connaît pas le paramètre
+    // (PGRST202) : la commande repart sans lui, comme avant.
+    const retrait = body.data.type === 'courier' && body.data.mode === 'recuperer' && body.data.retrait
+      ? { p_retrait_lat: body.data.retrait.lat, p_retrait_lng: body.data.retrait.lng }
+      : {};
+    const commander = (avecRetrait: boolean) => body.data.type === 'courier'
+      ? db.rpc('place_courier_order', {
+          p_client_order_id: body.data.client_order_id,
+          p_pickup_hint: body.data.pickup_hint,
+          p_pickup_lat: body.data.pickup.lat,
+          p_pickup_lng: body.data.pickup.lng,
+          p_dropoff_hint: body.data.dropoff_hint,
+          p_dropoff_lat: body.data.dropoff?.lat ?? null,
+          p_dropoff_lng: body.data.dropoff?.lng ?? null,
+          p_parcel: body.data.parcel,
+          p_payment: body.data.payment_method,
+          p_scheduled_for: body.data.scheduled_for,
+          p_parcel_note: body.data.parcel_note,
+          p_dropoff_contact: body.data.dropoff_contact,
+          p_pickup_contact: body.data.pickup_contact,
+          // Seulement pour « récupérer » : sans la migration 0059, la base
+          // ne connaît pas ce paramètre, et « déposer » doit continuer de
+          // fonctionner.
+          ...(body.data.mode === 'recuperer' ? { p_mode: 'recuperer' } : {}),
+          // Seulement avec un devis : il n'en existe qu'une fois la
+          // migration 0079 appliquée (sinon le paramètre serait inconnu).
+          ...(body.data.devis ? { p_devis: body.data.devis } : {}),
+          ...(avecRetrait ? retrait : {}),
+        })
+      : null;
+
+    let { data: orderId, error } =
       body.data.type === 'delivery'
         ? await db.rpc('place_delivery_order', {
             p_client_order_id: body.data.client_order_id,
@@ -232,28 +270,10 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
             p_payment: body.data.payment_method,
             p_note: body.data.type === 'delivery' ? ((body.data.note === null ? noteGardee : body.data.note.trim()) || null) : null,
           })
-        : await db.rpc('place_courier_order', {
-            p_client_order_id: body.data.client_order_id,
-            p_pickup_hint: body.data.pickup_hint,
-            p_pickup_lat: body.data.pickup.lat,
-            p_pickup_lng: body.data.pickup.lng,
-            p_dropoff_hint: body.data.dropoff_hint,
-            p_dropoff_lat: body.data.dropoff?.lat ?? null,
-            p_dropoff_lng: body.data.dropoff?.lng ?? null,
-            p_parcel: body.data.parcel,
-            p_payment: body.data.payment_method,
-            p_scheduled_for: body.data.scheduled_for,
-            p_parcel_note: body.data.parcel_note,
-            p_dropoff_contact: body.data.dropoff_contact,
-            p_pickup_contact: body.data.pickup_contact,
-            // Seulement pour « récupérer » : sans la migration 0059, la base
-            // ne connaît pas ce paramètre, et « déposer » doit continuer de
-            // fonctionner.
-            ...(body.data.mode === 'recuperer' ? { p_mode: 'recuperer' } : {}),
-            // Seulement avec un devis : il n'en existe qu'une fois la
-            // migration 0079 appliquée (sinon le paramètre serait inconnu).
-            ...(body.data.devis ? { p_devis: body.data.devis } : {}),
-          });
+        : await commander(true)!;
+    if (error?.code === 'PGRST202' && Object.keys(retrait).length > 0) {
+      ({ data: orderId, error } = await commander(false)!);
+    }
 
     if (error) {
       const failure = toHttpFailure(error);
