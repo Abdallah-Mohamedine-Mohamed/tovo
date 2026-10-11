@@ -5,7 +5,7 @@ import { embed, embeddingsEnabled } from './embeddings.js';
 import { commandesRecentes, marquerLePlusCommande, parPopularite } from './popularite.js';
 import { offreVille } from './livreur.js';
 import { serviceClient } from './supabase.js';
-import { carteCommerces, pointDeMesure, type PointDeRecherche, commercesDuType, commercesNommes, memeCommerce, commercesPourProduit, libelleDes, specialistesDe, type Commerce, type TypeCommerce } from './commerces.js';
+import { carteCommerces, pointDeMesure, type PointDeRecherche, type CategorieCommerce, commercesDuType, commercesNommes, memeCommerce, commercesPourProduit, libelleDes, specialistesDe, type Commerce, type TypeCommerce } from './commerces.js';
 import { avecOuvertureReelle } from './ouverture.js';
 import { chercherSurGoogle, lieuGoogle, NOTE_GOOGLE } from './googlePlaces.js';
 import { heuresDeGarde, reponseGarde } from './pharmaciesGarde.js';
@@ -763,10 +763,13 @@ export async function commercesDuTypeDemande(
   type: TypeCommerceCherche,
   position: PointDeRecherche | null | undefined,
   dejaVus: { boutiques: ReadonlySet<string>; commerces: ReadonlySet<string> },
+  /** Une catégorie nommée (« un atelier de couture ») : elle seule (11/10). */
+  seulement?: CategorieCommerce,
 ): Promise<CatalogueAnswer | null> {
   const suite = dejaVus.boutiques.size + dejaVus.commerces.size > 0;
-  // Les boutiques Tovo de ce rayon, s'il en a un.
-  const rayon = RAYON_DU_COMMERCE[type];
+  // Les boutiques Tovo de ce rayon, s'il en a un — sauf pour une catégorie
+  // qu'elles ne sont pas (un couturier n'est pas une boutique de prêt-à-porter).
+  const rayon = seulement && !seulement.principale ? undefined : RAYON_DU_COMMERCE[type];
   const categorie = rayon ? await idDuRayon(db, rayon) : undefined;
   let boutiques: Array<Record<string, unknown> & { id: string; is_open: boolean }> = [];
   if (categorie && position) {
@@ -786,7 +789,7 @@ export async function commercesDuTypeDemande(
   // Puis l'annuaire : ni sur Tovo, ni déjà montrés.
   const surTovo = await estSurTovo(db);
   const commerces = commercesDuType(type as TypeCommerce, position,
-    (c) => surTovo(c) || dejaVus.commerces.has(c.nom), 5, suite ? 30_000 : 20_000);
+    (c) => surTovo(c) || dejaVus.commerces.has(c.nom), 5, suite ? 30_000 : 20_000, seulement);
   if (boutiques.length === 0 && commerces.length === 0) return null;
 
   const ouvertes = boutiques.filter((b) => b.is_open).length;
@@ -794,6 +797,7 @@ export async function commercesDuTypeDemande(
   // « tous » repartent de là, pas du seul dernier écran (05/10).
   const vus = {
     commerce_type: type,
+    ...(seulement ? { commerce_categorie: seulement.slug } : {}),
     deja_vus_boutiques: [...dejaVus.boutiques, ...boutiques.map((b) => b.id)],
     deja_vus_commerces: [...dejaVus.commerces, ...commerces.map((c) => c.nom)],
   };
@@ -803,7 +807,7 @@ export async function commercesDuTypeDemande(
       commerces.length ? 'Hors de Tovo, d’autres près de vous ; un livreur peut y aller, il vous appelle pour convenir de l’achat.' : '',
     ].filter(Boolean).join(' '),
     summary: {
-      type_de_commerce: type,
+      type_de_commerce: seulement?.libelle ?? type,
       ...(suite ? { suite_de_la_liste: true } : {}),
       boutiques_tovo: boutiques.map((b) => ({ nom: b.name, ouverte: b.is_open, distance_m: b.distance_m })),
       commerces_hors_tovo: commerces.map((c) => ({ nom: c.nom, quartier: c.quartier })),

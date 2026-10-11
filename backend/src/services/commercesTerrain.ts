@@ -1,5 +1,5 @@
 import { normaliserIntention } from '../ai/intents.js';
-import { chargerCommerces, installerTerrain, type Commerce, type TypeCommerce } from './commerces.js';
+import { categorie, chargerCommerces, installerTerrain, type Commerce, type TypeCommerce } from './commerces.js';
 import { autourDe } from './lieux.js';
 import { serviceClient } from './supabase.js';
 
@@ -34,6 +34,11 @@ interface Ligne {
   repere: string | null;
 }
 
+// « Téléphones » existait déjà au terrain sous la clé du type (0078).
+const ALIAS_TERRAIN: Record<string, string> = { electronique: 'telephones' };
+const categorieFine = (slugs: string[] | null): string | undefined =>
+  (slugs ?? []).map((s) => ALIAS_TERRAIN[s] ?? s).find((s) => categorie(s));
+
 const enCommerce = (l: Ligne, categories: Map<string, Categorie>): Commerce => ({
   id: `terrain:${l.id}`,
   nom: l.nom,
@@ -42,6 +47,8 @@ const enCommerce = (l: Ligne, categories: Map<string, Categorie>): Commerce => (
   // Les catégories (« Friperie », « Pièces auto ») : un client qui les
   // demande trouve ce commerce, comme une spécialité (08/10).
   specialites: (l.categories ?? []).map((c) => categories.get(c)?.libelle ?? c),
+  // La catégorie fine de l'annuaire, si le livreur en a choisi une (11/10).
+  ...(categorieFine(l.categories) ? { categorie: categorieFine(l.categories)! } : {}),
   adresse: l.repere,
   quartier: autourDe({ lat: l.lat, lng: l.lng }).quartier,
   telephone: l.telephone ? l.telephone.replace(/(\d{2})(?=\d)/g, '$1 ') : null,

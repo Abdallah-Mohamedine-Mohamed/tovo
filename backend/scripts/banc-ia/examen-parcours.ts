@@ -289,6 +289,22 @@ const SCENARIOS: Scenario[] = [
   { id: 'C6', parcours: 'C', titre: 'pharmacies de garde', etapes: [{ dire: 'Pharmacies de garde près de moi', verifier: [
     ['des pharmacies', (r) => commerces(r).length > 0],
   ] }] },
+  // Les catégories fines (11/10, le fondateur : « un atelier de couture, c'est
+  // différent d'un prêt-à-porter »). Les deux chemins : un genre de commerce,
+  // et un produit qui nomme une catégorie.
+  { id: 'C7', parcours: 'C', titre: 'un atelier de couture, pas du prêt-à-porter', etapes: [{ dire: 'Je cherche un atelier de couture près de moi', verifier: [
+    ['des ateliers de couture, et seulement eux', (r) => commerces(r).length > 0
+      && commerces(r).every((i) => /couture/i.test(sansAccents(String(i.type ?? ''))))],
+    aucuneCommande,
+  ] }] },
+  { id: 'C8', parcours: 'C', titre: 'un opticien', etapes: [{ dire: 'Il me faut un opticien', verifier: [
+    ['un opticien', (r) => commerces(r).some((i) => /optique/i.test(sansAccents(String(i.type ?? ''))))],
+    aucuneCommande,
+  ] }] },
+  { id: 'C9', parcours: 'C', titre: 'des pièces moto', etapes: [{ dire: 'Où acheter des pièces moto ?', verifier: [
+    ['des vendeurs de pièces', (r) => commerces(r).some((i) => /pieces/i.test(sansAccents(String(i.type ?? ''))))],
+    aucuneCommande,
+  ] }] },
 
   // N — Phrases NOUVELLES (écrites après les corrections du 02/10, avant de les
   // passer) : elles vérifient que les corrections tiennent sur des phrases

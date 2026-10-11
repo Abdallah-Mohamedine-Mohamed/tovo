@@ -44,6 +44,70 @@ export interface Commerce {
   specialites?: string[];
   /** Les autres noms sous lesquels on le connaît (« Vendeur de merguez de la place Toumo »). */
   alias?: string[];
+  /** Sa catégorie fine (CATEGORIES, 11/10) : « couture », pas seulement « vêtements ». */
+  categorie?: string;
+}
+
+/**
+ * LES CATÉGORIES FINES de l'annuaire (11/10, demande du fondateur : « un
+ * atelier de couture, c'est différent d'un prêt-à-porter »). Chacune se
+ * rattache à un TYPE (son icône, son rayon Tovo, le cerveau ne change pas) ;
+ * elle dit ce qu'est vraiment le commerce, sur sa carte et dans la recherche.
+ *
+ * `mots` : ce que dit un client qui cherche CE genre de commerce (sans
+ * accents, au singulier ou au pluriel). Un client qui en nomme un ne voit
+ * que cette catégorie. `principale` : la catégorie que sont les boutiques
+ * Tovo du rayon (on les montre aussi). Mêmes clés que les catégories du
+ * terrain (migration 0082) : un livreur peut les choisir.
+ */
+export interface CategorieCommerce { slug: string; libelle: string; type: TypeCommerce; mots: string[]; principale?: boolean }
+export const CATEGORIES: CategorieCommerce[] = [
+  { slug: 'pret-a-porter', libelle: 'Prêt-à-porter', type: 'vetements', principale: true,
+    mots: ['pret a porter', 'boutique de vetements', 'magasin de vetements', 'boutique de mode', 'habits'] },
+  { slug: 'couture', libelle: 'Atelier de couture', type: 'vetements',
+    mots: ['atelier de couture', 'couture', 'couturier', 'couturiere', 'tailleur', 'retouche', 'retouches'] },
+  { slug: 'chaussures', libelle: 'Chaussures', type: 'vetements', mots: ['chaussures', 'magasin de chaussures', 'boutique de chaussures'] },
+  { slug: 'tissus', libelle: 'Tissus et pagnes', type: 'vetements', mots: ['tissus', 'tissu', 'pagnes', 'pagne', 'bazin', 'wax', 'mercerie'] },
+  { slug: 'bijouterie', libelle: 'Bijouterie', type: 'vetements', mots: ['bijouterie', 'bijoutier', 'bijoux', 'montres'] },
+  { slug: 'friperie', libelle: 'Friperie', type: 'vetements', mots: ['friperie', 'fripes'] },
+  { slug: 'telephones', libelle: 'Téléphones', type: 'electronique', principale: true,
+    mots: ['telephonie', 'boutique de telephones', 'magasin de telephones', 'accessoires de telephone'] },
+  { slug: 'informatique', libelle: 'Informatique', type: 'electronique', mots: ['informatique', 'ordinateurs', 'magasin d informatique'] },
+  { slug: 'electromenager', libelle: 'Électroménager', type: 'electronique', mots: ['electromenager'] },
+  { slug: 'solaire', libelle: 'Énergie solaire', type: 'electronique', mots: ['solaire', 'panneaux solaires', 'panneau solaire'] },
+  { slug: 'alimentation', libelle: 'Alimentation', type: 'supermarche', mots: ['alimentation', 'alimentation generale', 'superette', 'epicerie'] },
+  { slug: 'grossiste', libelle: 'Grossiste', type: 'supermarche', mots: ['grossiste', 'vente en gros', 'demi gros'] },
+  { slug: 'patisserie', libelle: 'Pâtisserie', type: 'boulangerie', mots: ['patisserie', 'patissier'] },
+  { slug: 'poissonnerie', libelle: 'Poissonnerie', type: 'boucherie', mots: ['poissonnerie', 'poissonnier'] },
+  { slug: 'parfumerie', libelle: 'Parfumerie', type: 'beaute', mots: ['parfumerie', 'encens'] },
+  { slug: 'materiaux', libelle: 'Matériaux de construction', type: 'quincaillerie', mots: ['materiaux de construction', 'materiaux'] },
+  { slug: 'librairie', libelle: 'Librairie', type: 'boutique', mots: ['librairie', 'papeterie', 'fournitures scolaires', 'livres'] },
+  { slug: 'meubles', libelle: 'Meubles et décoration', type: 'boutique', mots: ['meubles', 'mobilier', 'decoration'] },
+  { slug: 'gaz', libelle: 'Gaz', type: 'boutique', mots: ['depot de gaz', 'bouteille de gaz', 'bouteilles de gaz'] },
+  { slug: 'pieces-auto', libelle: 'Pièces auto et moto', type: 'boutique',
+    mots: ['pieces auto', 'pieces moto', 'pieces detachees', 'pieces de rechange'] },
+  { slug: 'optique', libelle: 'Optique', type: 'boutique', mots: ['opticien', 'optique', 'lunettes'] },
+  { slug: 'centre-commercial', libelle: 'Centre commercial', type: 'boutique', mots: ['centre commercial', 'galerie marchande'] },
+  { slug: 'fleuriste', libelle: 'Fleuriste', type: 'boutique', mots: ['fleuriste', 'fleurs'] },
+];
+const CATEGORIE = new Map(CATEGORIES.map((c) => [c.slug, c]));
+export const categorie = (slug: string | undefined | null): CategorieCommerce | undefined => (slug ? CATEGORIE.get(slug) : undefined);
+
+/**
+ * La catégorie qu'un texte NOMME (« un couturier près de moi » → couture),
+ * mot entier, au singulier comme au pluriel ; la plus longue expression
+ * l'emporte (« boutique de vetements » avant « vetements »).
+ */
+export function categorieNommee(texte: string): CategorieCommerce | undefined {
+  const phrase = ` ${normaliserIntention(texte)} `;
+  let meilleure: { c: CategorieCommerce; n: number } | undefined;
+  for (const c of CATEGORIES) {
+    for (const m of c.mots) {
+      const dit = phrase.includes(` ${m} `) || phrase.includes(` ${m}s `) || (m.endsWith('s') && phrase.includes(` ${m.slice(0, -1)} `));
+      if (dit && (!meilleure || m.length > meilleure.n)) meilleure = { c, n: m.length };
+    }
+  }
+  return meilleure?.c;
 }
 
 const LIBELLES: Record<TypeCommerce, { un: string; des: string; icone: string }> = {
@@ -110,7 +174,14 @@ function chargerFichier(chemin = join(process.cwd(), 'data', 'commerces-niamey.j
   try {
     const { corrections } = JSON.parse(readFileSync(join(process.cwd(), 'data', 'commerces-types.json'), 'utf8')) as
       { corrections: Record<string, { type: TypeCommerce }> };
-    cache = cache.map((c) => (corrections[c.id] ? { ...c, type: corrections[c.id]!.type } : c));
+    cache = cache.map((c) => {
+      const corrige = corrections[c.id]?.type;
+      if (!corrige) return c;
+      // Une catégorie d'un autre type ne vaut plus (« Elegance meuble » n'est
+      // plus un supermarché, ni donc une « alimentation »).
+      const { categorie: fine, ...reste } = c;
+      return categorie(fine)?.type === corrige ? { ...c, type: corrige } : { ...reste, type: corrige };
+    });
   } catch {
     // Pas de corrections : l'annuaire tel quel.
   }
@@ -219,9 +290,11 @@ export function commercesDuType(
   exclure: (c: Commerce) => boolean,
   combien: number,
   rayonMax = 20_000,
+  /** Une catégorie nommée par le client (« un couturier ») : elle seule. */
+  seulement?: CategorieCommerce,
 ): Commerce[] {
   const retenus: Commerce[] = [];
-  const candidats = chargerCommerces().filter((c) => c.type === type)
+  const candidats = chargerCommerces().filter((c) => c.type === type && (!seulement || c.categorie === seulement.slug))
     .map((c) => ({ c, d: position ? metres(position, c) : 0 }))
     .filter(({ d }) => d <= rayonMax)
     .sort((a, b) => (position ? a.d - b.d : b.c.fiabilite - a.c.fiabilite));
@@ -346,6 +419,18 @@ export function commercesPourProduit(
     return retenus;
   };
   const retenus = garder(reputes, []);
+  // Une catégorie nommée (« un opticien », « des lunettes ») : ses commerces,
+  // les plus proches d'abord, avant le type entier (11/10).
+  const nommee = categorieNommee(texte);
+  if (nommee && retenus.length < combien) {
+    const memes = chargerCommerces().filter((c) => c.categorie === nommee.slug && !reputes.includes(c));
+    garder(position
+      ? memes.map((c) => ({ c, d: metres(position, c) }))
+        .filter(({ d }) => d <= (elargir ? 20_000 : 8000) && (auDelaDe === 0 || d > auDelaDe))
+        .sort((a, b) => a.d - b.d).map(({ c }) => c)
+      : memes.sort((a, b) => b.fiabilite - a.fiabilite), retenus);
+    if (retenus.length > 0 && !elargir) return retenus;
+  }
   const types = typesPourProduit(texte);
   for (const type of types.length > 0 ? types : secours) {
     if (retenus.length >= combien) break;
@@ -399,7 +484,8 @@ export function carteCommerces(
         return {
           id: c.id,
           nom: c.nom,
-          type: LIBELLES[c.type].un,
+          // La catégorie fine si on la connaît (« Atelier de couture »), sinon le type.
+          type: categorie(c.categorie)?.libelle ?? LIBELLES[c.type].un,
           icone: LIBELLES[c.type].icone,
           adresse: ou || null,
           distance_m: mesure ? Math.round(metres(mesure, c)) : null,

@@ -4,7 +4,7 @@ import { SYSTEM_PROMPT, contexteUtilisateur } from './systemPrompt.js';
 import { EXECUTORS, TOOL_DEFINITIONS, type ToolContext } from './tools.js';
 import { collectIds, sanitizeToolResult, validateComponents } from './validate.js';
 import { envelope, merchantCard, type ChatEnvelope, type Component } from '../components/builders.js';
-import { ailleursEnPlus, alternativesHorsTovo, commercesDuTypeDemande, cataloguePage, horsTovo, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, type CataloguePage, type CatalogueAnswer, type PendingMerchantChoice } from '../services/catalogue.js';
+import { ailleursEnPlus, alternativesHorsTovo, commercesDuTypeDemande, cataloguePage, horsTovo, resolveCatalogueIntent, merchantIntentAnswer, requeteSansEnseigne, searchAnswer, type CataloguePage, type CatalogueAnswer, type PendingMerchantChoice } from '../services/catalogue.js';
 import { ajouterALaNote } from '../services/noteCommande.js';
 import {
   demandeBoutiqueOuverte,
@@ -20,7 +20,7 @@ import { resumeAffichage } from './memoire.js';
 import type { Intention } from './jev.js';
 import type { Rayon, TypeCommerceCherche } from './decideur.js';
 import { idDuRayon } from '../services/catalogue.js';
-import type { PointDeRecherche } from '../services/commerces.js';
+import { categorie, categorieNommee, type PointDeRecherche } from '../services/commerces.js';
 import { avecOuvertureReelle } from '../services/ouverture.js';
 import { avecPreuves, Faits, FluxVerifie, verifierTexte, type Verification } from './verificateur.js';
 import { rediger, redigerEtJuger, sansPromesseVide } from './redacteur.js';
@@ -373,7 +373,7 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
   // été montré.
   {
     const memoire = previous.dernierAffichage.find((c) => c.data.commerce_type)?.data as
-      { commerce_type?: TypeCommerceCherche; deja_vus_boutiques?: string[]; deja_vus_commerces?: string[] } | undefined;
+      { commerce_type?: TypeCommerceCherche; commerce_categorie?: string; deja_vus_boutiques?: string[]; deja_vus_commerces?: string[] } | undefined;
     const typeAffiche = memoire?.commerce_type;
     const type = input.commerce ?? (input.suite ? typeAffiche : undefined);
     if (type && !input.audio && !boutiqueNommee) {
@@ -383,7 +383,12 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
         boutiques: new Set(continuer ? memoire?.deja_vus_boutiques ?? [] : []),
         commerces: new Set(continuer ? memoire?.deja_vus_commerces ?? [] : []),
       };
-      const liste = await commercesDuTypeDemande(input.db, type, input.position, dejaVus);
+      // La catégorie que le client nomme (« un couturier »), si elle est de ce
+      // type ; une suite reprend celle de la liste affichée (11/10).
+      const nommee = categorieNommee(parole);
+      const seulement = nommee?.type === type ? nommee
+        : continuer && input.suite ? categorie(memoire?.commerce_categorie) : undefined;
+      const liste = await commercesDuTypeDemande(input.db, type, input.position, dejaVus, seulement);
       if (liste) return repondre(liste);
       if (dejaVus.boutiques.size + dejaVus.commerces.size > 0) {
         return repondre({ content: 'Je vous ai montré tous ceux que je connais dans les environs.', summary: { type_de_commerce: type, tout_montre: true }, components: [] });
@@ -493,11 +498,16 @@ export async function orchestrate(input: OrchestrateInput): Promise<OrchestrateO
       input.intention === 'boutique' && input.requete && !boutiqueNommee ? input.requete : parole,
       previous.pending);
   let direct = intent ? await merchantIntentAnswer(input.db, intent) : null;
-  // Ce que le cerveau a compris (« merguez »), sauf quand une boutique est
-  // nommée : la requête est alors ce qui reste une fois son nom retiré.
+  // Ce que le cerveau a compris (« merguez »). Une boutique nommée : SON
+  // produit à lui, moins le nom de la boutique (article 1) — pas le reste de
+  // la phrase brute, qui gardait le lieu de livraison : « pizza margherita
+  // livree yantala » ne trouvait rien chez Maison Grill (R2, 11/10).
+  const produitCerveau = input.requete && intent && intent.merchants.length > 0
+    ? requeteProduitUtilisateur(requeteSansEnseigne(input.requete, intent.merchants))
+    : '';
   const requeteClient = input.requete && intent && intent.merchants.length === 0 && !intent.missing
     ? requeteProduitUtilisateur(input.requete)
-    : requeteProduitUtilisateur(intent?.query ?? parole);
+    : produitCerveau || requeteProduitUtilisateur(intent?.query ?? parole);
   const keyword = rapide(requeteClient);
   const selectedBranch = Boolean(previous.pending
     && intent?.merchants.length === 1
