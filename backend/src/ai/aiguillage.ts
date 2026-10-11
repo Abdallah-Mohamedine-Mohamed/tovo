@@ -153,6 +153,25 @@ export function routeDuCerveau(
   if (contexte.commande === false && SUR_UNE_COMMANDE.has(d.intention)) {
     return { type: 'intention', intention: 'social', decision };
   }
+  // Article 3, pour la réclamation : sans commande Tovo en cours, une
+  // « plainte » qui nomme un lieu où aller chercher quelque chose ne vise
+  // rien d'existant — c'est peut-être une commande passée directement chez
+  // un commerce (« va chercher ma commande déjà payée chez … », 10/10).
+  // Article 11 : dans le doute, on demande ; on ne transmet pas à l'équipe.
+  const depart = d.details?.depart?.trim();
+  if (contexte.commande === false && d.intention === 'aide' && depart) {
+    const texte = message.trim().slice(0, 300);
+    return {
+      type: 'clarifier',
+      decision,
+      contenu: 'Je veux être sûr de bien vous comprendre. Vous voulez :',
+      components: [quickReplies([
+        { label: `Envoyer un livreur à ${depart}`, value: `${PREFIXE}livreur${SEPARATEUR}${texte}` },
+        { label: LIBELLES.aide, value: `${PREFIXE}aide${SEPARATEUR}${texte}` },
+        { label: 'Autre chose', value: `${PREFIXE}modele${SEPARATEUR}${texte}` },
+      ])],
+    };
+  }
   // Article 6 : une envie est une demande SANS produit précis. Si le cerveau
   // en a extrait un (« Boutique de prêt à porter pour femmes » → « vêtements
   // pour femmes »), c'est une recherche : l'« envie » partait au modèle, qui

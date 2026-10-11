@@ -120,6 +120,22 @@ describe('la route décidée par le cerveau', () => {
       .toMatchObject({ type: 'intention', intention: 'envie' });
   });
 
+  it('article 3 : une « plainte » avec un lieu de départ, sans commande Tovo, se fait confirmer (10/10)', () => {
+    const plainte = (depart: string) => ({ ...decision('aide', true), details: { depart } });
+    const phrase = 'Va me chercher ma commande chez French Tacos, je l’ai déjà payée';
+    const route = routeDuCerveau(plainte('French Tacos'), phrase, { commande: false });
+    expect(route.type).toBe('clarifier');
+    const tuiles = route.type === 'clarifier' ? (route.components[0]!.data.items as Array<{ label: string; value: string }>) : [];
+    expect(tuiles.map((t) => t.label)).toEqual(['Envoyer un livreur à French Tacos', 'Signaler un problème', 'Autre chose']);
+    expect(tuiles[0]!.value).toBe(`intention:livreur::${phrase}`);
+    // Une commande Tovo existe : la plainte la vise, elle part à l'équipe.
+    expect(routeDuCerveau(plainte('French Tacos'), phrase, { commande: true }))
+      .toMatchObject({ type: 'intention', intention: 'aide' });
+    // Sans lieu de départ (« personne ne m'aide ») : rien ne change.
+    expect(routeDuCerveau(plainte(''), 'Personne ne m’aide', { commande: false }))
+      .toMatchObject({ type: 'intention', intention: 'aide' });
+  });
+
   it('pas de décision : le chemin habituel', () => {
     expect(routeDuCerveau(decision(null, false), 'bonjour')).toMatchObject({ type: 'habituel' });
   });

@@ -685,6 +685,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         return output.finish({ conversation_id: conversationId, ...envelope(route.contenu, route.components) });
       }
     }
+    // Une tuile touchée pour une course : l'intention est celle CHOISIE, mais
+    // le départ et l'arrivée viennent du cerveau, qui relit la phrase
+    // d'origine (article 9). Sans lui, une coupe par motifs donnait au
+    // livreur « Chez French Tacos, je l'ai déjà payée » (10/10).
+    if (choisie && (choisie.intention === 'livreur' || choisie.intention === 'colis') && cerveauActif()) {
+      detailsCerveau = (await comprendre(choisie.message).catch(() => null))?.details;
+    }
     // Route connue : les détecteurs à mots ne décident plus.
     const parJev = intention !== undefined;
     // Le cerveau n'a pas pu trancher (panne, délai) : les détecteurs à mots

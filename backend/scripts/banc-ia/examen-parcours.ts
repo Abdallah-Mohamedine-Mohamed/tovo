@@ -52,6 +52,8 @@ interface Etape {
   commander?: boolean;
   /** Avant de commander, le client modifie l'arrivée (« Modifier », un lieu écrit). */
   modifierArrivee?: string;
+  /** Sauter l'étape si la réponse précédente montre déjà ce qu'elle visait (ex. la carte sans passer par le choix). */
+  passer?: (precedente: Reponse) => boolean;
   /** Préparer la base avant de parler (ex. vieillir la conversation). */
   avant?: (c: Contexte) => Promise<void>;
   verifier: Verification[];
@@ -95,6 +97,11 @@ async function noteEnBase(client: TestUser): Promise<string> {
   const { data, error } = await admin.from('notes_commande').select('note').eq('user_id', client.id).maybeSingle();
   return error ? '' : String(data?.note ?? '');
 }
+async function signalements(client: TestUser): Promise<number> {
+  const { count } = await admin.from('signalements').select('id', { count: 'exact', head: true }).eq('user_id', client.id);
+  return count ?? 0;
+}
+const aucunSignalement: Verification = ['aucune réclamation transmise à l’équipe', async (_r, c) => (await signalements(c.client)) === 0];
 const aucuneCommande: Verification = ['aucune commande créée sans toucher', async (_r, c) => (await commandes(c.client)) === 0];
 
 /** Un produit à options n'est jamais dans le panier sans ses choix. */
@@ -739,6 +746,41 @@ E4 : carte ${prixCarte} F, devis ${devis ?? 'aucun'}, facturé ${course?.total} 
     ] },
   ] },
 
+  // Article 3 pour la réclamation (10/10) : un achat payé DIRECTEMENT chez un
+  // commerce, sans commande Tovo, n'est pas une plainte. Le cerveau le classe
+  // souvent « aide » (0/6 mesuré) : le serveur fait choisir, sans rien
+  // transmettre à l'équipe, et le livreur part bien de ce commerce.
+  { id: 'E5', parcours: 'B', titre: 'commande payée chez French Tacos : un livreur, jamais une plainte', contrat: 2, etapes: [
+    { dire: 'Va me chercher ma commande chez French Tacos, je l’ai déjà payée', verifier: [
+      aucunSignalement, aucuneCommande, pasDeLivreurEnRoute,
+      ['la carte au départ de French Tacos, ou le choix « Envoyer un livreur à French Tacos »', (r) =>
+        carte(r, (d) => /french tacos/.test(texteDe(d.pickup)))
+        || elements(r).some((i) => /envoyer un livreur a french tacos/.test(sansAccents(nom(i))))],
+    ] },
+    { passer: (r) => aLaCarte('courier_form')(r),
+      toucher: (r) => {
+        const tuile = elements(r).find((i) => /envoyer un livreur/.test(sansAccents(nom(i))));
+        return tuile ? { action: 'quick_reply', payload: { label: nom(tuile), value: String(tuile.value) } } : null;
+      },
+      verifier: [aucunSignalement, aucuneCommande,
+        ['la carte : départ French Tacos', (r) => carte(r, (d) => /french tacos/.test(texteDe(d.pickup)))]] },
+    { commander: true, verifier: [
+      aucunSignalement,
+      enBase('« aller chercher » chez French Tacos', (x) => x.mode === 'recuperer' && /french tacos/.test(texteDe(x.pickup_hint))),
+      enBase('le livreur lit le lieu, pas le reste de la phrase', (x) => !/paye|commande/.test(texteDe(x.pickup_hint))),
+    ] },
+  ] },
+  // La garantie ne touche pas une vraie plainte : une course Tovo existe, le
+  // client se plaint, l'équipe est prévenue (route « aide » inchangée).
+  { id: 'E6', parcours: 'B', titre: 'une vraie plainte sur une course Tovo part toujours à l’équipe', contrat: 2, etapes: [
+    { dire: 'Je veux un livreur pour déposer un colis à Banifandou', verifier: [] },
+    { commander: true, verifier: [enBase('la course existe', (x) => /banifandou/.test(texteDe(x.dropoff_hint)))] },
+    { dire: 'Le livreur ne m’a pas rendu ma monnaie', verifier: [
+      ['la réclamation est transmise à l’équipe', async (_r, c) => (await signalements(c.client)) === 1],
+      ['pas de choix « Envoyer un livreur »', (r) => !elements(r).some((i) => /envoyer un livreur/.test(sansAccents(nom(i))))],
+    ] },
+  ] },
+
   { id: 'G1', parcours: 'G', titre: 'remarque', etapes: [{ dire: 'Tu es sourd ?', verifier: [
     ['aucun produit', (r) => produits(r).length === 0], ['une phrase', (r) => r.texte.trim().length > 0],
   ] }] },
@@ -884,6 +926,10 @@ await Promise.all(Array.from({ length: 4 }, async () => {
     for (const [n, etape] of s.etapes.entries()) {
       let r: Reponse;
       let c = conversationId;
+      if (etape.passer?.(contexte.reponses.at(-1)!)) {
+        vu.push('[étape sautée : déjà à l’écran]');
+        continue;
+      }
       if (etape.commander) {
         if (etape.avant) await etape.avant(contexte);
         r = await commanderLaCarte(app, client, conversationId, contexte.reponses.at(-1), etape.modifierArrivee);
