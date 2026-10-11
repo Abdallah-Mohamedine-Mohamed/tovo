@@ -810,6 +810,14 @@ E4 : carte ${prixCarte} F, devis ${devis ?? 'aucun'}, facturé ${course?.total} 
     { commander: true, verifier: [
       enBase('« aller chercher » chez BOBA Plateau', (x) => x.mode === 'recuperer' && /boba plateau/.test(texteDe(x.pickup_hint))),
       // Le livreur lit le suivi (order_tracking) : le départ est LA boutique (0080).
+      // Le livreur est cherché près du retrait (0081) : la course prend la zone de la boutique.
+      ['la course est rattachée à la zone de BOBA Plateau', async (_r, c) => {
+        const { data: o } = await admin.from('orders').select('zone_id').eq('user_id', c.client.id).eq('type', 'courier')
+          .order('placed_at', { ascending: false }).limit(1).maybeSingle();
+        const { data: z } = await admin.rpc('zone_for_point', { p_lat: 13.5283, p_lng: 2.1067 });
+        const zone = (Array.isArray(z) ? z[0] : z) as { id?: string } | null;
+        return Boolean(o) && (o!.zone_id ?? null) === (zone?.id ?? null);
+      }],
       ['le livreur reçoit la position de BOBA Plateau', (r) => r.composants.some((c) => {
         const p = c.type === 'order_tracking' ? (c.data.pickup as { lat?: number; lng?: number } | null) : null;
         return Boolean(p) && Math.abs((p!.lat ?? 0) - 13.5283) < 0.001 && Math.abs((p!.lng ?? 0) - 2.1067) < 0.001;

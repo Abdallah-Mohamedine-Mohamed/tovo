@@ -116,7 +116,7 @@ export async function estimerArrivee(db: SupabaseClient, orderId: string, statut
   if (!['assigned', 'picked_up', 'delivering'].includes(statut)) return null;
   const { data: commande } = await db
     .from('orders')
-    .select('type, driver_id, dropoff_location, merchants(location), courier_details(pickup_location, mode)')
+    .select('type, driver_id, dropoff_location, merchants(location), courier_details(pickup_location, retrait_location, mode)')
     .eq('id', orderId)
     .maybeSingle();
   if (!commande) return null;
@@ -138,7 +138,7 @@ export async function estimerArrivee(db: SupabaseClient, orderId: string, statut
   const colis = commande.type === 'courier';
   const details = (Array.isArray(commande.courier_details)
     ? commande.courier_details[0]
-    : commande.courier_details) as { pickup_location?: unknown; mode?: string } | null;
+    : commande.courier_details) as { pickup_location?: unknown; retrait_location?: unknown; mode?: string } | null;
   const boutique = (Array.isArray(commande.merchants)
     ? commande.merchants[0]
     : commande.merchants) as { location?: unknown } | null;
@@ -148,7 +148,9 @@ export async function estimerArrivee(db: SupabaseClient, orderId: string, statut
     colis,
     mode: details?.mode ?? 'deposer',
     livreur,
-    depart: lirePoint(colis ? details?.pickup_location : boutique?.location),
+    // « Aller chercher » : le livreur part du lieu de retrait (0080), pas de
+    // chez le client — sinon l'heure annoncée oubliait tout le trajet.
+    depart: lirePoint(colis ? (details?.retrait_location ?? details?.pickup_location) : boutique?.location),
     arrivee: lirePoint(commande.dropoff_location),
   });
   return minutes == null ? null : heureArrivee(minutes);
