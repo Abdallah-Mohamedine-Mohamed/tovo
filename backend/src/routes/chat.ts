@@ -768,7 +768,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // course n'est annoncée, seulement les deux choix proposés.
       const sansCarte = !resultat.components.some((c) => c.type === 'courier_form');
       // Une phrase courte et courtoise : la carte dit le reste (V6, 09/10).
-      const prevue = sansCarte
+      const adresses = (resultat.summary as { choisir_une_adresse?: { lieu: string } } | undefined)?.choisir_une_adresse;
+      const prevue = adresses
+        ? `${adresses.lieu} a plusieurs adresses sur Tovo. Laquelle ?`
+        : sansCarte
         ? 'Je ne peux pas encore préparer une course d’un endroit à un autre sans passer par vous. Choisissez une des deux possibilités ci-dessous.'
         : 'Avec plaisir, voici votre course.';
 

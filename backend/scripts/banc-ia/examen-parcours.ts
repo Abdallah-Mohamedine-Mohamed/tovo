@@ -780,6 +780,37 @@ E4 : carte ${prixCarte} F, devis ${devis ?? 'aucun'}, facturé ${course?.total} 
       ['pas de choix « Envoyer un livreur »', (r) => !elements(r).some((i) => /envoyer un livreur/.test(sansAccents(nom(i))))],
     ] },
   ] },
+  // Une enseigne à plusieurs adresses (10/10) : Tovo demande laquelle, et la
+  // course part de l'adresse choisie, à la position de LA boutique.
+  { id: 'E7', parcours: 'B', titre: 'Boba (4 adresses) : on demande laquelle, la course part de la bonne', contrat: 2, etapes: [
+    { dire: 'J’ai commandé chez Boba, envoie un livreur récupérer ma commande', verifier: [
+      aucunSignalement, aucuneCommande, pasDeLivreurEnRoute,
+      ['pas de carte sans adresse précise', pasLaCarte('courier_form')],
+    ] },
+    // Le cerveau peut d'abord demander « Commander un livreur ? » (pas sûr) :
+    // le client le touche ; sinon l'étape est sautée.
+    { passer: (r) => !elements(r).some((i) => /^commander un livreur$/.test(sansAccents(nom(i)))),
+      toucher: (r) => {
+        const t = elements(r).find((i) => /^commander un livreur$/.test(sansAccents(nom(i))));
+        return t ? { action: 'quick_reply', payload: { label: nom(t), value: String(t.value) } } : null;
+      },
+      verifier: [aucunSignalement, aucuneCommande, ['pas de carte sans adresse précise', pasLaCarte('courier_form')]] },
+    { toucher: (r) => {
+      const plateau = elements(r).find((i) => /boba plateau/.test(sansAccents(nom(i))));
+      return plateau ? { action: 'quick_reply', payload: { label: nom(plateau), value: String(plateau.value) } } : null;
+    }, verifier: [
+      aucunSignalement, aucuneCommande,
+      ['la carte : départ BOBA Plateau', (r) => carte(r, (d) => /boba plateau/.test(texteDe(d.pickup)))],
+      // La boutique (13.528, 2.107), pas le centre du quartier Plateau (13.522, 2.099).
+      ['la carte : à la position de la boutique', (r) => carte(r, (d) => {
+        const p = d.pickup as { lat?: number; lng?: number };
+        return Math.abs((p.lat ?? 0) - 13.5283) < 0.001 && Math.abs((p.lng ?? 0) - 2.1067) < 0.001;
+      })],
+    ] },
+    { commander: true, verifier: [
+      enBase('« aller chercher » chez BOBA Plateau', (x) => x.mode === 'recuperer' && /boba plateau/.test(texteDe(x.pickup_hint))),
+    ] },
+  ] },
 
   { id: 'G1', parcours: 'G', titre: 'remarque', etapes: [{ dire: 'Tu es sourd ?', verifier: [
     ['aucun produit', (r) => produits(r).length === 0], ['une phrase', (r) => r.texte.trim().length > 0],

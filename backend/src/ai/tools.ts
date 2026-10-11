@@ -21,6 +21,7 @@ import { horsTovo, cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, 
 import { decrireImageDepuisOctets } from '../services/vision.js';
 import { offreVille } from '../services/livreur.js';
 import { avecPreuves } from './verificateur.js';
+import { valeurTuile } from './aiguillage.js';
 import { autourDe, quartierApproche, reperer } from '../services/lieux.js';
 import { chargerCommerces } from '../services/commerces.js';
 import { paiementMobileActif } from '../config/env.js';
@@ -1380,8 +1381,15 @@ async function carteDeTrajet(ctx: ToolContext, t: {
   // Le quartier et le repère du client, d'après sa position (OpenStreetMap,
   // 09/10) : « Chez moi · Niamey 2000 », et le livreur le lit aussi.
   const ici = client ? autourDe(client) : null;
-  const situeDepart = t.depart ? await situer(ctx.db, t.depart) : null;
-  const situeArrivee = t.arrivee ? await situer(ctx.db, t.arrivee) : null;
+  const lieuDepart = t.depart ? await situer(ctx.db, t.depart) : null;
+  const lieuArrivee = t.arrivee ? await situer(ctx.db, t.arrivee) : null;
+  // Une enseigne à plusieurs adresses, sans adresse précisée (BOBA, 10/10) :
+  // on demande laquelle (article 11) plutôt que de choisir, ou d'envoyer le
+  // livreur sans position.
+  if (lieuDepart && 'adresses' in lieuDepart) return choixDAdresse(t.depart!, lieuDepart.adresses, t.message);
+  if (lieuArrivee && 'adresses' in lieuArrivee) return choixDAdresse(t.arrivee!, lieuArrivee.adresses, t.message);
+  const situeDepart = lieuDepart;
+  const situeArrivee = lieuArrivee;
   // « à Niamey 2000, ici à ma position » : un lieu dit qui EST le client —
   // il dit « ici », « ma position », « chez moi », et le lieu est son quartier
   // ou à moins de 1,5 km de lui (09/10, capture du fondateur).
@@ -1474,23 +1482,53 @@ async function carteDeTrajet(ctx: ToolContext, t: {
 }
 
 /**
+ * Plusieurs adresses pour le lieu dit : une tuile par adresse. Chacune porte
+ * la phrase du client, le lieu remplacé par l'adresse choisie, et
+ * l'intention livreur : le cerveau la relit (départ, arrivée, consigne
+ * gardés) et la carte part de la bonne adresse.
+ */
+function choixDAdresse(lieu: string, adresses: string[], message?: string): ToolOutcome {
+  const dit = message?.trim() ?? '';
+  const motif = new RegExp(lieu.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+  const phrase = (adresse: string) => {
+    const avecAdresse = dit.replace(motif, adresse);
+    return dit && avecAdresse !== dit ? avecAdresse : `Un livreur pour ${adresse}${dit ? ` : ${dit}` : ''}`;
+  };
+  return {
+    summary: {
+      choisir_une_adresse: { lieu, adresses },
+      carte_possible: false,
+      a_dire: `Une phrase courte : « ${lieu} » a plusieurs adresses sur Tovo, le client choisit la sienne ci-dessous. Rien n’est commandé ni lancé.`,
+    },
+    components: [quickReplies(adresses.map((a) => ({ label: a.slice(0, 60), value: valeurTuile('livreur', phrase(a)) })))],
+  };
+}
+
+type LieuSitue = { lat: number; lng: number; corrige?: string };
+
+/**
  * Un lieu dit, situé, d'après les TROIS sources (09/10, demande du
  * fondateur) : un quartier ou un repère (OpenStreetMap), une boutique TOVO
  * (sa vraie position, alias compris), puis un commerce de l'annuaire public
  * ou relevé par les livreurs. Plusieurs candidats et aucun précisé (les
  * agences de BOBA) : on ne devine pas.
  */
-async function situer(db: SupabaseClient, lieu: string): Promise<{ lat: number; lng: number; corrige?: string } | null> {
-  const repere = reperer(lieu).point;
-  if (repere) return repere;
+async function situer(db: SupabaseClient, lieu: string): Promise<LieuSitue | { adresses: string[] } | null> {
   const dit = ` ${normaliserIntention(lieu)} `;
   const ditColle = dit.replace(/ /g, '');
   // Le nom, ou l'un de ses alias (« OTAKOSS », « O takos ») ; collé, pour
   // que « Otakoss » reconnaisse « O'TAKOSS ».
   const reconnu = (n: string) => n.length >= 3
     && (dit.includes(` ${n} `) || (n.replace(/ /g, '').length >= 5 && ditColle.includes(n.replace(/ /g, ''))));
+  // Une boutique Tovo nommée d'abord : son nom est plus précis qu'un quartier
+  // qu'il contient (« Boba Plateau » donnait le centre du Plateau, à 1 km
+  // de la boutique, 10/10).
   const tovo = await boutiqueTovo(db, dit, reconnu);
-  if (tovo !== undefined) return tovo;
+  if (tovo) return tovo;
+  const repere = reperer(lieu).point;
+  if (repere) return repere;
+  // Boutique connue sans position, ou recherche en panne : on ne devine pas.
+  if (tovo === null) return null;
   // L'annuaire public et les commerces relevés sur le terrain.
   const commerces = chargerCommerces().filter((c) =>
     [c.nom_normalise, ...(c.alias ?? []).map((a) => normaliserIntention(a))].some(reconnu));
@@ -1503,25 +1541,50 @@ async function situer(db: SupabaseClient, lieu: string): Promise<{ lat: number; 
 }
 
 /**
- * Une boutique Tovo nommée : sa position ; `null` si le nom est reconnu mais
- * ambigu (plusieurs agences) ; `undefined` si aucune boutique ne correspond.
+ * Une boutique Tovo nommée : sa position ; `{ adresses }` si le nom en
+ * désigne plusieurs sans préciser laquelle ; `null` si elle est trouvée sans
+ * position ; `undefined` si aucune boutique ne correspond.
+ *
+ * Trois règles (10/10) :
+ *  - le nom le plus complet reconnu l'emporte (« Boba Koubia » est BOBA
+ *    KOUBIA, pas aussi les trois BOBA) ;
+ *  - une agence dite (« Boba Plateau ») choisit parmi elles ;
+ *  - sans agence dite, toutes les adresses de l'enseigne sont proposées,
+ *    y compris celles dont le nom la prolonge (« BOBA KOUBIA » pour « Boba »).
  */
 async function boutiqueTovo(
   db: SupabaseClient,
   dit: string,
   reconnu: (n: string) => boolean,
-): Promise<{ lat: number; lng: number } | null | undefined> {
+): Promise<{ lat: number; lng: number } | { adresses: string[] } | null | undefined> {
   try {
     const { data } = await db.from('merchants').select('id, name, search_aliases').eq('is_approved', true).limit(400);
-    const boutiques = ((data ?? []) as Array<{ id: string; name: string; search_aliases?: string | null }>).map((m) => ({
-      id: m.id,
-      noms: [m.name.replace(/\([^)]*\)/g, ' '), ...(m.search_aliases ?? '').split(';')].map((n) => normaliserIntention(n)).filter(Boolean),
-      agence: normaliserIntention((/\(([^)]*)\)/.exec(m.name)?.[1]) ?? ''),
-    })).filter((b) => b.noms.some(reconnu));
-    if (boutiques.length === 0) return undefined;
-    const precisees = boutiques.filter((b) => b.agence && dit.includes(` ${b.agence} `));
-    const choisies = precisees.length ? precisees : boutiques;
-    if (choisies.length !== 1) return null;
+    const toutes = ((data ?? []) as Array<{ id: string; name: string; search_aliases?: string | null }>).map((m) => {
+      // L'agence entre parenthèses, même mal fermée (« BOBA ( Centre Aéré »).
+      const agence = (/\(\s*([^)]*?)\s*\)?\s*$/.exec(m.name)?.[1] ?? '').trim();
+      const nom = m.name.replace(/\(.*$/, ' ').replace(/\s+/g, ' ').trim();
+      return {
+        id: m.id,
+        adresse: agence ? `${nom} ${agence}` : nom,
+        noms: [nom, ...(m.search_aliases ?? '').split(';')].map((n) => normaliserIntention(n)).filter(Boolean),
+        agence: normaliserIntention(agence),
+      };
+    });
+    const longueur = (b: (typeof toutes)[number]) => Math.max(0, ...b.noms.filter(reconnu).map((n) => n.length));
+    const reconnues = toutes.filter((b) => longueur(b) > 0);
+    if (reconnues.length === 0) return undefined;
+    const plusLong = Math.max(...reconnues.map(longueur));
+    let choisies = reconnues.filter((b) => longueur(b) === plusLong);
+    const precisees = choisies.filter((b) => b.agence && dit.includes(` ${b.agence} `));
+    if (precisees.length) {
+      choisies = precisees;
+    } else {
+      const ditsNoms = choisies.flatMap((b) => b.noms.filter(reconnu));
+      const prolongent = toutes.filter((b) => !choisies.includes(b)
+        && b.noms.some((n) => ditsNoms.some((d) => n.startsWith(`${d} `))));
+      choisies = [...choisies, ...prolongent];
+    }
+    if (choisies.length > 1) return { adresses: [...new Set(choisies.map((b) => b.adresse))].slice(0, 6) };
     const { data: positions } = await db.rpc('merchants_positions', { ids: [choisies[0]!.id] });
     const p = (positions as Array<{ lat: number | null; lng: number | null }> | null)?.[0];
     return p?.lat != null && p?.lng != null ? { lat: p.lat, lng: p.lng } : null;

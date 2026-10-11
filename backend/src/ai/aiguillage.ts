@@ -78,6 +78,11 @@ export const LIBELLES: Record<Intention, string> = {
 const PREFIXE = 'intention:';
 const SEPARATEUR = '::';
 
+/** La valeur d'une tuile qui porte une intention CHOISIE et la phrase à relire (voir intentionChoisie). */
+export function valeurTuile(intention: Intention, phrase: string): string {
+  return `${PREFIXE}${intention}${SEPARATEUR}${phrase.trim().slice(0, 300)}`;
+}
+
 export type Route =
   | { type: 'intention'; intention: Intention; decision: DecisionJev }
   | { type: 'clarifier'; contenu: string; components: Component[]; decision: DecisionJev }

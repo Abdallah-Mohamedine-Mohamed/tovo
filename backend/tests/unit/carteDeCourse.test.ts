@@ -113,6 +113,40 @@ describe('la nouvelle carte (contrat 2) : tout trajet, consigne comprise (09/10)
     expect(enseigne.pickup).toMatchObject({ hint: 'Garbador', chez_moi: false, lat: 13.51, lng: 2.13 });
   });
 
+  it('une enseigne à plusieurs adresses : on demande laquelle, l’adresse dite est située (10/10)', async () => {
+    const positions: Record<string, { lat: number; lng: number }> = {
+      plateau: { lat: 13.52, lng: 2.1 }, aere: { lat: 13.56, lng: 2.09 }, koubia: { lat: 13.55, lng: 2.05 },
+    };
+    const boutiques = {
+      from: () => ({ select: () => ({ eq: () => ({ limit: async () => ({ data: [
+        { id: 'plateau', name: 'BOBA ( Plateau )' },
+        { id: 'aere', name: 'BOBA ( Centre Aéré' },
+        { id: 'koubia', name: 'BOBA KOUBIA' },
+      ] }) }) }) }),
+      rpc: async (nom: string, args: { ids?: string[] }) => nom === 'merchants_positions'
+        ? { data: [positions[args.ids![0]!]] }
+        : { data: { price: 1000, callback_minutes: 7 } },
+    } as unknown as SupabaseClient;
+    const message = 'J’ai commandé chez Boba, envoie un livreur récupérer ma commande';
+    const preparerChez = (lieu: string, dit = message) => EXECUTORS.preparer_course!(
+      { mode: 'recuperer', ou_recuperer: lieu },
+      { db: boutiques, userId: 'u1', currentMessage: dit, position, trajetLibre: true },
+    );
+
+    // « Boba » : les trois adresses, y compris celle dont le nom prolonge l'enseigne.
+    const choix = await preparerChez('Boba');
+    expect(carte(choix)).toBeUndefined();
+    const tuiles = choix.components.find((c) => c.type === 'quick_replies')!.data.items as Array<{ label: string; value: string }>;
+    expect(tuiles.map((t) => t.label)).toEqual(['BOBA Plateau', 'BOBA Centre Aéré', 'BOBA KOUBIA']);
+    // La tuile porte la phrase du client, l'adresse à la place du nom.
+    expect(tuiles[0]!.value).toBe('intention:livreur::J’ai commandé chez BOBA Plateau, envoie un livreur récupérer ma commande');
+
+    // Une adresse dite, ou le nom le plus complet : la carte, située.
+    expect(carte(await preparerChez('Boba Plateau'))!.pickup).toMatchObject({ lat: 13.52, lng: 2.1 });
+    expect(carte(await preparerChez('Boba Centre Aéré'))!.pickup).toMatchObject({ lat: 13.56, lng: 2.09 });
+    expect(carte(await preparerChez('Boba Koubia'))!.pickup).toMatchObject({ lat: 13.55, lng: 2.05 });
+  });
+
   it('« je veux un livreur » : départ chez moi, arrivée à préciser', async () => {
     const d = carte(await trajet({}))!;
     expect(d.pickup).toMatchObject({ chez_moi: true });
