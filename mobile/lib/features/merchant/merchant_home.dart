@@ -6,6 +6,8 @@ import '../../components/registry.dart';
 import '../../core/api.dart';
 import '../../core/deconnexion.dart';
 import '../../core/theme.dart';
+import '../../core/catalog_image.dart';
+import 'catalogue_boutique.dart';
 import 'merchant_controller.dart';
 import 'hours_editor.dart';
 import 'product_editor.dart';
@@ -140,7 +142,7 @@ class _MerchantHomeState extends State<MerchantHome>
             ? const _AucuneBoutique()
             : _onglet == 0
             ? _ListeCommandes(controller: _c)
-            : _ListeProduits(controller: _c, onEditer: _editer),
+            : CatalogueBoutique(controller: _c, onEditer: _editer),
       ),
       floatingActionButton: _onglet == 1 && _c.boutiqueId != null
           ? FloatingActionButton.extended(
@@ -210,6 +212,25 @@ class _ListeCommandes extends StatelessWidget {
   }
 }
 
+/// « 14:32 » aujourd'hui, « hier 21:05 », sinon « 12/10 09:40 ».
+String? _heure(String? iso) {
+  final t = iso == null ? null : DateTime.tryParse(iso)?.toLocal();
+  if (t == null) return null;
+  String deux(int n) => n.toString().padLeft(2, '0');
+  final hm = '${deux(t.hour)}:${deux(t.minute)}';
+  final maintenant = DateTime.now();
+  final jour = DateTime(t.year, t.month, t.day);
+  final aujourdhui = DateTime(
+    maintenant.year,
+    maintenant.month,
+    maintenant.day,
+  );
+  final ecart = aujourdhui.difference(jour).inDays;
+  if (ecart == 0) return hm;
+  if (ecart == 1) return 'hier $hm';
+  return '${deux(t.day)}/${deux(t.month)} $hm';
+}
+
 class _CarteCommande extends StatelessWidget {
   const _CarteCommande({required this.commande, required this.controller});
 
@@ -258,9 +279,26 @@ class _CarteCommande extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
+          // Qui et quand : « Awa · 14:32 ». Le prénom permet de répondre au
+          // livreur qui demande « la commande de qui ? » ; l'heure dit
+          // laquelle attend depuis le plus longtemps.
+          Text(
+            [
+              if ((commande['client_prenom'] as String?)?.isNotEmpty == true)
+                commande['client_prenom'] as String,
+              if (_heure(commande['placed_at'] as String?) != null)
+                _heure(commande['placed_at'] as String?)!,
+            ].join('  ·  '),
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: TovoTheme.ink,
+            ),
+          ),
+          const SizedBox(height: 2),
           Text(
             (commande['dropoff_hint'] as String?) ?? '',
-            style: const TextStyle(fontSize: 12, color: TovoTheme.ink),
+            style: const TextStyle(fontSize: 12, color: TovoTheme.inkDoux),
           ),
           const SizedBox(height: 2),
           // Ce que la boutique touchera réellement, commission déduite.
@@ -271,14 +309,55 @@ class _CarteCommande extends StatelessWidget {
           ),
           if (commande['order_items'] is List) ...[
             const SizedBox(height: 12),
+            // Une photo par article : au comptoir, dix flacons se ressemblent
+            // par le nom ; on les reconnaît à l'œil.
             for (final article
                 in (commande['order_items'] as List).whereType<Map>())
               Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  '${article['quantity']} × ${article['product_name']}'
-                  '${(article['selections_label'] as String?)?.isNotEmpty == true ? ' · ${article['selections_label']}' : ''}',
-                  style: const TextStyle(fontSize: 13, color: TovoTheme.ink),
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: TovoTheme.bloc,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: ((article['image_url'] as String?) ?? '').isEmpty
+                          ? null
+                          : ColoredBox(
+                              color: Colors.white,
+                              child: CatalogImage(
+                                article['image_url'] as String,
+                                fit: BoxFit.contain,
+                                decodeWidth: 132,
+                              ),
+                            ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      '${article['quantity']} ×',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${article['product_name']}'
+                        '${(article['selections_label'] as String?)?.isNotEmpty == true ? ' · ${article['selections_label']}' : ''}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: TovoTheme.ink,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
           ],
@@ -296,97 +375,6 @@ class _CarteCommande extends StatelessWidget {
           ],
         ],
       ),
-    );
-  }
-}
-
-class _ListeProduits extends StatelessWidget {
-  const _ListeProduits({required this.controller, required this.onEditer});
-
-  final MerchantController controller;
-  final void Function(Map<String, dynamic>) onEditer;
-
-  @override
-  Widget build(BuildContext context) {
-    final produits = controller.produits;
-
-    if (produits.isEmpty) {
-      return ListView(
-        children: const [
-          _Message(
-            icone: Icons.inventory_2_outlined,
-            titre: 'Catalogue vide',
-            detail:
-                'Touchez « Produit » en bas à droite pour ajouter votre premier article.',
-          ),
-        ],
-      );
-    }
-
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: produits.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
-      itemBuilder: (context, i) {
-        final produit = produits[i];
-        final disponible = produit['is_available'] as bool? ?? true;
-
-        return InkWell(
-          onTap: () => onEditer(produit),
-          borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
-              border: Border.all(color: const Color(0x12000000)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        (produit['name'] as String?) ?? '',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: disponible ? TovoTheme.ink : TovoTheme.muted,
-                          decoration: disponible
-                              ? null
-                              : TextDecoration.lineThrough,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        Money.format((produit['price'] as num?)?.toInt() ?? 0),
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: TovoTheme.teal,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // Rupture de stock en un geste : c'est l'action la plus
-                // fréquente d'un restaurant à midi, elle ne doit pas demander
-                // d'ouvrir une fiche produit.
-                Switch(
-                  value: disponible,
-                  activeThumbColor: TovoTheme.success,
-                  onChanged: (_) => controller.basculerDisponibilite(produit),
-                ),
-                const Icon(
-                  Icons.chevron_right,
-                  size: 18,
-                  color: TovoTheme.muted,
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }

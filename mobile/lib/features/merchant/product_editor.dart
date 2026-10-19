@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/api.dart';
 import '../../core/theme.dart';
+import 'merchant_controller.dart';
 import 'options_editor.dart';
 
 /// Création et modification d'un produit.
@@ -78,15 +79,38 @@ class _ProductEditorState extends State<ProductEditor> {
     super.dispose();
   }
 
+  /// Les rayons proposés : ceux du type de la boutique, pas tout Tovo.
+  ///
+  /// La liste complète mélangeait « KFC », « SANDWICH » et « PANINI » aux
+  /// rayons d'une parfumerie. On ne garde que les sous-rayons de la catégorie
+  /// de la boutique (« Beauté & soins » → Parfum, Soins du corps…), plus le
+  /// rayon actuel du produit s'il est ailleurs, pour ne jamais le perdre.
+  /// Boutique sans catégorie, ou catégorie sans sous-rayon : la liste
+  /// complète, comme avant.
   Future<void> _chargerCategories() async {
     try {
-      final data = await _db
-          .from('categories')
-          .select('id, name, parent_id')
-          .eq('is_active', true)
-          .order('sort_order');
+      final boutique = await _db
+          .from('merchants')
+          .select('category_id')
+          .eq('id', widget.merchantId)
+          .maybeSingle();
+      final type = boutique?['category_id'] as String?;
+
+      final toutes = List<Map<String, dynamic>>.from(
+        await _db
+            .from('categories')
+            .select('id, name, parent_id')
+            .eq('is_active', true)
+            .order('sort_order'),
+      );
+      final siennes = type == null
+          ? const <Map<String, dynamic>>[]
+          : toutes
+                .where((c) => c['parent_id'] == type || c['id'] == _categorieId)
+                .map((c) => {...c, 'parent_id': null})
+                .toList();
       if (!mounted) return;
-      setState(() => _categories = List<Map<String, dynamic>>.from(data));
+      setState(() => _categories = siennes.isNotEmpty ? siennes : toutes);
     } on Exception {
       // Sans catégories, on peut toujours enregistrer : le champ devient
       // simplement vide, et l'admin pourra ranger le produit plus tard.
@@ -242,31 +266,42 @@ class _ProductEditorState extends State<ProductEditor> {
           const SizedBox(height: 16),
 
           const Text(
-            'Catégorie',
+            'Rayon',
             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 6),
-          DropdownButtonFormField<String>(
-            initialValue: _categorieId,
-            isExpanded: true,
-            decoration: _decoration('Choisir'),
-            items: [
-              for (final c in _categories)
-                DropdownMenuItem(
-                  value: c['id'] as String,
-                  child: Text(
-                    // Une sous-catégorie est décalée : « Repas » puis
-                    // « — Plats locaux », pour qu'on voie la hiérarchie sans
-                    // avoir à naviguer.
-                    c['parent_id'] == null
-                        ? '${c['name']}'
-                        : '   — ${c['name']}',
-                    style: const TextStyle(fontSize: 13),
+          // Construit seulement une fois les rayons chargés : la liste doit
+          // contenir le rayon actuel du produit, sinon Flutter refuse d'afficher
+          // la valeur.
+          if (_categories.isEmpty)
+            InputDecorator(
+              decoration: _decoration('Chargement des rayons…'),
+              child: const SizedBox(height: 18),
+            )
+          else
+            DropdownButtonFormField<String>(
+              initialValue: _categories.any((c) => c['id'] == _categorieId)
+                  ? _categorieId
+                  : null,
+              isExpanded: true,
+              decoration: _decoration('Choisir'),
+              items: [
+                for (final c in _categories)
+                  DropdownMenuItem(
+                    value: c['id'] as String,
+                    child: Text(
+                      // Une sous-catégorie est décalée : « Repas » puis
+                      // « — Plats locaux », pour qu'on voie la hiérarchie sans
+                      // avoir à naviguer.
+                      c['parent_id'] == null
+                          ? MerchantController.nomRayon('${c['name']}')
+                          : '   — ${c['name']}',
+                      style: const TextStyle(fontSize: 13),
+                    ),
                   ),
-                ),
-            ],
-            onChanged: (v) => setState(() => _categorieId = v),
-          ),
+              ],
+              onChanged: (v) => setState(() => _categorieId = v),
+            ),
           const SizedBox(height: 16),
 
           SwitchListTile(

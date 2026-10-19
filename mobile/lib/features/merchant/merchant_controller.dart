@@ -119,7 +119,7 @@ class MerchantController extends ChangeNotifier {
       final moi = Supabase.instance.client.auth.currentUser?.id;
       final boutiques = await _db
           .from('merchants')
-          .select('id, name, is_open, prep_time_min, address_hint')
+          .select('id, name, is_open, prep_time_min, address_hint, category_id')
           .eq('owner_id', moi ?? '')
           .order('name')
           .limit(1);
@@ -129,11 +129,7 @@ class MerchantController extends ChangeNotifier {
       if (boutiqueId != null) {
         _ecouter();
         final commandesRequest = actualiserCommandes();
-        final produitsRequest = _db
-            .from('products')
-            .select('id, name, price, is_available, image_url')
-            .eq('merchant_id', boutiqueId!)
-            .order('name');
+        final produitsRequest = _chargerProduits(boutiqueId!);
         await commandesRequest;
         produits = await produitsRequest;
       }
@@ -145,6 +141,60 @@ class MerchantController extends ChangeNotifier {
     _ecouter();
     notifyListeners();
   }
+
+  /// Tout le catalogue, par pages de 1000.
+  ///
+  /// PostgREST plafonne une réponse à 1000 lignes SANS le signaler : Niger
+  /// Beauté en compte plus, et les suivants disparaissaient de la liste sans
+  /// un mot. La fiche entière est lue (description, rayon) : la fiche produit
+  /// part de ces valeurs, et les omettre les faisait EFFACER au premier
+  /// enregistrement.
+  Future<List<Map<String, dynamic>>> _chargerProduits(String id) async {
+    const page = 1000;
+    final tous = <Map<String, dynamic>>[];
+    for (var depuis = 0; ; depuis += page) {
+      final lot = await _db
+          .from('products')
+          .select(
+            'id, name, description, price, is_available, image_url, '
+            'category_id, categories(name)',
+          )
+          .eq('merchant_id', id)
+          .order('name')
+          .order('id')
+          .range(depuis, depuis + page - 1);
+      tous.addAll(lot);
+      if (lot.length < page) return tous;
+    }
+  }
+
+  /// Les rayons de la boutique, du plus fourni au plus maigre, d'après ses
+  /// produits. `id` nul : les produits qui n'ont pas encore de rayon.
+  List<({String? id, String nom, int nombre})> get rayons {
+    final noms = <String?, String>{};
+    final nombres = <String?, int>{};
+    for (final p in produits) {
+      final id = p['category_id'] as String?;
+      nombres[id] = (nombres[id] ?? 0) + 1;
+      noms[id] ??=
+          ((p['categories'] as Map?)?['name'] as String?) ?? 'Sans rayon';
+    }
+    final liste = [
+      for (final e in nombres.entries)
+        (id: e.key, nom: _joli(noms[e.key]!), nombre: e.value),
+    ]..sort((a, b) => b.nombre.compareTo(a.nombre));
+    return liste;
+  }
+
+  /// « SOINS DU CORPS » → « Soins du corps » : les rayons hérités de
+  /// l'ancienne app sont en capitales, ce qui crie dans une liste.
+  static String _joli(String nom) {
+    if (nom != nom.toUpperCase()) return nom;
+    final bas = nom.toLowerCase();
+    return bas.isEmpty ? bas : bas[0].toUpperCase() + bas.substring(1);
+  }
+
+  static String nomRayon(String nom) => _joli(nom);
 
   Future<void> actualiserCommandes() {
     if (boutiqueId == null || _disposed) return Future.value();
