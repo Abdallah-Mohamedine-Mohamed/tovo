@@ -22,7 +22,14 @@ export interface CataloguePage {
   category_id?: string | undefined;
   /** La requête réécrite par le dictionnaire des synonymes, quand elle a servi. */
   synonyme?: string | undefined;
+  /**
+   * Le chemin qui a trouvé les résultats, pour le journal des recherches :
+   * mots exacts, approché (fautes), synonyme, rayon nommé, sens, ou aucun.
+   */
+  chemin?: CheminRecherche | undefined;
 }
+
+export type CheminRecherche = 'mots' | 'approche' | 'synonyme' | 'rayon' | 'sens' | 'aucun';
 
 export interface CatalogueFilter {
   q?: string | undefined;
@@ -202,7 +209,8 @@ export function requeteSansEnseigne(message: string, merchants: Array<{ id: stri
  * pertinence.
  */
 export async function cataloguePage(db: SupabaseClient, filter: CatalogueFilter, semantic = true): Promise<CataloguePage> {
-  const [page, parProduit] = await Promise.all([cataloguePageBrute(db, filter, semantic), commandesRecentes()]);
+  const [brute, parProduit] = await Promise.all([cataloguePageBrute(db, filter, semantic), commandesRecentes()]);
+  const page = brute.total > 0 ? brute : { ...brute, chemin: 'aucun' as const };
   if (parProduit.size === 0) return page;
   const uneEnseigne = filter.merchant_ids?.length === 1;
   const items = uneEnseigne ? parPopularite(page.items, parProduit) : page.items;
@@ -229,6 +237,7 @@ async function cataloguePageBrute(db: SupabaseClient, filter: CatalogueFilter, s
   let response = await db.rpc('catalog_products_page', parameters);
   if (response.error) throw response.error;
   let page = response.data as CataloguePage;
+  page.chemin = page.match_type === 'exact' ? 'mots' : 'approche';
   // Des suggestions par faute de frappe : on vérifie qu'elles ressemblent
   // vraiment à la demande (et pas seulement à « litre »).
   if (page.match_type === 'similar' && parameters.p_query && page.total > 0) {
@@ -247,7 +256,7 @@ async function cataloguePageBrute(db: SupabaseClient, filter: CatalogueFilter, s
       // Exact seulement : un synonyme est déjà une traduction, une faute
       // tolérée par-dessus serait une seconde supposition. « chapiteau »
       // (indisponible) menait en approché au savon « Château Rouge » (19/10).
-      if (trouve.match_type === 'exact' && trouve.total > 0) return { ...trouve, synonyme: reecrite };
+      if (trouve.match_type === 'exact' && trouve.total > 0) return { ...trouve, synonyme: reecrite, chemin: 'synonyme' };
     }
   }
   if (page.total === 0 && parameters.p_query) {
@@ -272,6 +281,7 @@ async function cataloguePageBrute(db: SupabaseClient, filter: CatalogueFilter, s
       if (response.error) throw response.error;
       page = response.data as CataloguePage;
       page.category_id = parameters.p_category;
+      page.chemin = 'rayon';
       return page;
     }
     const vector = semantic && embeddingsEnabled && !singleWord
@@ -284,6 +294,7 @@ async function cataloguePageBrute(db: SupabaseClient, filter: CatalogueFilter, s
         const items = filtrerSuggestionsTextuelles(parameters.p_query, page.items, await variantesDe(db, page.items));
         page = { ...page, items, total: items.length, next_offset: null };
       }
+      page.chemin = 'sens';
     }
   }
   if (parameters.p_category && !filter.category_id) page.category_id = parameters.p_category;

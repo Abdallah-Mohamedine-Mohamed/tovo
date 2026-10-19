@@ -4,7 +4,7 @@ import { serviceClient, userClient } from './supabase.js';
 import type { CataloguePage } from './catalogue.js';
 
 /** Ce qu'on retient d'une page : l'assistant n'en montre qu'une partie. */
-type PageVue = Pick<CataloguePage, 'total'> & Partial<Pick<CataloguePage, 'match_type' | 'synonyme'>> & { items: Array<{ id: unknown }> };
+type PageVue = Pick<CataloguePage, 'total'> & Partial<Pick<CataloguePage, 'match_type' | 'synonyme' | 'chemin'>> & { items: Array<{ id: unknown }> };
 
 /**
  * Le JOURNAL DES RECHERCHES (table `recherches`, migration 0084) : ce que les
@@ -54,8 +54,11 @@ export function jetonDe(entete: string | string[] | undefined): string | null {
  */
 const FRAPPE_MS = 20_000;
 
+/** La version du serveur (commit déployé par Railway) : un avant/après se lit dans le journal. */
+const VERSION = process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? null;
+
 async function ecrire(entree: {
-  source: SourceRecherche; phrase: string; user_id: string | null; page: PageVue;
+  source: SourceRecherche; phrase: string; user_id: string | null; page: PageVue; dureeMs?: number | undefined;
 }): Promise<void> {
   const db = serviceClient();
   const phrase = entree.phrase.trim().slice(0, 200);
@@ -69,7 +72,7 @@ async function ecrire(entree: {
       await db.from('recherches').delete().eq('id', precedente.id);
     }
   }
-  await db.from('recherches').insert({
+  const ligne = {
     source: entree.source,
     phrase,
     requete: requeteProduitUtilisateur(phrase),
@@ -78,7 +81,16 @@ async function ecrire(entree: {
     total: entree.page.total,
     produits: entree.page.items.slice(0, 24).map((item) => String(item.id)),
     user_id: entree.user_id,
+  };
+  const { error } = await db.from('recherches').insert({
+    ...ligne,
+    chemin: entree.page.chemin ?? null,
+    duree_ms: entree.dureeMs == null ? null : Math.round(entree.dureeMs),
+    version: VERSION,
   });
+  // Colonnes de la migration 0085 pas encore passées : on note quand même
+  // l'essentiel plutôt que rien.
+  if (error) await db.from('recherches').insert(ligne);
 }
 
 /**
@@ -88,11 +100,13 @@ async function ecrire(entree: {
 export function noterRecherche(entree: {
   source: SourceRecherche; phrase: string; page: PageVue;
   userId?: string | null | undefined; jeton?: string | null | undefined;
+  /** Le temps de la recherche, ou du tour entier pour l'assistant. */
+  dureeMs?: number | undefined;
 }): void {
   if (env.NODE_ENV === 'test' || !entree.phrase.trim()) return;
   void (async () => {
     const user_id = entree.userId ?? await proprietaire(entree.jeton).catch(() => null);
-    await ecrire({ source: entree.source, phrase: entree.phrase, user_id, page: entree.page });
+    await ecrire({ source: entree.source, phrase: entree.phrase, user_id, page: entree.page, dureeMs: entree.dureeMs });
   })().catch(() => undefined);
 }
 

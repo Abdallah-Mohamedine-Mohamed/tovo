@@ -155,6 +155,7 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
   app.get('/search', async (request, reply) => {
     const query = z.object({ q: z.string().trim().min(2).max(120) }).safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: 'requête invalide' });
+    const debut = performance.now();
     try {
       const intent = await resolveCatalogueIntent(db(request), query.data.q);
       const menu = await merchantIntentAnswer(db(request), intent);
@@ -170,7 +171,7 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
         merchant_ids: intent.merchants.length ? intent.merchants.map((merchant) => merchant.id) : undefined,
       };
       const page = await cataloguePage(db(request), filter);
-      noterRecherche({ source: 'recherche', phrase: query.data.q, page, jeton: jetonDe(request.headers.authorization) });
+      noterRecherche({ source: 'recherche', phrase: query.data.q, page, jeton: jetonDe(request.headers.authorization), dureeMs: performance.now() - debut });
       const result = searchAnswer(page, filter);
       return reply.send(envelope(result.content, result.components));
     } catch (error) {
@@ -193,11 +194,12 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       const filter = { ...query.data, merchant_ids: query.data.merchant_id ? [query.data.merchant_id] : query.data.merchant_ids };
       const database = db(request);
       const merchantId = query.data.merchant_id;
+      const debut = performance.now();
       const [page, details] = await Promise.all([
         cataloguePage(database, filter).then((page) => {
           // La barre de recherche : la première page seulement, pas le défilement.
           if (query.data.q && query.data.offset === 0) {
-            noterRecherche({ source: 'barre', phrase: query.data.q, page, jeton: jetonDe(request.headers.authorization) });
+            noterRecherche({ source: 'barre', phrase: query.data.q, page, jeton: jetonDe(request.headers.authorization), dureeMs: performance.now() - debut });
           }
           return page;
         }),

@@ -1014,7 +1014,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         const items = resultat.components
           .filter((c) => c.type === 'product_carousel' || c.type === 'product_list')
           .flatMap((c) => ((c.data as { items?: Array<{ id: string }> }).items ?? []));
-        noterRecherche({ source: 'assistant', phrase: texteClient, userId, page: { items, total: items.length } });
+        noterRecherche({ source: 'assistant', phrase: texteClient, userId, page: { items, total: items.length }, dureeMs: performance.now() - started });
       }
 
       if (resultat.rejected.length > 0) {
