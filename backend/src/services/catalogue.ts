@@ -5,6 +5,7 @@ import { embed, embeddingsEnabled } from './embeddings.js';
 import { commandesRecentes, marquerLePlusCommande, parPopularite } from './popularite.js';
 import { offreVille } from './livreur.js';
 import { serviceClient } from './supabase.js';
+import { appliquerSynonymes, synonymesActifs } from './synonymes.js';
 import { carteCommerces, pointDeMesure, type PointDeRecherche, type CategorieCommerce, commercesDuType, commercesNommes, memeCommerce, commercesPourProduit, libelleDes, specialistesDe, type Commerce, type TypeCommerce } from './commerces.js';
 import { avecOuvertureReelle } from './ouverture.js';
 import { chercherSurGoogle, lieuGoogle, NOTE_GOOGLE } from './googlePlaces.js';
@@ -19,6 +20,8 @@ export interface CataloguePage {
   next_offset: number | null;
   match_type: 'exact' | 'similar';
   category_id?: string | undefined;
+  /** La requête réécrite par le dictionnaire des synonymes, quand elle a servi. */
+  synonyme?: string | undefined;
 }
 
 export interface CatalogueFilter {
@@ -231,6 +234,21 @@ async function cataloguePageBrute(db: SupabaseClient, filter: CatalogueFilter, s
   if (page.match_type === 'similar' && parameters.p_query && page.total > 0) {
     const items = filtrerSuggestionsProches(parameters.p_query, page.items);
     page = { ...page, items, total: items.length, next_offset: null };
+  }
+  // Rien trouvé tel quel : le dictionnaire des synonymes (« bonbonne » →
+  // « bouteille »). Il ne sert qu'ici, il ne peut donc qu'ajouter des
+  // résultats — voir src/services/synonymes.ts.
+  if (page.total === 0 && parameters.p_query) {
+    const reecrite = appliquerSynonymes(parameters.p_query, await synonymesActifs());
+    if (reecrite) {
+      const essai = await db.rpc('catalog_products_page', { ...parameters, p_query: reecrite });
+      if (essai.error) throw essai.error;
+      const trouve = essai.data as CataloguePage;
+      // Exact seulement : un synonyme est déjà une traduction, une faute
+      // tolérée par-dessus serait une seconde supposition. « chapiteau »
+      // (indisponible) menait en approché au savon « Château Rouge » (19/10).
+      if (trouve.match_type === 'exact' && trouve.total > 0) return { ...trouve, synonyme: reecrite };
+    }
   }
   if (page.total === 0 && parameters.p_query) {
     const normalizedQuery = normaliserIntention(parameters.p_query);

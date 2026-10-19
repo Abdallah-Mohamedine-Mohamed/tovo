@@ -38,6 +38,7 @@ import {
 } from '../ai/conversation.js';
 import { rediger, redigerReponsePhoto } from '../ai/redacteur.js';
 import { serviceClient } from '../services/supabase.js';
+import { noterRecherche } from '../services/journalRecherche.js';
 import { orderTracking, type Component } from '../components/builders.js';
 
 /**
@@ -1006,6 +1007,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         ...(streaming ? { onEvent: emit } : {}),
         trajetLibre,
       });
+
+      // Journal des recherches : ce que le client a demandé à l'assistant, et
+      // les produits qu'on lui a montrés.
+      if (intention === 'recherche' && texteClient) {
+        const items = resultat.components
+          .filter((c) => c.type === 'product_carousel' || c.type === 'product_list')
+          .flatMap((c) => ((c.data as { items?: Array<{ id: string }> }).items ?? []));
+        noterRecherche({ source: 'assistant', phrase: texteClient, userId, page: { items, total: items.length } });
+      }
 
       if (resultat.rejected.length > 0) {
         // Un composant rejeté signifie que le modèle a inventé un

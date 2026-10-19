@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { toHttpFailure } from '../lib/errors.js';
 import { cartSummary, envelope, quickReplies } from '../components/builders.js';
 import { ecrireNote, lireNote } from '../services/noteCommande.js';
+import { noterAjoutPanier } from '../services/journalRecherche.js';
 
 /**
  * Panier — sans tour LLM.
@@ -106,6 +107,8 @@ export async function cartRoutes(app: FastifyInstance): Promise<void> {
       p_quantity: body.data.quantity,
       p_selections: body.data.selections,
     });
+    // Pour le journal des recherches : la recherche qui l'a montré a abouti.
+    if (!error) noterAjoutPanier(request.user!.id, body.data.product_id);
 
     if (error) {
       const failure = toHttpFailure(error);

@@ -18,6 +18,7 @@ import { anonClient } from '../services/supabase.js';
 import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnswer, merchantMenu } from '../services/catalogue.js';
 import { demandeDeRepas } from '../ai/intents.js';
 import { avecOuvertureReelle } from '../services/ouverture.js';
+import { jetonDe, noterRecherche } from '../services/journalRecherche.js';
 
 /**
  * Catalogue — le parcours sans IA de la Phase 2.
@@ -169,6 +170,7 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
         merchant_ids: intent.merchants.length ? intent.merchants.map((merchant) => merchant.id) : undefined,
       };
       const page = await cataloguePage(db(request), filter);
+      noterRecherche({ source: 'recherche', phrase: query.data.q, page, jeton: jetonDe(request.headers.authorization) });
       const result = searchAnswer(page, filter);
       return reply.send(envelope(result.content, result.components));
     } catch (error) {
@@ -192,7 +194,13 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       const database = db(request);
       const merchantId = query.data.merchant_id;
       const [page, details] = await Promise.all([
-        cataloguePage(database, filter),
+        cataloguePage(database, filter).then((page) => {
+          // La barre de recherche : la première page seulement, pas le défilement.
+          if (query.data.q && query.data.offset === 0) {
+            noterRecherche({ source: 'barre', phrase: query.data.q, page, jeton: jetonDe(request.headers.authorization) });
+          }
+          return page;
+        }),
         merchantId ? Promise.all([
           database.from('merchants').select('id, name, logo_url, address_hint, description')
             .eq('id', merchantId).eq('is_approved', true).maybeSingle(),
