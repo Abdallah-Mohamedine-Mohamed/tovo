@@ -1,6 +1,7 @@
 import { serviceClient } from './supabase.js';
 import { embed, embedImage, texteIndexable } from './embeddings.js';
 import { registerProcessor, startWorker, getQueue } from './queue.js';
+import { redigerFiche, variantesAvecFiche } from './ficheRecherche.js';
 
 /**
  * Indexation des produits.
@@ -141,7 +142,12 @@ async function indexerChacun(produits: ProduitAIndexer[]): Promise<IndexOutcome>
     ((deja ?? []) as Array<{ id: string; embedding_source: string | null }>).map((p) => [p.id, p.embedding_source]),
   );
 
-  for (const produit of produits) {
+  for (const brut of produits) {
+    // Nouveau produit, ou produit renommé : son texte indexé ne commence pas
+    // par son nom actuel. On lui écrit sa fiche de recherche avant de
+    // l'indexer — un prix ou une disponibilité qui change n'en déclenche pas.
+    const source = sourceIndexee.get(brut.id);
+    const produit = source != null && source.startsWith(brut.name) ? brut : await avecFiche(brut);
     const texte = texteIndexable(produit);
 
     try {
@@ -195,6 +201,52 @@ async function indexerChacun(produits: ProduitAIndexer[]): Promise<IndexOutcome>
   }
 
   return { examined: produits.length, indexed, failed };
+}
+
+/**
+ * Écrit la fiche de recherche d'un produit (src/services/ficheRecherche.ts)
+ * et rend le produit à indexer avec elle.
+ *
+ * La description du commerçant est gardée : la fiche n'en écrit une que s'il
+ * n'y en a pas. Les étiquettes rejoignent ses variantes d'écriture, seules
+ * lues par la recherche par mots.
+ *
+ * Sans conséquence en cas d'échec : le produit est indexé tel quel, comme
+ * avant. Il ne sera pas retenté — son texte indexé commencera par son nom.
+ */
+async function avecFiche(produit: ProduitAIndexer): Promise<ProduitAIndexer> {
+  const db = serviceClient();
+  try {
+    const { data, error } = await db
+      .from('products')
+      .select('image_url, options_text, search_aliases, merchants(name), categories(name)')
+      .eq('id', produit.id)
+      .single();
+    if (error) throw error;
+    const ligne = data as unknown as {
+      image_url: string | null; options_text: string | null; search_aliases: string | null;
+      merchants: { name: string } | null; categories: { name: string } | null;
+    };
+    const fiche = await redigerFiche({
+      name: produit.name, boutique: ligne.merchants?.name, rayon: ligne.categories?.name,
+      options: [ligne.options_text, produit.description].filter(Boolean).join(' — ') || null,
+      image_url: ligne.image_url,
+    });
+    const complet = {
+      description: produit.description?.trim() ? produit.description : fiche.description,
+      tags: fiche.etiquettes.slice(0, 20),
+    };
+    const { error: erreur } = await db
+      .from('products')
+      .update({ ...complet, search_aliases: variantesAvecFiche(ligne.search_aliases, fiche, produit.name) })
+      .eq('id', produit.id);
+    if (erreur) throw erreur;
+    return { ...produit, ...complet };
+  } catch (cause) {
+    // eslint-disable-next-line no-console
+    console.error(`[indexer] fiche de ${produit.id} non écrite :`, cause instanceof Error ? cause.message : cause);
+    return produit;
+  }
 }
 
 /**

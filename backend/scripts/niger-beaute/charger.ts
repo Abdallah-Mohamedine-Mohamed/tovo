@@ -71,6 +71,11 @@ const visite = existsSync(join(DOSSIER, 'visite.json'))
   ? JSON.parse(readFileSync(join(DOSSIER, 'visite.json'), 'utf8')) as { articles: Record<string, Record<string, string>>; ajouts: Article[] }
   : { articles: {}, ajouts: [] };
 const fiche = JSON.parse(readFileSync(join(DOSSIER, 'boutique.json'), 'utf8'));
+// Les fiches de recherche écrites par decrire.ts (description française,
+// étiquettes) ; absentes, l'inventaire suffit.
+const fiches: Record<string, { description: string; etiquettes: string[] }> = existsSync(join(DOSSIER, 'descriptions.json'))
+  ? JSON.parse(readFileSync(join(DOSSIER, 'descriptions.json'), 'utf8'))
+  : {};
 
 // La visite l'emporte sur l'inventaire, champ par champ — comme son export.
 const articles: Article[] = [
@@ -108,9 +113,43 @@ const RAYONS: Array<[string, string[]]> = [
 const RAYON_PAR_DEFAUT = 'beaute-et-hygiene-c69';
 const rayonDe = (a: Article): string => RAYONS.find(([, sous]) => sous.includes(a.sous_categorie))?.[0] ?? RAYON_PAR_DEFAUT;
 
+/**
+ * La contenance sous ses formes usuelles, calculée et non écrite par l'IA :
+ * « 1000 ml » → « 1000 ml », « 1 l », « 1 litre » ; « 1 L » → « 1 l », « 1000 ml ».
+ * Un client écrit « 1 litre » quand l'étiquette dit « 1000 ml ».
+ */
+function contenances(brut: string): string[] {
+  const m = brut.toLowerCase().replace(',', '.').match(/(\d+(?:\.\d+)?)\s*(ml|cl|l|g|kg)\b/);
+  if (!m) return [];
+  const n = Number(m[1]);
+  const enMl = m[2] === 'l' ? n * 1000 : m[2] === 'cl' ? n * 10 : m[2] === 'ml' ? n : null;
+  const enG = m[2] === 'kg' ? n * 1000 : m[2] === 'g' ? n : null;
+  const sortie = [`${m[1]} ${m[2]}`];
+  if (enMl !== null) {
+    sortie.push(`${enMl} ml`);
+    if (enMl >= 1000 && enMl % 500 === 0) sortie.push(`${enMl / 1000} l`, `${enMl / 1000} litre${enMl > 1000 ? 's' : ''}`);
+  }
+  if (enG !== null) {
+    sortie.push(`${enG} g`);
+    if (enG >= 1000 && enG % 500 === 0) sortie.push(`${enG / 1000} kg`);
+  }
+  return sortie;
+}
+
+/** Les termes de recherche propres au produit (fiche IA + contenance), pour `search_aliases`. */
+function aliases(a: Article): string | null {
+  const termes = [...(fiches[a.id]?.etiquettes ?? []), ...contenances(a.contenance || a.nom || '')]
+    .map((x) => x.trim().toLowerCase()).filter((x) => x.length > 1);
+  return termes.length ? [...new Set(termes)].join(' ; ') : null;
+}
+
 function etiquettes(a: Article): string[] {
-  const brutes = [a.sous_categorie, a.marque, a.gamme, ...(a.mots_cles ?? '').split(',')];
-  return [...new Set(brutes.map((x) => (x ?? '').trim().toLowerCase()).filter((x) => x.length > 1))].slice(0, 12);
+  const brutes = [
+    ...(fiches[a.id]?.etiquettes ?? []),
+    ...contenances(a.contenance || a.nom || ''),
+    a.sous_categorie, a.marque, a.gamme, ...(a.mots_cles ?? '').split(','),
+  ];
+  return [...new Set(brutes.map((x) => (x ?? '').trim().toLowerCase()).filter((x) => x.length > 1))].slice(0, 20);
 }
 
 // --- Petits outils ------------------------------------------------------------------
@@ -313,10 +352,15 @@ for (const [i, a] of aCharger.entries()) {
   const legacy = `${CLE_BOUTIQUE}:${a.id}`;
   const champs = {
     name: a.nom,
-    description: a.description || null,
+    description: fiches[a.id]?.description || a.description || null,
     price: prixDe(a)!,
     category_id: categorie(rayonDe(a)),
     tags: etiquettes(a),
+    // La recherche PAR MOTS ne lit que le nom et `search_aliases` (0056/0057),
+    // ni les étiquettes ni la description : « gel douche citron » ne trouvait
+    // pas le Kiss Beauty « Shower Gel … Lemon ». Les termes français de la
+    // fiche et la contenance calculée y vont, au format « a ; b ».
+    search_aliases: aliases(a),
     is_available: true,
   };
   let produit = existants.get(legacy);

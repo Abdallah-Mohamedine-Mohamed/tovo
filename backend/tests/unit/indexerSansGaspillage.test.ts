@@ -7,6 +7,13 @@ vi.mock('../../src/services/embeddings.js', async (original) => ({
   embedImage: vi.fn(),
 }));
 
+// Un produit renommé reçoit sa fiche de recherche (IA) : simulée ici.
+const redigerFiche = vi.hoisted(() => vi.fn(async () => ({ description: 'Attiéké au poulet.', etiquettes: ['attieke'] })));
+vi.mock('../../src/services/ficheRecherche.js', async (original) => ({
+  ...(await original<typeof import('../../src/services/ficheRecherche.js')>()),
+  redigerFiche,
+}));
+
 const PRODUIT = { id: '77777777-7777-4777-8777-777777777777', name: 'Attiéké poulet', description: 'Semoule de manioc', image_description: null, tags: null };
 const base = vi.hoisted(() => ({ source: null as string | null, ecritures: [] as Array<Record<string, unknown>> }));
 vi.mock('../../src/services/supabase.js', () => {
@@ -31,8 +38,10 @@ describe('indexeur — pas d’embedding recalculé pour rien', () => {
     base.source = texteIndexable(PRODUIT);
     base.ecritures = [];
     embed.mockClear();
+    redigerFiche.mockClear();
     const r = await indexProductsByIds([PRODUIT.id]);
     expect(embed).not.toHaveBeenCalled();
+    expect(redigerFiche).not.toHaveBeenCalled();
     expect(r.indexed).toBe(1);
     expect(base.ecritures[0]).toEqual({ embedded_at: expect.any(String) });
   });
@@ -41,7 +50,11 @@ describe('indexeur — pas d’embedding recalculé pour rien', () => {
     base.source = 'ancien nom du produit';
     base.ecritures = [];
     embed.mockClear();
+    redigerFiche.mockClear();
     await indexProductsByIds([PRODUIT.id]);
     expect(embed).toHaveBeenCalledTimes(1);
+    // Renommé : sa fiche est réécrite, mais la description du commerçant reste.
+    expect(redigerFiche).toHaveBeenCalledTimes(1);
+    expect(base.ecritures[0]).toMatchObject({ description: 'Semoule de manioc', tags: ['attieke'] });
   });
 });

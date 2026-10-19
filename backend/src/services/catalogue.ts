@@ -44,7 +44,7 @@ export interface PendingMerchantChoice {
 }
 
 const MOTS_SIMILAIRES_VIDES = new Set([
-  'avec', 'chez', 'dans', 'pour', 'sans', 'sur', 'tout', 'toute', 'tous', 'toutes',
+  'avec', 'chez', 'contre', 'dans', 'pour', 'sans', 'sur', 'tout', 'toute', 'tous', 'toutes',
 ]);
 
 function motsRecherche(texte: string): string[] {
@@ -59,12 +59,18 @@ function motsRecherche(texte: string): string[] {
  * Il sert à classer des candidats, puis les mots du catalogue doivent encore
  * confirmer l'objet. C'est ce qui interdit « thé au lait » pour « pommade ».
  */
-export function filtrerSuggestionsTextuelles(query: string, items: ProductRow[]): ProductRow[] {
+export function filtrerSuggestionsTextuelles(
+  query: string, items: ProductRow[], variantes: ReadonlyMap<string, string> = new Map(),
+): ProductRow[] {
   const demandes = [...new Set(motsRecherche(query))];
   if (demandes.length === 0) return [];
 
   return items.filter((item) => {
-    const disponibles = new Set(motsRecherche(`${item.name} ${item.description ?? ''}`));
+    // Les variantes d'écriture comptent comme le nom : c'est là que la fiche
+    // de recherche range « palu » pour Artefan ou « tente » pour un chapiteau
+    // (src/services/ficheRecherche.ts). Sans elles, le sens trouvait le bon
+    // produit et ce filtre le rejetait (banc-clients, 19/10).
+    const disponibles = new Set(motsRecherche(`${item.name} ${item.description ?? ''} ${variantes.get(String(item.id)) ?? ''}`));
     const correspondances = demandes.filter((mot) => disponibles.has(mot));
     if (demandes.length === 1) return correspondances.length === 1;
 
@@ -200,6 +206,16 @@ export async function cataloguePage(db: SupabaseClient, filter: CatalogueFilter,
   return { ...page, items: marquerLePlusCommande(items, parProduit) };
 }
 
+/** Les variantes d'écriture des produits proposés, en une lecture. */
+async function variantesDe(db: SupabaseClient, items: ProductRow[]): Promise<Map<string, string>> {
+  if (items.length === 0) return new Map();
+  const { data, error } = await db.from('products').select('id, search_aliases')
+    .in('id', items.map((item) => String(item.id))).not('search_aliases', 'is', null);
+  // Une panne de lecture n'empêche pas la recherche : on filtre comme avant.
+  if (error) return new Map();
+  return new Map((data ?? []).map((ligne) => [String(ligne.id), String(ligne.search_aliases)]));
+}
+
 async function cataloguePageBrute(db: SupabaseClient, filter: CatalogueFilter, semantic = true): Promise<CataloguePage> {
   const query = requeteProduitUtilisateur(filter.q ?? '');
   const parameters = {
@@ -247,7 +263,7 @@ async function cataloguePageBrute(db: SupabaseClient, filter: CatalogueFilter, s
       if (response.error) throw response.error;
       page = response.data as CataloguePage;
       if (page.match_type === 'similar') {
-        const items = filtrerSuggestionsTextuelles(parameters.p_query, page.items);
+        const items = filtrerSuggestionsTextuelles(parameters.p_query, page.items, await variantesDe(db, page.items));
         page = { ...page, items, total: items.length, next_offset: null };
       }
     }
