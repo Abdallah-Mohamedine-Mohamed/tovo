@@ -240,8 +240,14 @@ if (boutiqueExistante) {
     if (lot.length < 1000) break;
   }
 }
-const nouveaux = aCharger.filter((a) => !existants.has(`${CLE_BOUTIQUE}:${a.id}`)).length;
-console.log(`  base Tovo : boutique ${boutiqueExistante ? 'déjà créée' : 'à créer'} ; ${nouveaux} produits à créer, ${aCharger.length - nouveaux} à mettre à jour`);
+// Sans photo, pas en vente (décision du 19/10) : ni fichier dans images/, ni
+// photo déjà en ligne. Un tel article déjà chargé est retiré de la vitrine.
+const sansPhoto = (a: Article) => !imageDe(a) && !existants.get(`${CLE_BOUTIQUE}:${a.id}`)?.image_url;
+const aVendre = aCharger.filter((a) => !sansPhoto(a));
+const nouveaux = aVendre.filter((a) => !existants.has(`${CLE_BOUTIQUE}:${a.id}`)).length;
+const aRetirerFautePhoto = aCharger.filter((a) => sansPhoto(a) && existants.get(`${CLE_BOUTIQUE}:${a.id}`)?.is_available);
+console.log(`  sans photo : ${aCharger.length - aVendre.length} écartés (${aRetirerFautePhoto.length} déjà en ligne, retirés de la vente)`);
+console.log(`  base Tovo : boutique ${boutiqueExistante ? 'déjà créée' : 'à créer'} ; ${nouveaux} produits à créer, ${aVendre.length - nouveaux} à mettre à jour`);
 
 if (!appliquer) {
   console.log('\nÀ blanc : rien écrit. Relancez avec --appliquer.');
@@ -348,7 +354,7 @@ if (args.includes('--boutique-seule')) {
 // fichier absent.
 
 let crees = 0, majs = 0, images = 0, retires = 0;
-for (const [i, a] of aCharger.entries()) {
+for (const [i, a] of aVendre.entries()) {
   const legacy = `${CLE_BOUTIQUE}:${a.id}`;
   const champs = {
     name: a.nom,
@@ -379,13 +385,13 @@ for (const [i, a] of aCharger.entries()) {
     await verifier(db.from('products').update({ image_url: image }).eq('id', produit.id), `image ${a.id}`);
     images++;
   }
-  process.stdout.write(`\r  produits ${i + 1}/${aCharger.length}`);
+  process.stdout.write(`\r  produits ${i + 1}/${aVendre.length}`);
 }
 console.log();
 
 // Un article chargé puis déclaré absent à la visite disparaît de la vitrine,
 // sans effacer son historique de commandes.
-for (const a of ecartes) {
+for (const a of [...ecartes, ...aRetirerFautePhoto]) {
   const p = existants.get(`${CLE_BOUTIQUE}:${a.id}`);
   if (p?.is_available) {
     await verifier(db.from('products').update({ is_available: false }).eq('id', p.id), `retrait ${a.id}`);

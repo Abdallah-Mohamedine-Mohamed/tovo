@@ -39,3 +39,24 @@ backend/scripts/voix/sons/
 
 # Avatars : images générées (node outils/avatars/generer.cjs)
 outils/avatars/images/
+
+# Atelier du catalogue Niger Beauté (photos de visite, recadrages, planches,
+# scripts Python ponctuels) : fichiers de travail, jamais dans le dépôt.
+/.deps/
+/new_catalog_work/
+/images_batch*/
+/images-chatgpt*
+/phase2_review/
+/*_candidates/
+/eucerin_candidates/
+/logo/
+/project/
+/outils/
+/*.py
+/*.jpg
+/*.jpeg
+/*.png
+/*.download
+/*.tsv
+/*.csv
+!/categories.csv
