@@ -15,14 +15,14 @@ vi.mock('../../src/services/ficheRecherche.js', async (original) => ({
 }));
 
 const PRODUIT = { id: '77777777-7777-4777-8777-777777777777', name: 'Attiéké poulet', description: 'Semoule de manioc', image_description: null, tags: null };
-const base = vi.hoisted(() => ({ source: null as string | null, ecritures: [] as Array<Record<string, unknown>> }));
+const base = vi.hoisted(() => ({ tags: null as string[] | null, source: null as string | null, ecritures: [] as Array<Record<string, unknown>> }));
 vi.mock('../../src/services/supabase.js', () => {
   const chaine = (): unknown => new Proxy(() => undefined, {
     get: (_c, prop) => {
       if (prop === 'then') return (ok: (v: unknown) => void) => ok({ data: base.source === null ? [] : [{ id: PRODUIT.id, embedding_source: base.source }], error: null });
       if (prop === 'update') return (valeurs: Record<string, unknown>) => { base.ecritures.push(valeurs); return chaine(); };
       if (prop === 'select') return (colonnes: string) => (colonnes.startsWith('id, name')
-        ? { in: async () => ({ data: [PRODUIT], error: null }) }
+        ? { in: async () => ({ data: [{ ...PRODUIT, tags: base.tags }], error: null }) }
         : chaine());
       return () => chaine();
     },
@@ -56,5 +56,22 @@ describe('indexeur — pas d’embedding recalculé pour rien', () => {
     // Renommé : sa fiche est réécrite, mais la description du commerçant reste.
     expect(redigerFiche).toHaveBeenCalledTimes(1);
     expect(base.ecritures[0]).toMatchObject({ description: 'Semoule de manioc', tags: ['attieke'] });
+  });
+
+  it('nouveau produit chargé avec ses étiquettes : sa fiche n’est pas réécrite', async () => {
+    base.source = null;
+    base.tags = ['gel douche'];
+    redigerFiche.mockClear();
+    await indexProductsByIds([PRODUIT.id]);
+    expect(redigerFiche).not.toHaveBeenCalled();
+    base.tags = null;
+  });
+
+  it('nouveau produit sans étiquettes (ajouté depuis l’app) : il reçoit sa fiche', async () => {
+    base.source = null;
+    base.tags = null;
+    redigerFiche.mockClear();
+    await indexProductsByIds([PRODUIT.id]);
+    expect(redigerFiche).toHaveBeenCalledTimes(1);
   });
 });

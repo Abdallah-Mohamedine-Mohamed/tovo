@@ -143,11 +143,14 @@ async function indexerChacun(produits: ProduitAIndexer[]): Promise<IndexOutcome>
   );
 
   for (const brut of produits) {
-    // Nouveau produit, ou produit renommé : son texte indexé ne commence pas
-    // par son nom actuel. On lui écrit sa fiche de recherche avant de
-    // l'indexer — un prix ou une disponibilité qui change n'en déclenche pas.
+    // Produit renommé (son texte indexé ne commence plus par son nom), ou
+    // nouveau produit sans étiquettes : on lui écrit sa fiche de recherche
+    // avant de l'indexer. Un prix ou une disponibilité qui change n'en
+    // déclenche pas, ni un produit chargé avec sa fiche (Niger Beauté).
     const source = sourceIndexee.get(brut.id);
-    const produit = source != null && source.startsWith(brut.name) ? brut : await avecFiche(brut);
+    const renomme = source != null && !source.startsWith(brut.name);
+    const sansFiche = source == null && !(brut.tags?.length);
+    const produit = renomme || sansFiche ? await avecFiche(brut) : brut;
     const texte = texteIndexable(produit);
 
     try {
