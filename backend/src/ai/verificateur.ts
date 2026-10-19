@@ -348,10 +348,29 @@ export function affirmationsInventees(phrase: string, faits: Faits): Affirmation
  * Découpe en phrases, ponctuation et espaces qui suivent compris. Un point
  * DANS un nombre (« 6.800 ») ne coupe pas : seul un point suivi d'un espace,
  * ou de la fin, termine une phrase.
+ *
+ * Et jamais DANS un gras ouvert (19/10) : « Je n'ai pas la lotion **St. Ives** »
+ * était coupée après « St. », et la suite, commençant par « Ives** », retirée
+ * comme un nom inconnu — le client lisait « Je n'ai pas la lotion **St. ». Un
+ * nom en gras est un tout : tant que les « ** » sont impairs, la phrase
+ * continue. Vaut pour tous les noms à point (St., Dr., Ste.), sans liste.
  */
 export function phrases(texte: string): string[] {
-  return texte.match(/(?:[^.!?\n]|[.!?](?![\s.!?]|$))+(?:[.!?]+(?=\s|$))?[^\S\n]*|[.!?]+[^\S\n]*|\n+/g)
+  const morceaux = texte.match(/(?:[^.!?\n]|[.!?](?![\s.!?]|$))+(?:[.!?]+(?=\s|$))?[^\S\n]*|[.!?]+[^\S\n]*|\n+/g)
     ?.filter((p) => p.length > 0) ?? [];
+  const sortie: string[] = [];
+  let enCours = '';
+  for (const m of morceaux) {
+    enCours += m;
+    // Un retour à la ligne clôt toujours : un « ** » orphelin ne doit pas
+    // avaler le reste de la réponse.
+    if ((enCours.match(/\*\*/g)?.length ?? 0) % 2 === 0 || m.startsWith('\n')) {
+      sortie.push(enCours);
+      enCours = '';
+    }
+  }
+  if (enCours) sortie.push(enCours);
+  return sortie;
 }
 
 export interface Verification {

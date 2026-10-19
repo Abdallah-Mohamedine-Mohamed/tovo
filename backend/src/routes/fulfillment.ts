@@ -6,6 +6,7 @@ import { queueDispatch } from '../services/dispatch.js';
 import { notifierClient, notifierLivreurCommandePrete } from '../services/orderNotifications.js';
 import { paiementMobileActif } from '../config/env.js';
 import { verifierPaiement } from '../services/payments.js';
+import { serviceClient } from '../services/supabase.js';
 
 /**
  * Exécution d'une commande — boutiquier et livreur.
@@ -289,7 +290,7 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
 
     let builder = request.supabase!
       .from('orders')
-      .select('id, status, total, items_total, merchant_payout, placed_at, dropoff_hint, order_items(product_name, quantity, selections_label)')
+      .select('id, user_id, status, total, items_total, merchant_payout, placed_at, dropoff_hint, order_items(product_name, quantity, selections_label, products(image_url))')
       .order('placed_at', { ascending: false })
       .limit(50);
 
@@ -301,6 +302,32 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(failure.status).send(failure.body);
     }
 
-    return reply.send({ orders: data ?? [] });
+    // Le PRÉNOM du client, et lui seul (18/10) : de quoi répondre au livreur
+    // qui demande « la commande de qui ? », sans livrer au boutiquier le nom
+    // complet ni le numéro. Lu par le service : la RLS des profils ne montre
+    // pas un client à une boutique, et c'est voulu.
+    const commandes = (data ?? []) as Array<Record<string, unknown>>;
+    const clients = [...new Set(commandes.map((c) => c['user_id'] as string).filter(Boolean))];
+    const prenoms = new Map<string, string>();
+    if (clients.length) {
+      const { data: profils } = await serviceClient().from('profiles').select('id, full_name').in('id', clients);
+      for (const p of profils ?? []) {
+        const prenom = String(p.full_name ?? '').trim().split(/\s+/)[0] ?? '';
+        if (prenom) prenoms.set(p.id as string, prenom);
+      }
+    }
+
+    return reply.send({
+      orders: commandes.map(({ user_id, order_items, ...c }) => ({
+        ...c,
+        client_prenom: prenoms.get(user_id as string) ?? null,
+        // Photo du produit à plat sur l'article : le comptoir reconnaît un
+        // flacon à l'œil plus vite qu'à son nom.
+        order_items: ((order_items ?? []) as Array<Record<string, unknown>>).map(({ products, ...a }) => ({
+          ...a,
+          image_url: (products as { image_url?: string | null } | null)?.image_url ?? null,
+        })),
+      })),
+    });
   });
 }

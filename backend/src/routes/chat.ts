@@ -36,7 +36,7 @@ import { avecPreuves } from '../ai/verificateur.js';
 import {
   argumentsDeLaCourse, completerCourse, decrireMemoire, DUREE_DE_VIE_MS, lireConversation, type Ligne, type Memoire,
 } from '../ai/conversation.js';
-import { rediger } from '../ai/redacteur.js';
+import { rediger, redigerReponsePhoto } from '../ai/redacteur.js';
 import { serviceClient } from '../services/supabase.js';
 import { orderTracking, type Component } from '../components/builders.js';
 
@@ -476,12 +476,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         currentMessage: message,
         ...(body.data.context ? { position: body.data.context } : {}),
       });
-      const contenu = resultat.content ?? (resultat.components.length > 0
+      const prevue = resultat.content ?? (resultat.components.length > 0
         ? 'Voici ce que je trouve.'
         : "Je n'ai rien trouvé pour le moment.");
 
       emit({ type: 'conversation', conversation_id: conversationId });
       emit({ type: 'results', components: resultat.components });
+      // Le raccourci évite au modèle de CHOISIR l'outil, pas d'écrire la
+      // phrase : elle passe par le rédacteur comme toutes les autres (19/10 —
+      // la phrase fixe annonçait « les articles qui correspondent à votre
+      // photo » quand aucun n'était le produit photographié).
+      const contenu = actionDirecte === 'search_by_image'
+        ? await redigerReponsePhoto({ indication: legendePhoto(body.data.interaction!.payload), resultat })
+        : prevue;
       emit({ type: 'text', text: contenu });
 
       await db.from('messages').insert({

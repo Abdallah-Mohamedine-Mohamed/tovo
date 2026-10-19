@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visite catalogue</title>
+<style>
+  :root { --fond: #f6f6f4; --carte: #fff; --texte: #161616; --doux: #6b6b68; --trait: #e3e3df; --accent: #161616; --ok: #1f7a3f; --alerte: #a15c00; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 15px/1.4 'Segoe UI', system-ui, sans-serif; background: var(--fond); color: var(--texte); display: flex; flex-direction: column; }
+  header { display: flex; gap: 12px; align-items: center; padding: 10px 16px; background: var(--carte); border-bottom: 1px solid var(--trait); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0 8px 0 0; white-space: nowrap; }
+  header button { white-space: nowrap; }
+  .progres { font-variant-numeric: tabular-nums; color: var(--doux); }
+  .barre { width: 160px; height: 6px; background: var(--trait); border-radius: 3px; overflow: hidden; }
+  .barre > i { display: block; height: 100%; background: var(--accent); }
+  input, select, textarea { font: inherit; padding: 7px 9px; border: 1px solid var(--trait); border-radius: 8px; background: #fff; color: inherit; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid #161616; outline-offset: -1px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--trait); background: #fff; cursor: pointer; }
+  button.principal { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .espace { flex: 1; }
+  main { flex: 1; display: grid; grid-template-columns: 380px 1fr; min-height: 0; }
+  #liste { overflow: auto; border-right: 1px solid var(--trait); background: var(--carte); }
+  .groupe > h2 { position: sticky; top: 0; z-index: 1; margin: 0; padding: 8px 12px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--doux); background: #fafaf8; border-bottom: 1px solid var(--trait); display: flex; justify-content: space-between; }
+  .ligne { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 9px 12px; border-bottom: 1px solid #f0f0ec; cursor: pointer; }
+  .ligne:hover { background: #fafaf8; }
+  .ligne.actif { background: #efefea; }
+  .ligne .nom { font-size: 14px; }
+  .ligne .meta { font-size: 12px; color: var(--doux); }
+  .ligne .prix { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+  .pastille { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--trait); color: var(--doux); }
+  .pastille.fait { color: var(--ok); border-color: #b9dcc5; }
+  .pastille.absent { color: #999; text-decoration: line-through; }
+  #fiche { overflow: auto; padding: 18px 22px 40px; }
+  .vide { color: var(--doux); padding: 40px; text-align: center; }
+  .photos { display: grid; grid-template-columns: 260px 1fr; gap: 14px; margin-bottom: 16px; }
+  .cadre { background: var(--carte); border: 1px solid var(--trait); border-radius: 10px; overflow: hidden; position: relative; }
+  .cadre img { display: block; width: 100%; height: 230px; object-fit: contain; background: #fff; cursor: zoom-in; }
+  .cadre .legende { font-size: 12px; color: var(--doux); padding: 6px 10px; border-top: 1px solid var(--trait); }
+  .cadre.boutique img { object-fit: cover; }
+  .sans-image { height: 230px; display: grid; place-items: center; color: var(--doux); font-size: 13px; text-align: center; padding: 10px; }
+  .verifier { background: #fff8ec; border: 1px solid #f0dcb8; color: #6b4200; padding: 9px 12px; border-radius: 8px; margin-bottom: 14px; font-size: 14px; }
+  .champs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+  .champs label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--doux); }
+  .champs label.large { grid-column: 1 / -1; }
+  .champs input, .champs select, .champs textarea { font-size: 15px; color: var(--texte); }
+  .prix-bloc { margin-bottom: 16px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 14px; background: var(--carte); border: 1px solid var(--trait); border-radius: 10px; }
+  .prix-bloc label { flex: 0 0 240px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--doux); }
+  #prix { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; padding: 8px 12px; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .etat { font-size: 13px; color: var(--doux); }
+  .etat.ok { color: var(--ok); } .etat.erreur { color: #b42318; }
+  .code { display: flex; gap: 6px; } .code input { flex: 1; }
+  .proposition { grid-column: 1 / -1; background: #f1f6f2; border: 1px solid #cfe3d5; border-radius: 8px; padding: 10px 12px; font-size: 14px; display: flex; gap: 12px; align-items: center; }
+  .proposition img { width: 56px; height: 56px; object-fit: contain; background: #fff; border-radius: 6px; }
+  .info { font-size: 13px; color: var(--doux); margin: 0 0 12px; }
+  #zoom { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: none; overflow: auto; z-index: 10; cursor: zoom-out; }
+  #zoom img { display: block; margin: 20px auto; max-width: none; }
+  #zoom.ouvert { display: block; }
+  dialog { border: 1px solid var(--trait); border-radius: 12px; padding: 20px; width: min(520px, 92vw); }
+  dialog::backdrop { background: rgba(0,0,0,.35); }
+  dialog .champs { margin: 12px 0; }
+  .principal kbd { background: transparent; color: #fff; border-color: rgba(255,255,255,.45); }
+  kbd { font: 12px 'Segoe UI'; border: 1px solid var(--trait); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Visite catalogue</h1>
+  <div class="barre"><i id="barre"></i></div>
+  <span class="progres" id="progres"></span>
+  <input id="recherche" type="search" placeholder="Rechercher (nom, marque, NB-…)" style="width:200px">
+  <select id="filtre">
+    <option value="tous">Tous</option>
+    <option value="a_faire" selected>À faire</option>
+    <option value="fait">Prix saisis</option>
+    <option value="absent">Pas en boutique</option>
+    <option value="verifier">À vérifier</option>
+    <option value="sans_image">Sans image (à photographier)</option>
+  </select>
+  <select id="filtreCat"><option value="">Toutes catégories</option></select>
+  <span class="espace"></span>
+  <button id="btnAjout">+ Article manquant</button>
+  <button id="btnExport">Exporter le catalogue</button>
+</header>
+<main>
+  <nav id="liste"></nav>
+  <section id="fiche"><p class="vide">Chargement…</p></section>
+</main>
+<div id="zoom"><img alt=""></div>
+
+<dialog id="dlgAjout">
+  <h3 style="margin:0">Article manquant</h3>
+  <p class="info">Un produit en boutique qui n'est pas dans l'inventaire.</p>
+  <form method="dialog" id="formAjout">
+    <div class="champs">
+      <label class="large">Nom (comme sur l'étiquette)<input name="nom" required></label>
+      <label>Marque<input name="marque"></label>
+      <label>Contenance<input name="contenance" placeholder="ex. 250 ml"></label>
+      <label>Catégorie<input name="categorie" list="listeCats"></label>
+      <label>Sous-catégorie<input name="sous_categorie" list="listeSousCats"></label>
+      <label>Prix (F CFA)<input name="prix" inputmode="numeric"></label>
+      <label class="large">Note<input name="note"></label>
+    </div>
+    <div class="actions">
+      <button class="principal" value="ok">Ajouter</button>
+      <button value="annuler" formnovalidate>Annuler</button>
+    </div>
+  </form>
+</dialog>
+<datalist id="listeCats"></datalist>
+<datalist id="listeSousCats"></datalist>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let articles = [];
+let courant = null;
+const format = (n) => n === '' || n == null ? '' : Number(n).toLocaleString('fr-FR').replace(/ /g, ' ') + ' F';
+const statutDe = (a) => a.statut || 'a_faire';
+const aVerifier = (a) => statutDe(a) === 'a_faire' && (a.confiance === 'basse' || (a.a_verifier || '').trim() !== '' || !a.contenance);
+const echapper = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+async function charger() {
+  const r = await fetch('/api/donnees');
+  articles = (await r.json()).articles;
+  const cats = [...new Set(articles.map((a) => a.categorie).filter(Boolean))].sort();
+  const sous = [...new Set(articles.map((a) => a.sous_categorie).filter(Boolean))].sort();
+  $('#filtreCat').innerHTML = '<option value="">Toutes catégories</option>' + cats.map((c) => `<option>${echapper(c)}</option>`).join('');
+  $('#listeCats').innerHTML = cats.map((c) => `<option value="${echapper(c)}">`).join('');
+  $('#listeSousCats').innerHTML = sous.map((c) => `<option value="${echapper(c)}">`).join('');
+  afficherListe();
+  const premier = visibles()[0];
+  if (premier) ouvrir(premier.id); else $('#fiche').innerHTML = '<p class="vide">Rien à afficher avec ce filtre.</p>';
+}
+
+function visibles() {
+  const q = $('#recherche').value.trim().toLowerCase();
+  const f = $('#filtre').value;
+  const cat = $('#filtreCat').value;
+  return articles.filter((a) => {
+    if (cat && a.categorie !== cat) return false;
+    if (f === 'sans_image' ? Boolean(a.image || a.photo) : f === 'verifier' ? !aVerifier(a) : f !== 'tous' && statutDe(a) !== f) return false;
+    if (q && !`${a.id} ${a.nom} ${a.marque} ${a.gamme} ${a.variante}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function progression() {
+  const faits = articles.filter((a) => statutDe(a) === 'fait').length;
+  const absents = articles.filter((a) => statutDe(a) === 'absent').length;
+  const total = articles.length;
+  $('#progres').textContent = `${faits} prix saisis · ${absents} absents · ${total - faits - absents} à faire / ${total}`;
+  $('#barre').style.width = `${Math.round(100 * (faits + absents) / Math.max(total, 1))}%`;
+}
+
+function afficherListe() {
+  progression();
+  const groupes = new Map();
+  for (const a of visibles()) {
+    const g = a.ajout ? 'Articles ajoutés pendant la visite' : (a.photo_source || 'Sans photo').replace(/\.jpe?g$/i, '');
+    if (!groupes.has(g)) groupes.set(g, []);
+    groupes.get(g).push(a);
+  }
+  $('#liste').innerHTML = [...groupes].map(([g, l]) => `<div class="groupe"><h2><span>${echapper(g)}</span><span>${l.length}</span></h2>` +
+    l.map((a) => `<div class="ligne${courant === a.id ? ' actif' : ''}" data-id="${a.id}">
+      <div><div class="nom">${echapper(a.nom)}</div><div class="meta">${a.id}${a.contenance ? ' · ' + echapper(a.contenance) : ''}${aVerifier(a) ? ' · à vérifier' : ''}</div></div>
+      <div>${statutDe(a) === 'fait' ? `<span class="prix">${format(a.prix)}</span>` : `<span class="pastille ${statutDe(a)}">${statutDe(a) === 'absent' ? 'absent' : 'à faire'}</span>`}</div>
+    </div>`).join('') + '</div>').join('') || '<p class="vide">Aucun article.</p>';
+}
+
+$('#liste').addEventListener('click', (e) => {
+  const l = e.target.closest('.ligne');
+  if (l) ouvrir(l.dataset.id);
+});
+
+function ouvrir(id) {
+  const a = articles.find((x) => x.id === id);
+  if (!a) return;
+  courant = id;
+  document.querySelectorAll('.ligne').forEach((l) => l.classList.toggle('actif', l.dataset.id === id));
+  document.querySelector(`.ligne[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest' });
+  const imageProduit = a.photo ? `/photos-visite/${a.photo}` : a.image;
+  const photoBoutique = a.photo_source ? `/photos-boutique/${a.photo_source.replace(/\.jpe?g$/i, '')}.jpg` : null;
+  $('#fiche').innerHTML = `
+    <div class="photos">
+      <div class="cadre">${imageProduit ? `<img src="${imageProduit}" alt="">` : '<div class="sans-image">Pas encore d’image produit</div>'}
+        <div class="legende">${a.photo ? 'Photo jointe pendant la visite' : a.image ? 'Image produit (catalogue)' : 'Image produit'}</div></div>
+      <div class="cadre boutique">${photoBoutique ? `<img src="${photoBoutique}" alt="" onerror="this.outerHTML='<div class=sans-image>Photo boutique pas encore convertie</div>'">` : '<div class="sans-image">Pas de photo boutique</div>'}
+        <div class="legende">Photo boutique ${echapper(a.photo_source || '')} — cliquez pour agrandir</div></div>
+    </div>
+    ${(a.a_verifier || '').trim() ? `<div class="verifier"><b>À vérifier :</b> ${echapper(a.a_verifier)}</div>` : ''}
+    ${(a.note_images || '').trim() ? `<div class="verifier"><b>Image :</b> ${echapper(a.note_images)}</div>` : ''}
+    <div class="prix-bloc" id="champsPrix">
+      <label>Prix (F CFA)<input id="prix" name="prix" inputmode="numeric" autocomplete="off" value="${echapper(a.prix)}"></label>
+      <div class="actions">
+        <button class="principal" id="btnSuivant">Enregistrer et suivant <kbd>Entrée</kbd></button>
+        <button id="btnAbsent">${statutDe(a) === 'absent' ? 'Remettre à faire' : 'Pas en boutique'}</button>
+        <button id="btnPhoto">Joindre une photo</button>
+        <input type="file" id="fichierPhoto" accept="image/*" hidden>
+      </div>
+      <div class="etat" id="etat" style="flex-basis:100%">${statutDe(a) === 'fait' ? 'Enregistré' : statutDe(a) === 'absent' ? 'Marqué absent' : ''}</div>
+    </div>
+    <p class="info">${a.id}${a.ajout ? ' · ajouté pendant la visite' : ` · confiance ${echapper(a.confiance)}`}${a.imitation === 'oui' ? ' · imitation (interne, jamais affiché au client)' : ''}</p>
+    <div class="champs" id="champs">
+      <label class="large">Nom affiché au client<input name="nom" value="${echapper(a.nom)}"></label>
+      <label>Marque<input name="marque" value="${echapper(a.marque)}"></label>
+      <label>Contenance<input name="contenance" value="${echapper(a.contenance)}" placeholder="ex. 250 ml, 200 g"></label>
+      <label>Variante<input name="variante" value="${echapper(a.variante)}"></label>
+      <label>Catégorie<input name="categorie" list="listeCats" value="${echapper(a.categorie)}"></label>
+      <label>Sous-catégorie<input name="sous_categorie" list="listeSousCats" value="${echapper(a.sous_categorie)}"></label>
+      <label class="large">Note (pour nous)<input name="note" value="${echapper(a.note)}"></label>
+    </div>
+    <p class="info" style="margin-top:14px"><kbd>Ctrl</kbd>+<kbd>↓</kbd> article suivant · <kbd>Ctrl</kbd>+<kbd>↑</kbd> précédent · clic sur une photo pour l’agrandir</p>`;
+  document.querySelectorAll('#fiche .cadre img').forEach((img) => img.addEventListener('click', () => zoomer(img.src)));
+  $('#fiche').scrollTop = 0;
+  $('#prix').focus({ preventScroll: true });
+  $('#prix').select();
+  $('#prix').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/[^\d]/g, ''); });
+  $('#btnSuivant').onclick = () => enregistrer('fait', true);
+  $('#btnAbsent').onclick = () => enregistrer(statutDe(a) === 'absent' ? 'a_faire' : 'absent', statutDe(a) !== 'absent');
+  $('#btnPhoto').onclick = () => $('#fichierPhoto').click();
+  $('#fichierPhoto').onchange = joindrePhoto;
+}
+
+function valeursFiche() {
+  return Object.fromEntries([...document.querySelectorAll('#champs [name], #champsPrix [name]')].map((el) => [el.name, el.value.trim()]));
+}
+
+async function enregistrer(statut, suivant) {
+  const a = articles.find((x) => x.id === courant);
+  const v = valeursFiche();
+  if (statut === 'fait' && !v.prix) {
+    etat('Saisissez un prix (ou « Pas en boutique »).', 'erreur');
+    $('#prix').focus();
+    return;
+  }
+  const corps = { ...v, statut };
+  const liste = visibles();
+  const index = liste.findIndex((x) => x.id === courant);
+  etat('Enregistrement…');
+  try {
+    const r = await fetch(`/api/article/${courant}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(corps) });
+    if (!r.ok) throw new Error((await r.json()).erreur || r.status);
+    Object.assign(a, corps);
+    afficherListe();
+    const prochain = visibles()[index] && visibles()[index].id !== courant ? visibles()[index] : liste[index + 1];
+    if (suivant && prochain) ouvrir(prochain.id); else { ouvrir(courant); etat('Enregistré ✓', 'ok'); }
+  } catch (e) {
+    etat('Échec de l’enregistrement : ' + e.message + ' — réessayez.', 'erreur');
+  }
+}
+
+function etat(texte, genre = '') {
+  const el = $('#etat');
+  if (el) { el.textContent = texte; el.className = 'etat ' + genre; }
+}
+
+async function chercherCode() {
+  const champ = document.querySelector('#champs [name="code_barres"]');
+  const code = champ.value.replace(/\D/g, '');
+  const bloc = $('#proposition');
+  if (code.length < 6) return;
+  bloc.style.display = 'flex';
+  bloc.textContent = 'Recherche dans Open Beauty Facts…';
+  try {
+    const r = await (await fetch(`/api/codebarres/${code}`)).json();
+    if (!r.trouve) { bloc.textContent = 'Code-barres inconnu des bases publiques (ou pas d’Internet). Le code est gardé.'; return; }
+    bloc.innerHTML = `${r.image ? `<img src="${echapper(r.image)}" alt="">` : ''}
+      <div style="flex:1"><b>${echapper(r.nom || '(sans nom)')}</b><br>${echapper(r.marque)} ${r.contenance ? '· ' + echapper(r.contenance) : ''} <span class="etat">(${r.source})</span></div>
+      <button type="button" id="btnReprendre">Reprendre ces infos</button>`;
+    $('#btnReprendre').onclick = () => {
+      const f = (n, v) => { if (v) document.querySelector(`#champs [name="${n}"]`).value = v; };
+      f('nom', [r.marque.split(',')[0], r.nom, r.contenance].filter(Boolean).join(' ').trim());
+      f('marque', r.marque.split(',')[0]);
+      f('contenance', r.contenance);
+      bloc.style.display = 'none';
+      $('#prix').focus();
+    };
+  } catch {
+    bloc.textContent = 'Recherche impossible (pas d’Internet ?). Le code est gardé.';
+  }
+}
+
+async function joindrePhoto(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  etat('Envoi de la photo…');
+  try {
+    const r = await (await fetch(`/api/photo/${courant}`, { method: 'POST', headers: { 'content-type': f.type || 'image/jpeg' }, body: f })).json();
+    await fetch(`/api/article/${courant}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ photo: r.photo }) });
+    articles.find((x) => x.id === courant).photo = r.photo;
+    ouvrir(courant);
+    etat('Photo jointe ✓', 'ok');
+  } catch (err) { etat('Échec de l’envoi : ' + err.message, 'erreur'); }
+}
+
+function zoomer(src) {
+  const z = $('#zoom');
+  z.querySelector('img').src = src;
+  z.classList.add('ouvert');
+}
+// Une seule fois : Entrée enregistre (ou cherche le code-barres).
+$('#fiche').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.target.tagName !== 'INPUT' || e.target.type === 'file') return;
+  e.preventDefault();
+  enregistrer('fait', true);
+});
+$('#zoom').addEventListener('click', () => $('#zoom').classList.remove('ouvert'));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') $('#zoom').classList.remove('ouvert');
+  if (e.ctrlKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault();
+    const l = visibles(); const i = l.findIndex((x) => x.id === courant);
+    const n = l[i + (e.key === 'ArrowDown' ? 1 : -1)];
+    if (n) ouvrir(n.id);
+  }
+});
+for (const id of ['#recherche', '#filtre', '#filtreCat']) $(id).addEventListener('input', () => { afficherListe(); const v = visibles(); if (v.length && !v.some((a) => a.id === courant)) ouvrir(v[0].id); });
+
+$('#btnAjout').onclick = () => { $('#formAjout').reset(); $('#dlgAjout').showModal(); };
+$('#dlgAjout').addEventListener('close', async () => {
+  if ($('#dlgAjout').returnValue !== 'ok') return;
+  const v = Object.fromEntries(new FormData($('#formAjout')));
+  v.prix = (v.prix || '').replace(/\D/g, '');
+  const a = articles.find((x) => x.id === courant);
+  const r = await (await fetch('/api/ajout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...v, photo_source: a?.photo_source || '', statut: v.prix ? 'fait' : 'a_faire' }) })).json();
+  await charger();
+  ouvrir(r.id);
+});
+$('#btnExport').onclick = () => { location.href = '/api/export'; };
+
+charger();
+</script>
+</body>
+</html>

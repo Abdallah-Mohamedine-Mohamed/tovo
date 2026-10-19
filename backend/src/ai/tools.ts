@@ -518,7 +518,10 @@ export async function chercherParPhoto(
     }, 'echec');
   }
 
-  const produits = await chercherEnRaccourcissant(ctx, motsCles);
+  // Le titre nomme ce que les cartes SONT : la recherche qui a trouvé, pas ce
+  // qui a été lu. « Lait corporel St Ives » au-dessus d'un lait d'une autre
+  // marque (trouvé une fois « St Ives » retiré) annonçait un produit absent.
+  const { produits, requete: trouveAvec } = await chercherEnRaccourcissant(ctx, motsCles);
 
   return fin({
     content: produits.length > 0
@@ -530,11 +533,12 @@ export async function chercherParPhoto(
       // « je vois une souris sans fil » plutôt que « je n'ai rien trouvé » :
       // le client sait alors si c'est la photo ou le catalogue qui a manqué.
       lu_sur_la_photo: motsCles,
+      ...(produits.length > 0 && trouveAvec !== motsCles ? { trouve_en_cherchant_seulement: trouveAvec } : {}),
       resultats: produits.length,
       produits: produits.map(resumeProduit),
     },
     components:
-      produits.length > 0 ? [productCarousel(produits, motsCles)] : [],
+      produits.length > 0 ? [productCarousel(produits, trouveAvec)] : [],
   }, produits.length > 0 ? 'mots-cles' : 'echec');
 }
 
@@ -552,17 +556,17 @@ export async function chercherParPhoto(
 async function chercherEnRaccourcissant(
   ctx: ToolContext,
   motsCles: string,
-): Promise<ReturnType<typeof versProductRow>[]> {
+): Promise<{ produits: ReturnType<typeof versProductRow>[]; requete: string }> {
   const mots = motsCles.split(/\s+/).filter(Boolean);
 
   for (let n = mots.length; n >= 1; n--) {
     const requete = mots.slice(0, n).join(' ');
     const page = await cataloguePage(ctx.db, { q: requete, limit: 8 }, false);
     const compatibles = filtrerProduitsPhoto(motsCles, page.items);
-    if (compatibles.length > 0) return compatibles;
+    if (compatibles.length > 0) return { produits: compatibles, requete };
   }
 
-  return [];
+  return { produits: [], requete: motsCles };
 }
 
 const boutiquesProches: Executor = async (args, ctx) => {

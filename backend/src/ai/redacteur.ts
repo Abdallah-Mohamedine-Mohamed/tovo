@@ -207,3 +207,60 @@ async function appeler(r: ARediger, delaiMs: number): Promise<string | null> {
   // Une phrase inventée retirée : si rien ne reste, la phrase prévue.
   return sansPromesseVide(verifie.texte || prevue, r.composants ?? []);
 }
+
+/**
+ * La réponse à une PHOTO (19/10). Le chat l'envoyait sans rédacteur, avec une
+ * phrase fixe : « Voici les articles qui correspondent à votre photo » — même
+ * quand aucun n'était le produit photographié (un lait St Ives → un lait
+ * Topicrem). Article 5 : rien d'inventé ; article 6 : un produit répond par ce
+ * qu'il EST.
+ *
+ * Le juge de l'article 6 dit d'abord lesquels SONT le produit de la photo ;
+ * le rédacteur écrit ensuite d'après ce verdict, donné comme un fait. Aucun
+ * nom de marque dans le code : le verdict vaut pour toutes les photos.
+ */
+export async function redigerReponsePhoto(r: {
+  indication: string;
+  resultat: { content?: string; summary: unknown; components: Component[] };
+}): Promise<string> {
+  const { resultat } = r;
+  const resume = (resultat.summary ?? {}) as Record<string, unknown>;
+  const lu = String(resume.lu_sur_la_photo ?? '').trim();
+  const prevue = resultat.content ?? '';
+  const message = `J'ai envoyé la photo d'un produit et je veux exactement ce produit${lu ? ` : ${lu}` : ''}${r.indication ? ` (${r.indication})` : ''}.`;
+  if (resultat.components.length === 0 || !lu) {
+    return rediger({ message, prevue, faits: resultat.summary, composants: resultat.components });
+  }
+
+  const garder = await jugerPertinence({ message, prevue, composants: resultat.components }, 2500);
+  const noms = produitsAffiches(resultat.components);
+  const identiques = garder ? noms.filter((p) => garder.has(p.id)).map((p) => p.nom) : null;
+
+  // Le sens prévu — et le secours si le rédacteur est en panne — suit le
+  // verdict : il ne peut plus annoncer une trouvaille qui n'en est pas une.
+  const sens = identiques === null
+    ? 'Voici ce qui ressemble le plus à votre photo.'
+    : identiques.length > 0
+      ? 'Voici le produit de votre photo.'
+      : "Ce produit précis n'est pas disponible sur Tovo ; voici des produits proches.";
+  const faits = {
+    ...resume,
+    ...(identiques === null ? {} : {
+      produit_de_la_photo_trouve: identiques.length > 0,
+      identiques_a_la_photo: identiques,
+      autres_produits_affiches: 'proches seulement, pas le produit de la photo',
+    }),
+  };
+  return (await redigerEtJuger({ message, prevue: sens, faits, composants: resultat.components }, 2500, false)).texte;
+}
+
+function produitsAffiches(composants: Component[]): Array<{ id: string; nom: string }> {
+  return composants
+    .filter((c) => c.type === 'product_carousel' || c.type === 'product_list' || c.type === 'product_card')
+    .flatMap((c) => {
+      const d = c.data as Record<string, unknown>;
+      const items = Array.isArray(d.items) ? d.items as Array<Record<string, unknown>> : [d];
+      return items.map((i) => ({ id: String(i.id ?? ''), nom: String(i.name ?? '') }));
+    })
+    .filter((p) => p.id && p.nom);
+}
