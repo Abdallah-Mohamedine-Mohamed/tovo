@@ -17,21 +17,28 @@ const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_
 });
 
 // [ce que tape le client, noms acceptables]
+//
+// « Acceptable » = ce qu'un client qui tape cette phrase serait content de
+// recevoir, quelle que soit la boutique. Élargi le 19/10 : la grille ne
+// connaissait qu'un produit par phrase, et comptait comme ratés le café
+// soluble Carte Noire, le Powerbank, le Jus de Baobab… arrivés en tête.
+// Restent refusés : un produit voisin (Nems pour des pâtes, Eba pour du
+// foufou, des biscuits au chocolat pour du chocolat noir).
 const CAS: Array<[string, RegExp]> = [
   ['médicament contre le palu', /artefan|bimalaril/i],
   ['sirop contre la toux', /rhinathiol/i],
   ['écouteurs iphone', /earpods/i],
-  ['batterie externe pour téléphone', /power bank|batterie externe/i],
+  ['batterie externe pour téléphone', /power ?bank|batterie externe/i],
   ['frigo', /r[ée]frig[ée]rateur/i],
   ["cartouche d'encre hp", /cartridge|toner|encre/i],
   ['routeur wifi 4g', /tenda 4g/i],
   ['jeu de course ps5', /need for speed/i],
-  ['boisson énergisante', /red bull|monster|xr energy|predator/i],
+  ['boisson énergisante', /red bull|monster|energy|predator/i],
   ['soda au citron', /sprite/i],
-  ['café soluble', /nescaf|nestcaf/i],
-  ['céréales petit déjeuner', /corn flakes|muesli|flocons|c[ée]r[ée]acol/i],
+  ['café soluble', /nescaf|nestcaf|caf[ée] soluble/i],
+  ['céréales petit déjeuner', /corn flakes|muesli|flocons|c[ée]r[ée]acol|c[ée]r[ée]ales|golden morn/i],
   ['chocolat noir', /lindt/i],
-  ['lait corporel éclaircissant vitamine c', /half cast/i],
+  ['lait corporel éclaircissant vitamine c', /half cast|power c|whiten|vitamin(e)? c/i],
   ['gommage visage curcuma', /turmeric/i],
   ['produit défrisant cheveux', /d[ée]fris/i],
   ['parfum dior pour femme', /dior|j'adore/i],
@@ -39,17 +46,17 @@ const CAS: Array<[string, RegExp]> = [
   ['bonbonne de gaz 12 kg', /gaz \(12kg\)/i],
   ['gâteau turc à la pistache', /baklava|fistik|kunefe/i],
   ['riz au poisson sénégalais', /tchep/i],
-  ['brochettes de viande épicée', /tukunya|toukounya|suya/i],
-  ['plat mexicain', /fajitas|qu[ée]sadillas|taco/i],
+  ['brochettes de viande épicée', /tukunya|toukounya|suya|brochette/i],
+  ['plat mexicain', /fajitas|qu[ée]sadillas|taco|burrito|nachos|enchilada|huevos rancheros/i],
   ['bubble tea', /boba|th[ée] au lait/i],
-  ['boisson maltée', /maltina/i],
-  ['jus de baobab', /pain de singe/i],
+  ['boisson maltée', /maltina|malta/i],
+  ['jus de baobab', /pain de singe|baobab/i],
   ["jus d'hibiscus", /bissap/i],
   ['pâtes à la viande hachée', /bolognaise|spaghetti.*(boeuf|viande)/i],
   ['foufou', /igname pil|foutou/i],
   ['location de tables pour mariage', /table/i],
   ['gel douche gommant citron 1 litre', /kiss beauty.*lemon|lemon.*scrub/i],
-  ['crème pour les mains', /hand cream|cr[èe]me.*mains/i],
+  ['crème pour les mains', /hand cream|cr[èe]me.*mains|corps (&|et) mains/i],
 ];
 
 let premier = 0, top3 = 0, top10 = 0;
