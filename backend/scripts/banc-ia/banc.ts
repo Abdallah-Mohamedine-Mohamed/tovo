@@ -3,6 +3,7 @@
  *
  *   npm run banc:ia                         → tous les candidats
  *   npm run banc:ia -- actuel gemini        → seulement ceux-là
+ *   npm run banc:ia -- actuel --ancienne    → le jeu tiré de l'ancienne app (jeuAncienneApp.ts)
  *
  * Mesure, pour chaque candidat :
  *   - la justesse (phrases qui se comprennent seules, puis les pièges) ;
@@ -18,7 +19,11 @@
  * Lecture seule : ne touche ni à la base ni aux commandes.
  */
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { COUTEUSES, JEU, type Cas } from '../../src/ai/banc/jeu.js';
+import { COUTEUSES, JEU as JEU_ACTUEL, type Cas } from '../../src/ai/banc/jeu.js';
+import { JEU_ANCIENNE } from '../../src/ai/banc/jeuAncienneApp.js';
+
+// --ancienne : les vrais messages de l'ancienne application, anonymisés.
+const JEU = process.argv.includes('--ancienne') ? JEU_ANCIENNE : JEU_ACTUEL;
 import type { Intention } from '../../src/ai/jev.js';
 
 // La production tourne avec le classifieur local et l'aiguillage Jev.

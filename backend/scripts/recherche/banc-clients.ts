@@ -20,7 +20,10 @@
  *                explique une erreur, il ne la définit pas ;
  *   - `absent` : aucune offre adaptée n'est en vente. Réussi seulement si
  *                l'app ne PRÉSENTE rien comme répondant : aucun résultat, ou
- *                des « suggestions » (match_type similar, affiché comme tel).
+ *                des « suggestions » (match_type similar, affiché comme tel)
+ *                sans aucun piège (`refuse`) dans les 3 premières — une
+ *                suggestion sans rapport reste une mauvaise réponse
+ *                (« chaise » → câble, chargeur, cheese burger ; 20/10).
  *
  * FAUX EN TÊTE = tout premier résultat qui n'est pas conforme (revue du
  * 19/10 : compter seulement les voisins listés en oubliait).
@@ -28,6 +31,9 @@
  * Trois lots, jamais mélangés dans un score :
  *   - `reglage` : les phrases sur lesquelles on a travaillé ;
  *   - `pieges`  : mauvaise contenance, mauvais public, produit absent ;
+ *   - `ancienne`: ce que les clients de l'ANCIENNE app demandaient vraiment
+ *                 (messages et notes de commande, 20/10/2026) — produits
+ *                 locaux, demandes hors catalogue ;
  *   - `temoin`  : écrit le 19/10 d'après le catalogue, SANS avoir regardé les
  *                 réponses du moteur. On ne règle jamais rien d'après lui : il
  *                 dit si un réglage se généralise. Le modifier pour le faire
@@ -61,7 +67,7 @@ const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-type Lot = 'reglage' | 'pieges' | 'temoin';
+type Lot = 'reglage' | 'pieges' | 'temoin' | 'ancienne';
 interface Cas {
   phrase: string;
   bon?: RegExp;
@@ -122,6 +128,31 @@ const LOTS: Record<Lot, Cas[]> = {
     { phrase: 'paracétamol', bon: /acumol|parac[ée]tamol|doliprane|efferalgan|dafalgan|panadol/i },
     { phrase: 'coca zéro', absent: true, refuse: /^coca(?!.*z[ée]ro)/i },
   ],
+  ancienne: [
+    { phrase: 'doukounou', bon: /doukounou/i },
+    { phrase: 'souroundou', bon: /souroundou/i },
+    { phrase: 'toukoudi', bon: /toukoudi/i },
+    { phrase: 'kilishi', bon: /kilich|kilish/i },
+    { phrase: 'garba', bon: /garba/i },
+    { phrase: 'foutou', bon: /foutou/i },
+    { phrase: 'alloco', bon: /allo?co/i },
+    { phrase: 'mafé', bon: /maf[ée]/i },
+    { phrase: 'queue de boeuf', bon: /queue de b/i },
+    { phrase: 'demi poulet', bon: /demi poulet|1\/2/i },
+    { phrase: 'shawarma', bon: /sh?a?r?wa?rma|chawarma/i },
+    { phrase: 'buffalo wings', bon: /buffalo/i },
+    { phrase: 'riz cantonnais', bon: /cantonn?ais/i },
+    { phrase: 'pizza us', bon: /pizza us/i },
+    { phrase: 'jus de gingembre', bon: /jus/i, exige: [/gingembre/i] },
+    { phrase: 'jus ira', bon: /jus/i, exige: [/ira\b/i] },
+    { phrase: 'milkshake fraise', bon: /milk ?shake/i, exige: [/fraise/i] },
+    { phrase: 'bouteille de gaz', bon: /gaz \(/i, refuse: /cuisini/i },
+    { phrase: 'boba perles noires', bon: /boba|bubble/i },
+    { phrase: 'papier cuisson', absent: true, refuse: /pizza|poulet|four|cuisini/i },
+    { phrase: 'kakan dadi', absent: true, refuse: /./ },
+    { phrase: 'chaise', absent: true, refuse: /c[aâ]ble|chargeur|charge|burger|cheese/i },
+    { phrase: 'table pliable', absent: true, refuse: /sel|[ée]dulcorant|support|r[ée]frig/i },
+  ],
   temoin: [
     { phrase: 'déodorant pour homme', bon: /d[ée]odorant|deo\b/i, exige: [/homme|\bmen\b/i] },
     { phrase: "huile d'argan pour cheveux", bon: /huile|shampo|bain/i, exige: [/argan/i] },
@@ -173,7 +204,8 @@ for (const [lot, cas] of Object.entries(LOTS) as Array<[Lot, Cas[]]>) {
     if (c.absent) {
       sansOffre++;
       // Rien, ou seulement des « suggestions » affichées comme telles.
-      const honnete = items.length === 0 || page.match_type === 'similar';
+      const honnete = items.length === 0
+        || (page.match_type === 'similar' && !items.slice(0, 3).some((p) => c.refuse?.test(p.name)));
       if (honnete) honnetes++;
       console.log(`${honnete ? '✓' : '✗'} ${c.phrase.padEnd(40)} sans offre : ${items.length === 0 ? 'rien montré' : `${honnete ? 'suggestions' : 'PRÉSENTÉ COMME CONFORME'} (1er : ${premier})`}`);
       continue;
