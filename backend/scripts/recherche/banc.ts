@@ -11,9 +11,16 @@
  */
 import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
-import { cataloguePage } from '../../src/services/catalogue.js';
+import { cataloguePage, typesPourLeBanc } from '../../src/services/catalogue.js';
 import { boutiquesCorrespondantes, normaliserIntention } from '../../src/ai/intents.js';
 import type { Requete } from './generer.js';
+
+// --types : mesurer les types de scripts/recherche/types.json AVANT de les
+// écrire en base (src/services/typeProduit.ts).
+if (process.argv.includes('--types')) {
+  const fichier = JSON.parse(readFileSync('scripts/recherche/types.json', 'utf8')) as Record<string, { types: string[] }>;
+  typesPourLeBanc(new Map(Object.entries(fichier).map(([id, t]) => [id, t.types])));
+}
 
 const avecSens = process.argv.includes('--sens');
 const requetes = JSON.parse(readFileSync('scripts/recherche/requetes.json', 'utf8')) as Requete[];

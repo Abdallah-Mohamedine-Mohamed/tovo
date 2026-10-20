@@ -6,6 +6,8 @@ import { commandesRecentes, marquerLePlusCommande, parPopularite } from './popul
 import { offreVille } from './livreur.js';
 import { serviceClient } from './supabase.js';
 import { appliquerSynonymes, synonymesActifs } from './synonymes.js';
+import { quantiteDemandee, selonQuantite } from './contenance.js';
+import { classerParType } from './typeProduit.js';
 import { carteCommerces, pointDeMesure, type PointDeRecherche, type CategorieCommerce, commercesDuType, commercesNommes, memeCommerce, commercesPourProduit, libelleDes, specialistesDe, type Commerce, type TypeCommerce } from './commerces.js';
 import { avecOuvertureReelle } from './ouverture.js';
 import { chercherSurGoogle, lieuGoogle, NOTE_GOOGLE } from './googlePlaces.js';
@@ -211,10 +213,39 @@ export function requeteSansEnseigne(message: string, merchants: Array<{ id: stri
 export async function cataloguePage(db: SupabaseClient, filter: CatalogueFilter, semantic = true): Promise<CataloguePage> {
   const [brute, parProduit] = await Promise.all([cataloguePageBrute(db, filter, semantic), commandesRecentes()]);
   const page = brute.total > 0 ? brute : { ...brute, chemin: 'aucun' as const };
-  if (parProduit.size === 0) return page;
   const uneEnseigne = filter.merchant_ids?.length === 1;
-  const items = uneEnseigne ? parPopularite(page.items, parProduit) : page.items;
-  return { ...page, items: marquerLePlusCommande(items, parProduit) };
+  let items = uneEnseigne && parProduit.size > 0 ? parPopularite(page.items, parProduit) : page.items;
+  // Ce que le client NOMME passe devant ce qui en contient seulement le mot
+  // (src/services/typeProduit.ts) — après la popularité, qui ne doit pas
+  // remettre un biscuit devant le chocolat demandé.
+  if (filter.q?.trim() && items.length > 1) items = classerParType(filter.q, items, await sourceDesTypes(db, items));
+  return { ...page, items: parProduit.size > 0 ? marquerLePlusCommande(items, parProduit) : items };
+}
+
+/** Les types des produits proposés (colonne `type_produit`, migration 0086), en une lecture. */
+async function typesEnBase(db: SupabaseClient, items: ProductRow[]): Promise<Map<string, string[]>> {
+  // Colonne absente (migration pas encore passée), panne ou erreur : l'ordre
+  // reste. Le classement par type ne fait jamais échouer une recherche.
+  try {
+    const { data, error } = await db.from('products').select('id, type_produit')
+      .in('id', items.map((item) => String(item.id))).not('type_produit', 'is', null);
+    if (error) return new Map();
+    return new Map((data ?? []).map((ligne) => [String(ligne.id), ligne.type_produit as string[]]));
+  } catch {
+    return new Map();
+  }
+}
+let sourceDesTypes: (db: SupabaseClient, items: ProductRow[]) => Promise<Map<string, string[]>> = typesEnBase;
+
+/**
+ * Pour les bancs seulement : mesurer des types AVANT de les écrire en base
+ * (scripts/recherche/types.json). Le serveur lit toujours la base.
+ */
+export function typesPourLeBanc(types: ReadonlyMap<string, string[]>): void {
+  sourceDesTypes = async (_db, items) => new Map(items.flatMap((item) => {
+    const t = types.get(String(item.id));
+    return t ? [[String(item.id), t] as const] : [];
+  }));
 }
 
 /** Les variantes d'écriture des produits proposés, en une lecture. */
@@ -227,7 +258,39 @@ async function variantesDe(db: SupabaseClient, items: ProductRow[]): Promise<Map
   return new Map((data ?? []).map((ligne) => [String(ligne.id), String(ligne.search_aliases)]));
 }
 
+/**
+ * Une CONTENANCE demandée (« gaz 6 kg », « huile 5 litres ») est une
+ * exigence, pas un mot parmi d'autres. La recherche par mots ignore les mots
+ * d'une lettre : « gaz 6 kg » cherchait « gaz kg », et la bouteille de 12 kg
+ * sortait en tête (banc-clients, 19/10).
+ *
+ * On lit donc plus large (60), puis on compare les quantités lues dans le
+ * NOM (src/services/contenance.ts) : les produits à la bonne contenance
+ * d'abord, puis ceux qui n'en affichent pas (un plat, un article vendu en
+ * plusieurs formats) ; une AUTRE contenance n'est jamais présentée comme
+ * conforme. S'il n'existe aucun produit à la bonne contenance, les autres
+ * formats restent proposés, mais comme suggestions (match_type « similar »,
+ * affiché « N suggestions » par l'app).
+ */
 async function cataloguePageBrute(db: SupabaseClient, filter: CatalogueFilter, semantic = true): Promise<CataloguePage> {
+  const demandee = quantiteDemandee(requeteProduitUtilisateur(filter.q ?? ''));
+  if (!demandee || (filter.offset ?? 0) > 0) return chercher(db, filter, semantic);
+  const limite = filter.limit ?? 24;
+  const page = await chercher(db, { ...filter, limit: Math.max(limite, 60) }, semantic);
+  const parClasse = { conforme: [] as ProductRow[], inconnue: [] as ProductRow[], autre: [] as ProductRow[] };
+  for (const item of page.items) parClasse[selonQuantite(String(item.name), demandee)].push(item);
+  if (parClasse.conforme.length === 0 && parClasse.autre.length === 0) {
+    return { ...page, items: page.items.slice(0, limite), next_offset: page.items.length > limite ? limite : page.next_offset };
+  }
+  if (parClasse.conforme.length > 0) {
+    const items = [...parClasse.conforme, ...parClasse.inconnue].slice(0, limite);
+    return { ...page, items, total: items.length, next_offset: null };
+  }
+  const items = [...parClasse.inconnue, ...parClasse.autre].slice(0, limite);
+  return { ...page, items, total: items.length, next_offset: null, match_type: 'similar' };
+}
+
+async function chercher(db: SupabaseClient, filter: CatalogueFilter, semantic = true): Promise<CataloguePage> {
   const query = requeteProduitUtilisateur(filter.q ?? '');
   const parameters = {
     p_query: query, p_embedding: null as string | null,

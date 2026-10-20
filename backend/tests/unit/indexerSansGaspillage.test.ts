@@ -9,6 +9,9 @@ vi.mock('../../src/services/embeddings.js', async (original) => ({
 
 // Un produit renommé reçoit sa fiche de recherche (IA) : simulée ici.
 const redigerFiche = vi.hoisted(() => vi.fn(async () => ({ description: 'Attiéké au poulet.', etiquettes: ['attieke'] })));
+vi.mock('../../src/services/typeProduit.js', () => ({
+  typesDesProduits: vi.fn(async () => new Map([['77777777-7777-4777-8777-777777777777', ['attiéké']]])),
+}));
 vi.mock('../../src/services/ficheRecherche.js', async (original) => ({
   ...(await original<typeof import('../../src/services/ficheRecherche.js')>()),
   redigerFiche,

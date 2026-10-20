@@ -14,11 +14,16 @@
  *   - `bon`    : ce QU'EST un produit acceptable, lu dans son NOM ;
  *   - `exige`  : les contraintes du client (marque, contenance, public), lues
  *                dans le nom ou les variantes d'écriture — toutes requises ;
- *   - `refuse` : un voisin qui ne convient pas (lu dans le nom) ; s'il sort en
- *                tête, c'est compté comme FAUX EN TÊTE ;
- *   - `absent` : aucune offre adaptée n'est en vente. Réussi si aucun piège
- *                (`refuse`) n'est dans les 3 premiers — mieux vaut rien qu'un
- *                voisin.
+ *   - `quantite`: la contenance demandée, comparée en NOMBRES dans le nom
+ *                (« 1 kg » n'est pas dans « 11 kg », « 1 litre » = « 1000 ml ») ;
+ *   - `refuse` : un voisin connu qui ne convient pas (lu dans le nom) — il
+ *                explique une erreur, il ne la définit pas ;
+ *   - `absent` : aucune offre adaptée n'est en vente. Réussi seulement si
+ *                l'app ne PRÉSENTE rien comme répondant : aucun résultat, ou
+ *                des « suggestions » (match_type similar, affiché comme tel).
+ *
+ * FAUX EN TÊTE = tout premier résultat qui n'est pas conforme (revue du
+ * 19/10 : compter seulement les voisins listés en oubliait).
  *
  * Trois lots, jamais mélangés dans un score :
  *   - `reglage` : les phrases sur lesquelles on a travaillé ;
@@ -26,13 +31,26 @@
  *   - `temoin`  : écrit le 19/10 d'après le catalogue, SANS avoir regardé les
  *                 réponses du moteur. On ne règle jamais rien d'après lui : il
  *                 dit si un réglage se généralise. Le modifier pour le faire
- *                 passer lui ôte toute valeur.
+ *                 passer lui ôte toute valeur. Seule exception : une grille
+ *                 FAUSSE au regard de la demande se corrige, avec sa raison
+ *                 (l'ancienne reste dans l'historique git) :
+ *                   19/10 — « crème au beurre de karité » acceptait un
+ *                   shampooing ; contenances lues en nombres (1 kg ≠ 11 kg).
  *
  * Un avant/après n'a de sens qu'à catalogue constant : relancer les deux
  * versions le même jour, sans chargement entre les deux.
  */
 import { createClient } from '@supabase/supabase-js';
-import { cataloguePage } from '../../src/services/catalogue.js';
+import { cataloguePage, typesPourLeBanc } from '../../src/services/catalogue.js';
+import { quantiteDemandee, selonQuantite } from '../../src/services/contenance.js';
+
+// --types : mesurer les types de scripts/recherche/types.json AVANT de les
+// écrire en base (src/services/typeProduit.ts).
+if (process.argv.includes('--types')) {
+  const fichier = JSON.parse(readFileSync('scripts/recherche/types.json', 'utf8')) as Record<string, { types: string[] }>;
+  typesPourLeBanc(new Map(Object.entries(fichier).map(([id, t]) => [id, t.types])));
+}
+import { readFileSync } from 'node:fs';
 
 const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -43,6 +61,7 @@ interface Cas {
   phrase: string;
   bon?: RegExp;
   exige?: RegExp[];
+  quantite?: string;
   refuse?: RegExp;
   absent?: true;
 }
@@ -69,7 +88,7 @@ const LOTS: Record<Lot, Cas[]> = {
     { phrase: 'produit défrisant cheveux', bon: /d[ée]fris|relaxer|relax/i },
     { phrase: 'parfum dior pour femme', bon: /dior/i, exige: [/femme|women|\bf\b|j'adore|miss dior/i], refuse: /homme|\bmen\b/i },
     { phrase: 'tente pour cérémonie', absent: true, refuse: /savon|ch[aâ]teau|shampo|parfum/i },
-    { phrase: 'bonbonne de gaz 12 kg', bon: /gaz/i, exige: [/12 ?kg/i], refuse: /6 ?kg|cuisini/i },
+    { phrase: 'bonbonne de gaz 12 kg', bon: /gaz/i, quantite: '12 kg', refuse: /cuisini/i },
     { phrase: 'gâteau turc à la pistache', bon: /baklava|fistik|k[uü]nefe/i },
     { phrase: 'riz au poisson sénégalais', bon: /tchep|thieb|ceebu/i },
     { phrase: 'brochettes de viande épicée', bon: /tukunya|toukounya|suya|brochette/i },
@@ -81,20 +100,21 @@ const LOTS: Record<Lot, Cas[]> = {
     { phrase: 'pâtes à la viande hachée', bon: /bolognaise|spaghetti|p[âa]tes|macaroni|lasagne/i, exige: [/bolognaise|viande|boeuf|b(oe|œ)uf|hach/i], refuse: /nems|pizza|burger/i },
     { phrase: 'foufou', bon: /foufou|foutou|igname pil|fufu/i },
     { phrase: 'location de tables pour mariage', absent: true, refuse: /sel de table|[ée]dulcorant|support|r[ée]frig[ée]rateur/i },
-    { phrase: 'gel douche gommant citron 1 litre', bon: /gel douche|shower gel/i, exige: [/lemon|citron/i, /1 ?l\b|1000 ?ml|litre/i] },
+    { phrase: 'gel douche gommant citron 1 litre', bon: /gel douche|shower gel/i, exige: [/lemon|citron/i], quantite: '1 l' },
     { phrase: 'crème pour les mains', bon: /cr[èe]me|lait|lotion/i, exige: [/mains|hand/i], refuse: /savon|seife|soap/i },
   ],
   pieges: [
-    { phrase: 'gaz 6 kg', bon: /gaz/i, exige: [/6 ?kg/i], refuse: /12 ?kg|cuisini/i },
+    { phrase: 'gaz 6 kg', bon: /gaz/i, quantite: '6 kg', refuse: /cuisini/i },
     { phrase: 'parfum pour homme', bon: /parfum|eau de toilette|eau de parfum|perfum/i, exige: [/homme|\bmen\b|\bh\b/i], refuse: /femme|\bf$|women/i },
     { phrase: 'chargeur samsung', bon: /chargeur|charger/i, exige: [/samsung/i], refuse: /iphone|xiaomi/i },
     { phrase: 'chargeur iphone', bon: /chargeur|charger/i, exige: [/iphone|lightning|apple/i], refuse: /samsung|xiaomi/i },
     { phrase: 'toner visage', bon: /toner|tonique|lotion/i, exige: [/visage|face|cleansing|peau|skin/i], refuse: /44a|106a|85a|ink|cartouche/i },
-    { phrase: 'huile de cuisine 5 litres', bon: /huile/i, exige: [/5 ?l\b|5 litres?/i], refuse: /argan|ricin|coco|carotte|mono[iï]|karit|corps|cheveux/i },
+    { phrase: 'huile de cuisine 5 litres', bon: /huile/i, quantite: '5 l', refuse: /argan|ricin|coco|carotte|mono[iï]|karit|corps|cheveux/i },
     { phrase: 'shampoing pour bébé', bon: /shampo/i, exige: [/baby|b[ée]b[ée]/i] },
     { phrase: 'eau minérale', bon: /eau min[ée]rale|eau 0|bouteille d'eau|^eau\b/i, refuse: /parfum|toilette|cologne/i },
     { phrase: 'couches pour bébé', absent: true, refuse: /shampo|savon|gel|lotion|huile/i },
-    { phrase: 'paracétamol', absent: true, refuse: /artefan|bimalaril|rhinathiol|vitamine/i },
+    // L'Acumol EST du paracétamol : ce n'était pas un cas sans offre (19/10).
+    { phrase: 'paracétamol', bon: /acumol|parac[ée]tamol|doliprane|efferalgan|dafalgan|panadol/i },
     { phrase: 'coca zéro', absent: true, refuse: /^coca(?!.*z[ée]ro)/i },
   ],
   temoin: [
@@ -113,10 +133,10 @@ const LOTS: Record<Lot, Cas[]> = {
     { phrase: 'huile de coco', bon: /huile/i, exige: [/coco/i] },
     { phrase: 'thé au lait taro', bon: /th[ée] au lait/i, exige: [/taro/i] },
     { phrase: 'boisson gazeuse', bon: /coca|fanta|sprite|soda|gazeu/i, refuse: /\bgaz\b.*kg/i },
-    { phrase: 'crème au beurre de karité', bon: /cr[èe]me|lait|lotion|huile|beurre|shampo/i, exige: [/karit/i] },
-    { phrase: 'eau de parfum 100 ml', bon: /eau de parfum/i, exige: [/100 ?ml/i] },
+    { phrase: 'crème au beurre de karité', bon: /cr[èe]me|lait|lotion|beurre/i, exige: [/karit/i], refuse: /shampo/i },
+    { phrase: 'eau de parfum 100 ml', bon: /eau de parfum/i, quantite: '100 ml' },
     { phrase: 'gel douche pour homme', bon: /gel douche|shower gel/i, exige: [/homme|\bmen\b/i] },
-    { phrase: 'riz basmati 1 kg', bon: /riz/i, exige: [/basmati/i, /1 ?kg/i] },
+    { phrase: 'riz basmati 1 kg', bon: /riz/i, exige: [/basmati/i], quantite: '1 kg' },
     { phrase: 'pizza au poulet', bon: /pizza/i, exige: [/poulet|chicken/i] },
   ],
 };
@@ -132,6 +152,7 @@ async function variantes(ids: string[]): Promise<Map<string, string>> {
 function convient(cas: Cas, p: Produit, alias: string): boolean {
   if (!cas.bon?.test(p.name)) return false;
   if (cas.refuse?.test(p.name)) return false;
+  if (cas.quantite && selonQuantite(p.name, quantiteDemandee(cas.quantite)!) !== 'conforme') return false;
   const texte = `${p.name} ; ${alias}`;
   return (cas.exige ?? []).every((r) => r.test(texte));
 }
@@ -146,19 +167,21 @@ for (const [lot, cas] of Object.entries(LOTS) as Array<[Lot, Cas[]]>) {
     const premier = String(items[0]?.name ?? '—').slice(0, 48);
     if (c.absent) {
       sansOffre++;
-      const piege = items.slice(0, 3).find((p) => c.refuse?.test(p.name));
-      if (!piege) honnetes++;
-      console.log(`${piege ? '✗' : '✓'} ${c.phrase.padEnd(40)} sans offre : ${piege ? `piège montré (${piege.name.slice(0, 40)})` : items.length ? `pas de piège (1er : ${premier})` : 'rien montré'}`);
+      // Rien, ou seulement des « suggestions » affichées comme telles.
+      const honnete = items.length === 0 || page.match_type === 'similar';
+      if (honnete) honnetes++;
+      console.log(`${honnete ? '✓' : '✗'} ${c.phrase.padEnd(40)} sans offre : ${items.length === 0 ? 'rien montré' : `${honnete ? 'suggestions' : 'PRÉSENTÉ COMME CONFORME'} (1er : ${premier})`}`);
       continue;
     }
     avecOffre++;
     const rang = items.findIndex((p) => convient(c, p, alias.get(String(p.id)) ?? '')) + 1;
-    const faux = items[0] ? c.refuse?.test(items[0].name) === true : false;
+    const faux = items.length > 0 && rang !== 1;
+    const voisin = faux && c.refuse?.test(items[0]!.name) === true;
     if (rang === 1) enTete++;
     if (rang >= 1 && rang <= 3) top3++;
     if (rang >= 1) top10++;
     if (faux) fauxEnTete++;
-    console.log(`${rang === 1 ? '✓' : rang ? '~' : '✗'} ${c.phrase.padEnd(40)} ${rang ? `rang ${rang}` : 'absent du top 10'}${faux ? '  FAUX EN TÊTE' : ''}  (1er : ${premier})`);
+    console.log(`${rang === 1 ? '✓' : rang ? '~' : '✗'} ${c.phrase.padEnd(40)} ${rang ? `rang ${rang}` : 'absent du top 10'}${faux ? `  FAUX EN TÊTE${voisin ? ' (voisin refusé)' : ''}` : ''}  (1er : ${premier})`);
   }
   console.log(`→ ${lot} : en tête ${enTete}/${avecOffre} · top 3 ${top3}/${avecOffre} · top 10 ${top10}/${avecOffre} · faux en tête ${fauxEnTete}`
     + (sansOffre ? ` · sans offre honnêtes ${honnetes}/${sansOffre}` : ''));

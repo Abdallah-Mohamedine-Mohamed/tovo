@@ -2,6 +2,7 @@ import { serviceClient } from './supabase.js';
 import { embed, embedImage, texteIndexable } from './embeddings.js';
 import { registerProcessor, startWorker, getQueue } from './queue.js';
 import { redigerFiche, variantesAvecFiche } from './ficheRecherche.js';
+import { typesDesProduits } from './typeProduit.js';
 
 /**
  * Indexation des produits.
@@ -244,11 +245,27 @@ async function avecFiche(produit: ProduitAIndexer): Promise<ProduitAIndexer> {
       .update({ ...complet, search_aliases: variantesAvecFiche(ligne.search_aliases, fiche, produit.name) })
       .eq('id', produit.id);
     if (erreur) throw erreur;
+    await avecType(produit, ligne.merchants?.name, ligne.categories?.name, complet.description);
     return { ...produit, ...complet };
   } catch (cause) {
     // eslint-disable-next-line no-console
     console.error(`[indexer] fiche de ${produit.id} non écrite :`, cause instanceof Error ? cause.message : cause);
     return produit;
+  }
+}
+
+/**
+ * Le type du produit (src/services/typeProduit.ts), qui classe « chocolat
+ * noir » avant les biscuits au chocolat noir. Un échec (ou la colonne pas
+ * encore créée, migration 0086) ne bloque ni la fiche ni l'indexation.
+ */
+async function avecType(produit: ProduitAIndexer, boutique: string | undefined, rayon: string | undefined, description: string | null | undefined): Promise<void> {
+  try {
+    const types = (await typesDesProduits([{ id: produit.id, name: produit.name, boutique, rayon, description }])).get(produit.id);
+    if (types) await serviceClient().from('products').update({ type_produit: types }).eq('id', produit.id);
+  } catch (cause) {
+    // eslint-disable-next-line no-console
+    console.error(`[indexer] type de ${produit.id} non écrit :`, cause instanceof Error ? cause.message : cause);
   }
 }
 
