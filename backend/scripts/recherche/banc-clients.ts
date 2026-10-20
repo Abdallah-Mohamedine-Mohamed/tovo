@@ -36,6 +36,11 @@
  *                 (l'ancienne reste dans l'historique git) :
  *                   19/10 — « crème au beurre de karité » acceptait un
  *                   shampooing ; contenances lues en nombres (1 kg ≠ 11 kg).
+ *                   20/10 — la même phrase acceptait une pommade capillaire
+ *                   (« beurre » dans le nom) et refusait la crème Byphasse
+ *                   H24 Hydra Confort, dont l'ÉTIQUETTE (photo vérifiée) dit
+ *                   « Crème hydratante, beurre de karité » : le nom seul
+ *                   était trop pauvre.
  *
  * Un avant/après n'a de sens qu'à catalogue constant : relancer les deux
  * versions le même jour, sans chargement entre les deux.
@@ -133,7 +138,7 @@ const LOTS: Record<Lot, Cas[]> = {
     { phrase: 'huile de coco', bon: /huile/i, exige: [/coco/i] },
     { phrase: 'thé au lait taro', bon: /th[ée] au lait/i, exige: [/taro/i] },
     { phrase: 'boisson gazeuse', bon: /coca|fanta|sprite|soda|gazeu/i, refuse: /\bgaz\b.*kg/i },
-    { phrase: 'crème au beurre de karité', bon: /cr[èe]me|lait|lotion|beurre/i, exige: [/karit/i], refuse: /shampo/i },
+    { phrase: 'crème au beurre de karité', bon: /cr[èe]me|lait|lotion|byphasse h24 hydra confort/i, exige: [/karit/i], refuse: /shampo|pommade/i },
     { phrase: 'eau de parfum 100 ml', bon: /eau de parfum/i, quantite: '100 ml' },
     { phrase: 'gel douche pour homme', bon: /gel douche|shower gel/i, exige: [/homme|\bmen\b/i] },
     { phrase: 'riz basmati 1 kg', bon: /riz/i, exige: [/basmati/i], quantite: '1 kg' },

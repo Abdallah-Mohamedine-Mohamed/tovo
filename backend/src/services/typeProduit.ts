@@ -95,6 +95,26 @@ function mots(texte: string): string[] {
   return normaliserIntention(texte).split(' ').filter(Boolean).map((m) => m.replace(/(?<=..)[sx]$/, ''));
 }
 
+/**
+ * Deux mots désignent-ils la même chose ? Égaux, ou — pour les mots longs
+ * (6 lettres et plus), même initiale — à une lettre près : « shampoing » et
+ * « shampooing », « foufou » et « foutou » (banc-clients, 20/10). Les mots
+ * courts restent exacts : « savon » n'est pas « salon ».
+ */
+function memeMot(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length < 6 || b.length < 6 || a[0] !== b[0] || Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, ecarts = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++ecarts > 1) return false;
+    if (a.length > b.length) i++;
+    else if (b.length > a.length) j++;
+    else { i++; j++; }
+  }
+  return ecarts + (a.length - i) + (b.length - j) <= 1;
+}
+
 /** Où la phrase nomme-t-elle l'un de ces types ? Rang du premier mot, ou null. */
 export function positionDuType(phrase: string[], types: readonly string[]): number | null {
   let meilleure: number | null = null;
@@ -102,7 +122,7 @@ export function positionDuType(phrase: string[], types: readonly string[]): numb
     const t = mots(type);
     if (t.length === 0) continue;
     for (let i = 0; i + t.length <= phrase.length; i++) {
-      if (t.every((m, j) => phrase[i + j] === m)) {
+      if (t.every((m, j) => memeMot(phrase[i + j]!, m))) {
         if (meilleure === null || i < meilleure) meilleure = i;
         break;
       }

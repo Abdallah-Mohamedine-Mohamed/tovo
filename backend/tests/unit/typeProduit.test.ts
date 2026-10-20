@@ -32,6 +32,15 @@ describe('classement par type', () => {
     expect(classerParType('crèmes', [savon, lait], TYPES)).toEqual([lait, savon]);
   });
 
+  it('à une lettre près pour les mots longs, exact pour les courts', () => {
+    const bebe = { id: 'g', name: 'Gel lavant bébé' };
+    const johnson = { id: 'j', name: "Johnson's Baby Shampoo" };
+    const types = new Map([['g', ['gel lavant']], ['j', ['shampooing pour bébé', 'shampooing']], ['p', ['salon']]]);
+    expect(classerParType('shampoing pour bébé', [bebe, johnson], types)).toEqual([johnson, bebe]);
+    const salon = { id: 'p', name: 'Salon de jardin' };
+    expect(classerParType('savon', [salon, bebe], types)).toEqual([salon, bebe]);
+  });
+
   it('types nettoyés', () => {
     expect(nettoyerTypes([' Savon ', 'savon', 'x', 'Savon liquide', 'a', 'b4', 'c5'])).toEqual(['savon', 'savon liquide', 'b4']);
   });
