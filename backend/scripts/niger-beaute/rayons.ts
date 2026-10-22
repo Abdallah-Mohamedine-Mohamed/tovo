@@ -90,7 +90,8 @@ const PAR_SOUS_CATEGORIE: Record<string, Place> = {
   'Soins bébé': ['bebe', 'Soins'],
   'Biberons et accessoires': ['bebe', 'Biberons et accessoires'],
   'Linge de bébé': ['bebe', 'Linge'],
-  // Le seul « accessoire » : un gobelet pour enfant (GRAFFITI CUP), avec la gourde.
+  // Un accessoire va avec la gourde. Le seul de l'inventaire, « GRAFFITI CUP »,
+  // était un 202 Men mal nommé : retiré de la vente le 23/10.
   'Accessoires': ['bebe', 'Biberons et accessoires'],
 };
 
@@ -201,7 +202,7 @@ const manquantes = icones.filter((f) => !existsSync(f));
 if (manquantes.length) throw new Error(`icônes manquantes : ${manquantes.join(', ')}`);
 
 // Les « parfums » mal rangés par l'inventaire (revue du 22/10) : leur place doit se voir.
-for (const n of ['Dove Pink', 'Dove FIFA', 'Dove Refreshing', 'Dove Beauty Cream', 'Jhalak', 'Fair & White Mix', 'FaceFresh', 'GRAFFITI']) {
+for (const n of ['Dove Pink', 'Dove FIFA', 'Dove Refreshing', 'Dove Beauty Cream', 'Jhalak', 'Fair & White Mix', 'FaceFresh']) {
   for (const p of produits.data.filter((x) => x.name.includes(n))) {
     console.log(`  contrôle : ${p.name} → ${places.get(p.id)?.join(' / ')}${p.is_available ? '' : ' (pas en vente)'}`);
   }
