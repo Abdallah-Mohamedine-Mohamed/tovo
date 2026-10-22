@@ -746,12 +746,7 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
                       top: 11,
                       width: 62,
                       height: 62,
-                      child: CatalogImage(
-                        icone,
-                        fit: BoxFit.contain,
-                        decodeWidth: 200,
-                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                      ),
+                      child: _IconeCategorie(icone),
                     ),
                 ],
               ),
@@ -826,6 +821,52 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
         ),
       ],
     ),
+  );
+}
+
+/// L'icône d'une catégorie, qui se retélécharge si elle a échoué.
+///
+/// Un raté réseau laissait le galet vide pour de bon : l'image en échec
+/// n'était plus jamais redemandée (Dents et haleine sur le téléphone du
+/// client, 23/10, alors que le fichier était bon). On réessaie trois fois,
+/// de plus en plus tard ; l'échec n'est pas gardé en cache par Flutter.
+class _IconeCategorie extends StatefulWidget {
+  const _IconeCategorie(this.url);
+  final String url;
+
+  @override
+  State<_IconeCategorie> createState() => _IconeCategorieState();
+}
+
+class _IconeCategorieState extends State<_IconeCategorie> {
+  int _essai = 0;
+  bool _prevu = false;
+
+  void _reessayer() {
+    if (_prevu || _essai >= 3) return;
+    _prevu = true;
+    unawaited(
+      Future<void>.delayed(Duration(seconds: 2 << _essai), () {
+        if (!mounted) return;
+        setState(() {
+          _prevu = false;
+          _essai++;
+        });
+      }),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => CatalogImage(
+    widget.url,
+    // Une nouvelle clé : une nouvelle image, donc un nouveau téléchargement.
+    key: ValueKey(_essai),
+    fit: BoxFit.contain,
+    decodeWidth: 200,
+    errorBuilder: (_, __, ___) {
+      _reessayer();
+      return const SizedBox.shrink();
+    },
   );
 }
 

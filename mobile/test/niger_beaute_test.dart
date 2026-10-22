@@ -43,6 +43,8 @@ void main() {
   };
   final apercu = GlobalKey();
   final requetes = <Uri>[];
+  // Les images dont le PREMIER téléchargement échoue (raté réseau).
+  final echecs = <String>{};
   late TovoApi api;
 
   setUpAll(() async {
@@ -64,6 +66,11 @@ void main() {
   setUp(() {
     PanierEnDirect.instance.vider();
     requetes.clear();
+    echecs.clear();
+    // Une image chargée par un test précédent ne doit pas servir au suivant.
+    PaintingBinding.instance.imageCache
+      ..clear()
+      ..clearLiveImages();
     CatalogImage.providerOverride = (url) => NetworkImage(url);
     api = TovoApi(
       tokenProvider: () => null,
@@ -87,7 +94,7 @@ void main() {
 
   void testVisuel(String nom, Future<void> Function(WidgetTester) corps) {
     testWidgets(nom, (tester) async {
-      debugNetworkImageHttpClientProvider = () => _Images(images);
+      debugNetworkImageHttpClientProvider = () => _Images(images, echecs);
       try {
         await corps(tester);
       } finally {
@@ -167,6 +174,30 @@ void main() {
     await capturer(tester, '1-categories');
   });
 
+  testVisuel('une icône qui n’a pas pu se télécharger est redemandée', (
+    tester,
+  ) async {
+    const dents = 'https://exemple.test/rayons/dents-et-haleine.webp';
+    echecs.add(dents);
+    await ouvrir(tester);
+    bool chargee() => tester
+        .widgetList<RawImage>(
+          find.descendant(
+            of: find.byKey(const ValueKey('categorie-dents-et-haleine')),
+            matching: find.byType(RawImage),
+          ),
+        )
+        .any((r) => r.image != null);
+    // Le premier essai a échoué : le galet est vide.
+    expect(echecs, isEmpty);
+    expect(chargee(), isFalse);
+    // Deux secondes plus tard, l'icône est redemandée, et elle arrive.
+    await tester.pump(const Duration(seconds: 3));
+    await attendreLesImages(tester);
+    expect(chargee(), isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
   testVisuel('une catégorie : « Tous » d’abord, les pastilles filtrent sur place', (
     tester,
   ) async {
@@ -234,11 +265,16 @@ void main() {
 }
 
 class _Images extends Fake implements HttpClient {
-  _Images(this.images);
+  _Images(this.images, this.echecs);
   final Map<String, List<int>> images;
+  final Set<String> echecs;
   @override
-  Future<HttpClientRequest> getUrl(Uri url) async =>
-      _Requete(images[url.toString()] ?? images.values.first);
+  Future<HttpClientRequest> getUrl(Uri url) async {
+    if (echecs.remove(url.toString())) {
+      throw const SocketException('connexion interrompue');
+    }
+    return _Requete(images[url.toString()] ?? images.values.first);
+  }
 }
 
 class _Requete extends Fake implements HttpClientRequest {
