@@ -1,0 +1,177 @@
+{
+ "merchant": {
+  "id": "0d7cd912-2a00-484d-b8c7-84b0d3289b90",
+  "name": "Niger Beauté",
+  "is_open": true
+ },
+ "rayon": {
+  "cle": "parfums",
+  "nom": "Parfums",
+  "icone_url": "https://exemple.test/rayons/parfums.webp"
+ },
+ "pastilles": [
+  "Pour homme",
+  "Pour femme",
+  "Mixtes",
+  "Eaux de Cologne"
+ ],
+ "items": [
+  {
+   "id": "a021b604-25db-440f-9569-e558872f1cd7",
+   "name": "202 Men Eau de Parfum 100 ml",
+   "description": "Eau de parfum vaporisateur 202 Men de Paradise. Flacon de 100 ml (3.4 fl. oz).",
+   "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/a021b604-25db-440f-9569-e558872f1cd7/NB-335.webp",
+   "price": 6000,
+   "is_available": true,
+   "sous_rayon": "Pour homme",
+   "merchant_id": "0d7cd912-2a00-484d-b8c7-84b0d3289b90",
+   "merchant_name": "Niger Beauté",
+   "merchant_open": true,
+   "requires_options": false
+  },
+  {
+   "id": "be3e32cd-7629-497c-8222-cbcddfb915d7",
+   "name": "Acqua di Gio Eau de Parfum 60 ml",
+   "description": "Acqua Di Gio eau de parfum en vaporisateur spray naturel. Contenance de 60 ml.",
+   "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/be3e32cd-7629-497c-8222-cbcddfb915d7/NB-349.webp",
+   "price": 5000,
+   "is_available": true,
+   "sous_rayon": "Pour homme",
+   "merchant_id": "0d7cd912-2a00-484d-b8c7-84b0d3289b90",
+   "merchant_name": "Niger Beauté",
+   "merchant_open": true,
+   "requires_options": false
+  },
+  {
+   "id": "4bee3c4e-0026-4fdb-ba27-4416622adac5",
+   "name": "Ador Eau de Parfum 100 ml",
+   "description": "Eau de parfum Ador. Flacon de 100 ml.",
+   "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/4bee3c4e-0026-4fdb-ba27-4416622adac5/NB-336.webp",
+   "price": 6000,
+   "is_available": true,
+   "sous_rayon": "Pour femme",
+   "merchant_id": "0d7cd912-2a00-484d-b8c7-84b0d3289b90",
+   "merchant_name": "Niger Beauté",
+   "merchant_open": true,
+   "requires_options": false
+  },
+  {
+   "id": "8a70a370-a8a5-4760-aed4-ad36a51384f6",
+   "name": "Afnan 9PM Eau de Parfum 100 ml",
+   "description": "Afnan 9PM est une eau de parfum vaporisateur présentée en flacon de 100 ml (3.4 fl. oz).",
+   "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/8a70a370-a8a5-4760-aed4-ad36a51384f6/NB-026.webp",
+   "price": 30000,
+   "is_available": true,
+   "sous_rayon": "Pour homme",
+   "merchant_id": "0d7cd912-2a00-484d-b8c7-84b0d3289b90",
+   "merchant_name": "Niger Beauté",
+   "merchant_open": true,
+   "requires_options": false
+  },
+  {
+   "id": "c201c757-c460-45e0-947d-4dbb4801d2a7",
+   "name": "Afnan 9PM Elixir Parfum Intense 100 ml",
+   "description": "Afnan 9PM Elixir est un parfum intense en vaporisateur naturel. Flacon de 100 ml (3.4 fl. oz.).",
+   "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/c201c757-c460-45e0-947d-4dbb4801d2a7/NB-025.webp",
+   "price": 30000,
+   "is_available": true,
+   "sous_rayon": "Pour homme",
+   "merchant_id": "0d7cd912-2a00-484d-b8c7-84b0d3289b90",
+   "merchant_name": "Niger Beauté",
+   "merchant_open": true,
+   "requires_options": false
+  },
+  {
+   "id": "eabc135e-3019-4245-a84d-ffc8bd0b0144",
+   "name": "Ameer Al Oud Eau de Parfum 60 ml",
+   "description": "Ameer Al Oud est une eau de parfum naturel en spray-vaporisateur. Flacon de 60 ml.",
+   "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/eabc135e-3019-4245-a84d-ffc8bd0b0144/NB-180.webp",
+   "price": 5000,
+   "is_available": true,
+   "sous_rayon": "Mixtes",
+   "merchant_id": "0d7cd912-2a00-484d-b8c7-84b0d3289b90",
+   "merchant_name": "Niger Beauté",
+   "merchant_open": true,
+   "requires_options": false
+  },
+  {
+   "id": "e77db6bd-3711-468a-9e52-67a304f463fa",
+   "name": "Asdaaf Ameerat Al Arab Eau de Parfum 100 ml",
+   "description": "Ameerat Al Arab de la marque Asdaaf est une eau de parfum en vaporisateur spray. Contenance : 100 ml (3.4 fl. oz.).",
+   "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/e77db6bd-3711-468a-9e52-67a304f463fa/NB-1064.webp",
+   "price": 10000,
+   "is_available": true,
+   "sous_rayon": "Pour femme",
+   "merchant_id": "0d7cd912-2a00-484d-b8c7-84b0d3289b90",
+   "merchant_name": "Niger Beauté",
+   "merchant_open": true,
+   "requires_options": false
+  },
+  {
+   "id": "499e2a0e-8e84-405a-95f0-bbab41c561fd",
+   "name": "Black Opium Eau de Parfum 60 ml",
+   "description": "Black Opium eau de parfum naturel en spray vaporisateur. Flacon de 60 ml.",
+   "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/499e2a0e-8e84-405a-95f0-bbab41c561fd/NB-046.webp",
+   "price": 5000,
+   "is_available": true,
+   "sous_rayon": "Pour femme",
+   "merchant_id": "0d7cd912-2a00-484d-b8c7-84b0d3289b90",
+   "merchant_name": "Niger Beauté",
+   "merchant_open": true,
+   "requires_options": false
+  },
+  {
+   "id": "99680152-2719-427e-a4f5-1d3b9b04b8eb",
+   "name": "Bois d’Arabie Wurood Eau de Parfum 100 ml",
+   "description": "Wurood de Bois d’Arabie est une eau de parfum en vaporisateur spray. Flacon de 100 ml (3.4 fl. oz).",
+   "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/99680152-2719-427e-a4f5-1d3b9b04b8eb/NB-809.webp",
+   "price": 15000,
+   "is_available": true,
+   "sous_rayon": "Mixtes",
+   "merchant_id": "0d7cd912-2a00-484d-b8c7-84b0d3289b90",
+   "merchant_name": "Niger Beauté",
+   "merchant_open": true,
+   "requires_options": false
+  },
+  {
+   "id": "f4b1efa5-b0b6-4459-bb0e-16390c2b7779",
+   "name": "Bois d’Argent Eau de Parfum 60 ml",
+   "description": "Bois d'Argent est une eau de parfum en vaporisateur spray naturel. Flacon de 60 ml.",
+   "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/f4b1efa5-b0b6-4459-bb0e-16390c2b7779/NB-348.webp",
+   "price": 5000,
+   "is_available": true,
+   "sous_rayon": "Mixtes",
+   "merchant_id": "0d7cd912-2a00-484d-b8c7-84b0d3289b90",
+   "merchant_name": "Niger Beauté",
+   "merchant_open": true,
+   "requires_options": false
+  },
+  {
+   "id": "f13c18a6-552c-4ec0-81f1-7aa37ad1da8f",
+   "name": "Brand Collection 474 Eau de Parfum 100 ml",
+   "description": "Brand Collection N° 474 est une eau de parfum vaporisateur spray naturel. Flacon de 100 ml (3.3 fl. oz).",
+   "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/f13c18a6-552c-4ec0-81f1-7aa37ad1da8f/NB-206.webp",
+   "price": 3500,
+   "is_available": true,
+   "sous_rayon": "Pour femme",
+   "merchant_id": "0d7cd912-2a00-484d-b8c7-84b0d3289b90",
+   "merchant_name": "Niger Beauté",
+   "merchant_open": true,
+   "requires_options": false
+  },
+  {
+   "id": "e3bb9558-c33a-4646-b8c0-96cb620752e3",
+   "name": "Roulio Eau de Cologne de Parfum 75° 1000 ml",
+   "description": "Eau de Cologne de Parfum 75° de la marque Roulio. Flacon de 1000 ml.",
+   "image_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/e3bb9558-c33a-4646-b8c0-96cb620752e3/NB-515.webp",
+   "price": 2500,
+   "is_available": true,
+   "sous_rayon": "Eaux de Cologne",
+   "merchant_id": "0d7cd912-2a00-484d-b8c7-84b0d3289b90",
+   "merchant_name": "Niger Beauté",
+   "merchant_open": true,
+   "requires_options": false
+  }
+ ],
+ "total": 12
+}

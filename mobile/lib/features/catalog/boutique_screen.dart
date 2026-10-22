@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../../components/widgets/galet.dart';
 import '../../components/widgets/pastille_panier.dart';
 import '../../components/widgets/product_carousel.dart';
 import '../../components/widgets/read_placeholder.dart';
@@ -14,6 +15,7 @@ import '../../core/theme.dart';
 import 'cart_screen.dart';
 import 'catalog_screen.dart';
 import 'product_sheet.dart';
+import 'rayon_boutique_screen.dart';
 import 'rayons_screen.dart';
 
 /// La page d'une boutique, inspirée de Glovo : sa photo, son logo, ce qu'il
@@ -59,6 +61,11 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
   /// Les produits les plus commandés de la boutique, du plus au moins
   /// commandé. Vide sans commandes : le bloc disparaît.
   List<Map<String, dynamic>> _populaires = [];
+
+  /// Une grande boutique (Niger Beauté) ne montre que ses catégories : une
+  /// icône, un nom. Toutes les autres gardent la carte, rayon après rayon.
+  bool _enCategories = false;
+  List<Map<String, dynamic>> _categories = [];
   bool _charge = true;
   String? _erreur;
   int _actif = 0;
@@ -90,7 +97,7 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
     if (!mounted) return;
     if (reponse.ok) {
       _appliquer(reponse);
-    } else if (_rayons.isEmpty) {
+    } else if (_vide) {
       setState(() {
         _charge = false;
         _erreur = reponse.content;
@@ -106,8 +113,13 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
       if (fiche is Map<String, dynamic>) _boutique = fiche;
       _rayons = reponse.list('sections');
       _populaires = reponse.list('populaires');
+      _enCategories = reponse.raw['affichage'] == 'categories';
+      _categories = reponse.list('rayons');
     });
   }
+
+  /// Rien à montrer encore : ni rayon, ni catégorie.
+  bool get _vide => _enCategories ? _categories.isEmpty : _rayons.isEmpty;
 
   GlobalKey _cle(int i) => _cles.putIfAbsent(i, GlobalKey.new);
   GlobalKey _cleOnglet(int i) => _clesOnglets.putIfAbsent(i, GlobalKey.new);
@@ -291,11 +303,11 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
                     child: _onglets(),
                   ),
                 ),
-              if (_charge && _rayons.isEmpty)
+              if (_charge && _vide)
                 const SliverToBoxAdapter(child: ReadPlaceholder())
-              else if (_erreur != null && _rayons.isEmpty)
+              else if (_erreur != null && _vide)
                 SliverToBoxAdapter(child: _echec())
-              else if (_rayons.isEmpty)
+              else if (_vide)
                 const SliverToBoxAdapter(
                   child: Padding(
                     padding: EdgeInsets.all(32),
@@ -306,6 +318,8 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
                     ),
                   ),
                 )
+              else if (_enCategories)
+                _grilleDesCategories()
               else
                 SliverList.builder(
                   itemCount: _rayons.length,
@@ -681,6 +695,102 @@ class _BoutiqueScreenState extends State<BoutiqueScreen> {
         ],
       ),
     );
+  }
+
+  /// Les catégories de la boutique, quatre par rangée : l'icône posée sur
+  /// son galet gris, le nom dessous, rien d'autre (maquette validée, 22/10).
+  Widget _grilleDesCategories() => SliverPadding(
+    padding: const EdgeInsets.fromLTRB(16, 30, 16, 0),
+    sliver: SliverGrid.builder(
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 4,
+        crossAxisSpacing: 6,
+        mainAxisSpacing: 20,
+        mainAxisExtent: 132,
+      ),
+      itemCount: _categories.length,
+      itemBuilder: (_, i) => _categorie(_categories[i]),
+    ),
+  );
+
+  Widget _categorie(Map<String, dynamic> categorie) {
+    final nom = '${categorie['nom'] ?? ''}';
+    final icone = categorie['icone_url'] as String? ?? '';
+    return Semantics(
+      button: true,
+      label: nom,
+      excludeSemantics: true,
+      child: InkWell(
+        key: ValueKey('categorie-${categorie['cle']}'),
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => _ouvrirCategorie(categorie),
+        child: Column(
+          children: [
+            SizedBox(
+              width: 80,
+              height: 76,
+              child: Stack(
+                children: [
+                  const Positioned(
+                    left: 2,
+                    top: 2,
+                    width: 74,
+                    height: 70,
+                    child: Galet(),
+                  ),
+                  // Décalée vers le bas à droite : le galet dépasse en haut
+                  // à gauche, comme chez Glovo.
+                  if (icone.isNotEmpty)
+                    Positioned(
+                      left: 13,
+                      top: 11,
+                      width: 62,
+                      height: 62,
+                      child: CatalogImage(
+                        icone,
+                        fit: BoxFit.contain,
+                        decodeWidth: 200,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Trois lignes au plus : « Sérums et crèmes visage » ne tient pas
+            // en deux dans un quart d'écran, et un nom coupé ne se lit pas.
+            Text(
+              nom,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.25,
+                fontWeight: FontWeight.w600,
+                color: TovoTheme.ink,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Une catégorie : ses articles, et ses pastilles pour filtrer sur place.
+  Future<void> _ouvrirCategorie(Map<String, dynamic> categorie) async {
+    final commande = await Navigator.of(context).push<TovoResponse>(
+      MaterialPageRoute(
+        builder: (_) => RayonBoutiqueScreen(
+          api: widget.api,
+          merchantId: widget.merchantId,
+          cle: '${categorie['cle']}',
+          nom: '${categorie['nom'] ?? ''}',
+          conversationId: widget.conversationId,
+        ),
+      ),
+    );
+    if (mounted && commande != null) Navigator.of(context).pop(commande);
   }
 
   /// Tout le rayon [i], et les autres à portée de glissement.

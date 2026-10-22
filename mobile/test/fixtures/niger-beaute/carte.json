@@ -1,0 +1,117 @@
+{
+ "merchant": {
+  "id": "0d7cd912-2a00-484d-b8c7-84b0d3289b90",
+  "name": "Niger Beauté",
+  "description": "Parfums, soins du corps, du visage et des cheveux.",
+  "logo_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/logo.webp?v=1792421660885",
+  "cover_url": "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/cover.webp?v=1792421661865",
+  "address_hint": "Face station Ola Dan Gao",
+  "prep_time_min": 15,
+  "rating": 5,
+  "is_open": true
+ },
+ "affichage": "categories",
+ "rayons": [
+  {
+   "cle": "parfums",
+   "nom": "Parfums",
+   "icone_url": "https://exemple.test/rayons/parfums.webp",
+   "produits": 10
+  },
+  {
+   "cle": "deodorants",
+   "nom": "Déodorants",
+   "icone_url": "https://exemple.test/rayons/deodorants.webp",
+   "produits": 10
+  },
+  {
+   "cle": "laits-et-cremes",
+   "nom": "Laits et crèmes",
+   "icone_url": "https://exemple.test/rayons/laits-et-cremes.webp",
+   "produits": 10
+  },
+  {
+   "cle": "huiles",
+   "nom": "Huiles",
+   "icone_url": "https://exemple.test/rayons/huiles.webp",
+   "produits": 10
+  },
+  {
+   "cle": "gels-douche",
+   "nom": "Gels douche",
+   "icone_url": "https://exemple.test/rayons/gels-douche.webp",
+   "produits": 10
+  },
+  {
+   "cle": "savons",
+   "nom": "Savons",
+   "icone_url": "https://exemple.test/rayons/savons.webp",
+   "produits": 10
+  },
+  {
+   "cle": "visage",
+   "nom": "Sérums et crèmes visage",
+   "icone_url": "https://exemple.test/rayons/visage.webp",
+   "produits": 10
+  },
+  {
+   "cle": "cheveux",
+   "nom": "Cheveux",
+   "icone_url": "https://exemple.test/rayons/cheveux.webp",
+   "produits": 10
+  },
+  {
+   "cle": "maquillage",
+   "nom": "Maquillage",
+   "icone_url": "https://exemple.test/rayons/maquillage.webp",
+   "produits": 10
+  },
+  {
+   "cle": "hygiene-intime",
+   "nom": "Hygiène intime",
+   "icone_url": "https://exemple.test/rayons/hygiene-intime.webp",
+   "produits": 10
+  },
+  {
+   "cle": "dents-et-haleine",
+   "nom": "Dents et haleine",
+   "icone_url": "https://exemple.test/rayons/dents-et-haleine.webp",
+   "produits": 10
+  },
+  {
+   "cle": "bebe",
+   "nom": "Bébé",
+   "icone_url": "https://exemple.test/rayons/bebe.webp",
+   "produits": 10
+  }
+ ],
+ "total": 765,
+ "images": {
+  "https://exemple.test/rayons/parfums.webp": "icone-parfums.webp",
+  "https://exemple.test/rayons/deodorants.webp": "icone-deodorants.webp",
+  "https://exemple.test/rayons/laits-et-cremes.webp": "icone-laits-et-cremes.webp",
+  "https://exemple.test/rayons/huiles.webp": "icone-huiles.webp",
+  "https://exemple.test/rayons/gels-douche.webp": "icone-gels-douche.webp",
+  "https://exemple.test/rayons/savons.webp": "icone-savons.webp",
+  "https://exemple.test/rayons/visage.webp": "icone-visage.webp",
+  "https://exemple.test/rayons/cheveux.webp": "icone-cheveux.webp",
+  "https://exemple.test/rayons/maquillage.webp": "icone-maquillage.webp",
+  "https://exemple.test/rayons/hygiene-intime.webp": "icone-hygiene-intime.webp",
+  "https://exemple.test/rayons/dents-et-haleine.webp": "icone-dents-et-haleine.webp",
+  "https://exemple.test/rayons/bebe.webp": "icone-bebe.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/cover.webp?v=1792421661865": "img0.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/logo.webp?v=1792421660885": "img1.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/a021b604-25db-440f-9569-e558872f1cd7/NB-335.webp": "img2.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/be3e32cd-7629-497c-8222-cbcddfb915d7/NB-349.webp": "img3.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/4bee3c4e-0026-4fdb-ba27-4416622adac5/NB-336.webp": "img4.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/8a70a370-a8a5-4760-aed4-ad36a51384f6/NB-026.webp": "img5.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/c201c757-c460-45e0-947d-4dbb4801d2a7/NB-025.webp": "img6.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/eabc135e-3019-4245-a84d-ffc8bd0b0144/NB-180.webp": "img7.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/e77db6bd-3711-468a-9e52-67a304f463fa/NB-1064.webp": "img8.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/499e2a0e-8e84-405a-95f0-bbab41c561fd/NB-046.webp": "img9.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/99680152-2719-427e-a4f5-1d3b9b04b8eb/NB-809.webp": "img10.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/f4b1efa5-b0b6-4459-bb0e-16390c2b7779/NB-348.webp": "img11.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/f13c18a6-552c-4ec0-81f1-7aa37ad1da8f/NB-206.webp": "img12.webp",
+  "https://ouwzhgoavjeqwcwkqulh.supabase.co/storage/v1/object/public/products/0d7cd912-2a00-484d-b8c7-84b0d3289b90/e3bb9558-c33a-4646-b8c0-96cb620752e3/NB-515.webp": "img13.webp"
+ }
+}

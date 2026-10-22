@@ -19,6 +19,7 @@ import { cataloguePage, resolveCatalogueIntent, merchantIntentAnswer, searchAnsw
 import { demandeDeRepas } from '../ai/intents.js';
 import { avecOuvertureReelle } from '../services/ouverture.js';
 import { jetonDe, noterRecherche } from '../services/journalRecherche.js';
+import { affichageDe, articlesDuRayon, categoriesDeLaBoutique } from '../services/rayonsBoutique.js';
 
 /**
  * Catalogue — le parcours sans IA de la Phase 2.
@@ -688,7 +689,12 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
     const merchantId = params.data.merchantId;
     try {
       const database = db(request);
-      const [fiche, ouverte, rayons, produits, parProduit] = await Promise.all([
+      // L'affichage est lu à part, et sans échec : une base sans la migration
+      // 0087 garde la carte pour toutes les boutiques au lieu de casser leur
+      // page. En parallèle du reste : aucune attente de plus pour les autres.
+      const [mode, fiche, ouverte, rayons, produits, parProduit] = await Promise.all([
+        database.from('merchants').select('affichage').eq('id', merchantId).maybeSingle()
+          .then((r) => affichageDe(r.error ? null : (r.data as { affichage?: unknown } | null)?.affichage)),
         database.from('merchants')
           .select('id, name, description, logo_url, cover_url, address_hint, prep_time_min, rating')
           .eq('id', merchantId).eq('is_approved', true).maybeSingle(),
@@ -705,6 +711,10 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       if (fiche.error) throw fiche.error;
       if (!fiche.data) return reply.code(404).send({ error: 'boutique introuvable' });
       if (ouverte.error) throw ouverte.error;
+      if (mode === 'categories') {
+        const merchant = { ...fiche.data, is_open: ouverte.data === true };
+        return reply.send({ merchant, affichage: mode, ...(await categoriesDeLaBoutique(database, merchantId)) });
+      }
       if (rayons.error) throw rayons.error;
       if (produits.error) throw produits.error;
 
@@ -747,7 +757,34 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
         .slice(0, 6)
         .map(item);
 
-      return reply.send({ merchant, populaires, sections, total: lignes.length });
+      return reply.send({ merchant, affichage: mode, populaires, sections, total: lignes.length });
+    } catch (error) {
+      const failure = toHttpFailure(error);
+      return reply.code(failure.status).send(failure.body);
+    }
+  });
+
+  /**
+   * Une catégorie d'une boutique en affichage « categories » (Niger Beauté) :
+   * ses pastilles et tous ses articles. Les autres boutiques n'en ont pas.
+   */
+  app.get('/merchants/:merchantId/rayons/:cle', async (request, reply) => {
+    const params = z.object({ merchantId: z.string().uuid(), cle: z.string().regex(/^[a-z0-9-]{2,60}$/) })
+      .safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'requête invalide' });
+    try {
+      const database = db(request);
+      const [fiche, ouverte] = await Promise.all([
+        database.from('merchants').select('id, name')
+          .eq('id', params.data.merchantId).eq('is_approved', true).maybeSingle(),
+        database.rpc('merchant_open_now', { p_merchant_id: params.data.merchantId }),
+      ]);
+      if (fiche.error) throw fiche.error;
+      if (!fiche.data) return reply.code(404).send({ error: 'boutique introuvable' });
+      const merchant = { id: fiche.data.id as string, name: fiche.data.name as string, is_open: ouverte.data === true };
+      const page = await articlesDuRayon(database, merchant, params.data.cle);
+      if (!page) return reply.code(404).send({ error: 'catégorie introuvable' });
+      return reply.send({ merchant, ...page });
     } catch (error) {
       const failure = toHttpFailure(error);
       return reply.code(failure.status).send(failure.body);
