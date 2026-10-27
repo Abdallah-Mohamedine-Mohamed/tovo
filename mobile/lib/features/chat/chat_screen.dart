@@ -118,6 +118,25 @@ class _ChatScreenState extends State<ChatScreen> {
   DateTime? _debutParole;
   Timer? _minuterieParole;
 
+  /// Appui MAINTENU sur le micro (comme sur WhatsApp) : on parle tant que le
+  /// doigt reste posé, le relâcher envoie, le glisser vers la gauche annule.
+  bool _maintien = false;
+
+  /// Le doigt a glissé assez loin à gauche : le relâcher annulera.
+  bool _maintienAnnule = false;
+
+  /// Relâché avant que l'enregistrement ait fini de démarrer.
+  bool _relacheTot = false;
+
+  /// Le dernier vocal a été dit en maintenant le micro (pour le bon conseil).
+  bool _parMaintien = false;
+
+  /// Où le doigt s'est posé dans la barre du bas.
+  Offset? _doigtPose;
+
+  /// Glissé de plus que ça vers la gauche, le vocal est annulé.
+  static const _glissePourAnnuler = 80.0;
+
   /// Prénom du client, pour le salut d'accueil. Nul tant qu'on ne l'a pas.
   String? _prenom;
 
@@ -781,17 +800,9 @@ class _ChatScreenState extends State<ChatScreen> {
   /// long : la boîte de dialogue Android interromprait le geste, et
   /// l'enregistrement démarrerait après coup, sans personne pour l'arrêter.
   ///
-  /// Le maintien enfoncé a été retiré, pour deux raisons.
-  ///
-  /// La première est un défaut : dès que l'enregistrement commençait, la
-  /// barre de saisie était remplacée par l'affichage d'écoute — et le
-  /// détecteur de geste disparaissait de l'arbre avec elle. Le relâchement
-  /// n'atteignait donc plus personne : l'enregistrement continuait jusqu'à
-  /// la limite de durée, et l'application semblait figée.
-  ///
-  /// La seconde tient à l'usage : parler longtemps le doigt collé à l'écran
-  /// est pénible, et impossible si l'on veut faire autre chose en même
-  /// temps. Deux appuis coûtent un geste de plus et rendent la main.
+  /// Deux appuis rendent la main : parler longtemps le doigt collé à
+  /// l'écran est pénible. Le maintien enfoncé existe AUSSI, au choix
+  /// (_maintenirLeMicro, demandé par le client le 27/10).
   Future<void> _toucherLeMicro() async {
     if (_charge || _transcribing || _voiceAction) return;
     _voiceAction = true;
@@ -800,6 +811,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (_enregistreLaVoix) {
         await _envoyerLaParole();
       } else {
+        _parMaintien = false;
         _closeFocusedResults();
         _navigation++;
         await _demarrerLaParole(generation);
@@ -814,6 +826,95 @@ class _ChatScreenState extends State<ChatScreen> {
     } finally {
       _voiceAction = false;
     }
+  }
+
+  /// Appui maintenu sur le micro, comme sur WhatsApp : l'écoute commence,
+  /// et c'est le RELÂCHEMENT qui envoie (_relacherLeDoigt).
+  ///
+  /// Le maintien avait été retiré une première fois (25/09) : le bouton
+  /// disparaissait dès l'écoute, et le relâchement n'atteignait plus
+  /// personne. Le doigt est désormais suivi par un Listener PARENT de la
+  /// barre du bas (_suivreLeDoigt, _relacherLeDoigt), qui reste en place
+  /// quand le bouton est remplacé par l'affichage d'écoute.
+  ///
+  /// Jamais la boîte de dialogue d'autorisation pendant le geste : elle
+  /// l'interromprait. Sans autorisation, on explique, et l'appui court la
+  /// demande.
+  Future<void> _maintenirLeMicro() async {
+    if (_charge || _transcribing || _voiceAction || _enregistreLaVoix) return;
+    if (!await VoixTovo.autorisationDejaDonnee()) {
+      if (!mounted) return;
+      _messageAssistant(
+        "Touchez une fois le micro pour autoriser l'accès, puis maintenez-le "
+        'pour parler.',
+      );
+      return;
+    }
+    if (!mounted) return;
+    _voiceAction = true;
+    _relacheTot = false;
+    _parMaintien = true;
+    setState(() {
+      _maintien = true;
+      _maintienAnnule = false;
+    });
+    final generation = _voiceGeneration;
+    try {
+      _closeFocusedResults();
+      _navigation++;
+      await _demarrerLaParole(generation);
+    } on Exception {
+      await _annulerLaParole();
+      if (!mounted) return;
+      setState(() => _maintien = false);
+      _messageAssistant(
+        "L'enregistrement n'a pas abouti. Réessayez ou écrivez votre demande.",
+        enErreur: true,
+      );
+      return;
+    } finally {
+      _voiceAction = false;
+    }
+    if (!mounted) return;
+    if (!_enregistreLaVoix) {
+      setState(() => _maintien = false);
+      return;
+    }
+    // Le doigt s'est levé pendant le démarrage : on termine maintenant.
+    if (_relacheTot) await _terminerLeMaintien();
+  }
+
+  /// Le doigt glisse : assez loin à gauche, le relâcher annulera (et il
+  /// peut revenir sur ses pas).
+  void _suivreLeDoigt(PointerMoveEvent event) {
+    if (!_maintien || _doigtPose == null) return;
+    final annule = event.position.dx - _doigtPose!.dx < -_glissePourAnnuler;
+    if (annule == _maintienAnnule) return;
+    unawaited(HapticFeedback.selectionClick());
+    setState(() => _maintienAnnule = annule);
+  }
+
+  void _relacherLeDoigt(PointerEvent event) {
+    if (!_maintien) return;
+    if (!_enregistreLaVoix) {
+      _relacheTot = true;
+      return;
+    }
+    unawaited(_terminerLeMaintien());
+  }
+
+  Future<void> _terminerLeMaintien() async {
+    if (!_maintien) return;
+    final annule = _maintienAnnule;
+    setState(() {
+      _maintien = false;
+      _maintienAnnule = false;
+    });
+    if (annule) {
+      await _annulerLaParole();
+      return;
+    }
+    await _toucherLeMicro();
   }
 
   void _messageAssistant(String texte, {bool enErreur = false}) {
@@ -885,7 +986,10 @@ class _ChatScreenState extends State<ChatScreen> {
       await VoixTovo.annuler();
       if (!mounted || generation != _voiceGeneration) return;
       _messageAssistant(
-        "C'était trop court. Appuyez, parlez, puis appuyez à nouveau.",
+        _parMaintien
+            ? "C'était trop court. Gardez le doigt sur le micro pendant que "
+                  'vous parlez.'
+            : "C'était trop court. Appuyez, parlez, puis appuyez à nouveau.",
       );
       return;
     }
@@ -954,7 +1058,11 @@ class _ChatScreenState extends State<ChatScreen> {
     _voiceGeneration++;
     _minuterieParole?.cancel();
     if (mounted) {
-      setState(() => _enregistreLaVoix = false);
+      setState(() {
+        _enregistreLaVoix = false;
+        _maintien = false;
+        _maintienAnnule = false;
+      });
     }
     await VoixTovo.annuler();
   }
@@ -2101,42 +2209,61 @@ class _ChatScreenState extends State<ChatScreen> {
                   padding: const EdgeInsets.only(bottom: 6),
                   child: PastillePanier(onTap: _ouvrirPanier),
                 ),
-              AnimatedContainer(
-                duration: motionDuration,
-                curve: TovoTheme.courbe,
-                color: Colors.transparent,
-                child: AnimatedSwitcher(
+              // Le doigt posé sur le micro est suivi ICI, au-dessus du
+              // bouton : quand l'écoute commence, le bouton laisse place à
+              // l'affichage d'écoute, mais ce Listener reste et reçoit le
+              // glissement et le relâchement.
+              Listener(
+                onPointerDown: (event) => _doigtPose = event.position,
+                onPointerMove: _suivreLeDoigt,
+                onPointerUp: _relacherLeDoigt,
+                onPointerCancel: _relacherLeDoigt,
+                child: AnimatedContainer(
                   duration: motionDuration,
-                  switchInCurve: TovoTheme.courbe,
-                  child: activity == null
-                      ? ConversationComposer(
-                          key: const ValueKey('composer'),
-                          controller: _saisie,
-                          onSend: _envoyer,
-                          onCamera: () => unawaited(_choisirLaSource()),
-                          onGallery: () => unawaited(_choisirDansLesPhotos()),
-                          photoPath: _photoDraft?.path,
-                          onRemovePhoto: () =>
-                              setState(() => _photoDraft = null),
-                          onVoice: _toucherLeMicro,
-                          ecrit: _modeEcrit,
-                          onEcrit: (ecrit) => _modeEcrit = ecrit,
-                        )
-                      : AssistantActivityDock(
-                          key: const ValueKey('activity'),
-                          activity: activity,
-                          label: activity == AssistantActivity.searching
-                              ? _busyLabel
-                              : null,
-                          onPrimary: activity == AssistantActivity.listening
-                              ? () => unawaited(_toucherLeMicro())
-                              : null,
-                          onCancel: activity == AssistantActivity.listening
-                              ? () => unawaited(_annulerLaParole())
-                              : activity == AssistantActivity.transcribing
-                              ? _annulerTranscription
-                              : null,
-                        ),
+                  curve: TovoTheme.courbe,
+                  color: Colors.transparent,
+                  child: AnimatedSwitcher(
+                    duration: motionDuration,
+                    switchInCurve: TovoTheme.courbe,
+                    child: activity == null
+                        ? ConversationComposer(
+                            key: const ValueKey('composer'),
+                            controller: _saisie,
+                            onSend: _envoyer,
+                            onCamera: () => unawaited(_choisirLaSource()),
+                            onGallery: () => unawaited(_choisirDansLesPhotos()),
+                            photoPath: _photoDraft?.path,
+                            onRemovePhoto: () =>
+                                setState(() => _photoDraft = null),
+                            onVoice: _toucherLeMicro,
+                            onVoiceHold: () => unawaited(_maintenirLeMicro()),
+                            ecrit: _modeEcrit,
+                            onEcrit: (ecrit) => _modeEcrit = ecrit,
+                          )
+                        : AssistantActivityDock(
+                            key: const ValueKey('activity'),
+                            activity: activity,
+                            label: activity == AssistantActivity.searching
+                                ? _busyLabel
+                                : activity == AssistantActivity.listening &&
+                                      _maintien
+                                ? (_maintienAnnule
+                                      ? 'Relâchez pour annuler'
+                                      : 'Relâchez pour envoyer · ← annuler')
+                                : null,
+                            // Doigt posé : c'est le relâchement qui envoie.
+                            onPrimary:
+                                activity == AssistantActivity.listening &&
+                                    !_maintien
+                                ? () => unawaited(_toucherLeMicro())
+                                : null,
+                            onCancel: activity == AssistantActivity.listening
+                                ? () => unawaited(_annulerLaParole())
+                                : activity == AssistantActivity.transcribing
+                                ? _annulerTranscription
+                                : null,
+                          ),
+                  ),
                 ),
               ),
             ],

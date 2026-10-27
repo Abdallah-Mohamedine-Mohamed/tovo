@@ -1049,6 +1049,7 @@ class ConversationComposer extends StatefulWidget {
     required this.onCamera,
     required this.onGallery,
     required this.onVoice,
+    this.onVoiceHold,
     this.photoPath,
     required this.onRemovePhoto,
     this.ecrit = false,
@@ -1059,6 +1060,9 @@ class ConversationComposer extends StatefulWidget {
   final VoidCallback onCamera;
   final VoidCallback onGallery;
   final VoidCallback onVoice;
+
+  /// Appui maintenu sur le micro : on parle tant que le doigt reste posé.
+  final VoidCallback? onVoiceHold;
   final String? photoPath;
   final VoidCallback onRemovePhoto;
 
@@ -1278,11 +1282,20 @@ class _ConversationComposerState extends State<ConversationComposer> {
                     child: Material(
                       color: const Color(0xFF1B1921),
                       borderRadius: BorderRadius.circular(30),
+                      // Deux gestes, au choix du client (27/10) : toucher
+                      // (parler, puis toucher pour envoyer) ou MAINTENIR,
+                      // comme sur WhatsApp (relâcher envoie). Le relâchement
+                      // est écouté par l'écran parent : ce bouton disparaît
+                      // dès que l'écoute commence. Infobulle en mode manuel :
+                      // sinon, sur mobile, elle réclame elle aussi l'appui
+                      // long.
                       child: InkWell(
                         onTap: widget.onVoice,
+                        onLongPress: widget.onVoiceHold,
                         borderRadius: BorderRadius.circular(30),
                         child: const Tooltip(
                           message: 'Parler à Tovo',
+                          triggerMode: TooltipTriggerMode.manual,
                           child: SizedBox(
                             width: 86,
                             height: 43,

@@ -36,6 +36,11 @@ class VoixTovo {
   /// puisse l'arrêter.
   static Future<bool> autorisation() => _enregistreur.hasPermission();
 
+  /// L'accès au micro, SANS ouvrir la boîte de dialogue : c'est la seule
+  /// vérification permise au début d'un appui maintenu.
+  static Future<bool> autorisationDejaDonnee() =>
+      _enregistreur.hasPermission(request: false);
+
   /// Démarre l'enregistrement. Renvoie faux si l'accès est refusé.
   static Future<bool> demarrer() async {
     if (!await _enregistreur.hasPermission()) return false;
