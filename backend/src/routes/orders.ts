@@ -482,7 +482,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     // personne ce qu'il a mangé ; « 2 × Tacos poulet — Otakoss », si.
     const { data, error } = await request.supabase!
       .from('orders')
-      .select('id, type, status, total, placed_at, delivered_at, merchant_id, driver_id, merchants(name), order_items(product_name, quantity)')
+      .select('id, type, status, total, placed_at, delivered_at, merchant_id, driver_id, attente_client, merchants(name), order_items(product_name, quantity), articles_manquants(id, nom, quantite, prix_unitaire, decision, suggestions)')
       .order('placed_at', { ascending: false })
       .limit(query.data.limit);
 
@@ -493,8 +493,10 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
 
     // Champs existants inchangés : les versions déjà installées ignorent
     // simplement `merchant_name` et `articles`.
-    const orders = (data ?? []).map(({ merchants, order_items, ...commande }) => ({
+    const orders = (data ?? []).map(({ merchants, order_items, articles_manquants, ...commande }) => ({
       ...commande,
+      // Les articles manquants qui attendent le choix du client (02/11).
+      manquants: ((articles_manquants ?? []) as Array<{ decision: string }>).filter((m) => m.decision === 'attente'),
       merchant_name: (Array.isArray(merchants) ? merchants[0]?.name : (merchants as { name?: string } | null)?.name) ?? null,
       articles: ((order_items ?? []) as Array<{ product_name: string; quantity: number }>)
         .map((a) => ({ nom: a.product_name, quantite: a.quantity })),

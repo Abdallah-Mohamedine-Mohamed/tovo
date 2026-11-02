@@ -25,6 +25,7 @@ import 'conversations_drawer.dart';
 import 'conversation_chrome.dart';
 import 'photo_capture_sheet.dart';
 import '../profil/profil_screen.dart';
+import '../catalog/article_manquant_sheet.dart';
 import '../catalog/catalog_screen.dart';
 import '../catalog/product_sheet.dart';
 import '../../components/widgets/pastille_panier.dart';
@@ -192,9 +193,21 @@ class _ChatScreenState extends State<ChatScreen> {
     _cycleDeVie = AppLifecycleListener(
       onResume: () => unawaited(_rafraichirCommandes()),
     );
+    // La boutique signale un article manquant pendant que l'app est ouverte :
+    // la feuille de choix s'ouvre aussitôt (02/11).
+    _notifications = TovoPush.messagesEnAvantPlan().listen((message) {
+      if (message['kind'] == 'article_manquant') {
+        unawaited(_rafraichirCommandes());
+      }
+    });
   }
 
   late final AppLifecycleListener _cycleDeVie;
+  StreamSubscription<Map<String, String>>? _notifications;
+
+  /// Les articles manquants déjà présentés : la feuille ne revient pas
+  /// toutes les 20 secondes si le client l'a fermée sans choisir.
+  final _manquantsPresentes = <String>{};
 
   /// Tant qu'une commande est en cours, la pastille de l'accueil relit son
   /// étape toutes les 20 s : « En cuisine » ne doit pas rester affiché
@@ -222,6 +235,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _cycleDeVie.dispose();
+    unawaited(_notifications?.cancel());
     _suiviAccueil?.cancel();
     _minuterieParole?.cancel();
     unawaited(VoixTovo.liberer());
@@ -320,6 +334,33 @@ class _ChatScreenState extends State<ChatScreen> {
       _derniereCommande = derniere;
     });
     _surveillerCommande();
+    if (enCours != null) unawaited(_proposerChoixManquant(enCours));
+  }
+
+  /// Un article de la commande en cours manque : le client choisit
+  /// (remplacer, retirer, annuler). Une seule fois par article et par
+  /// session ; s'il ferme sans choisir, l'article est retiré au bout de
+  /// 10 minutes.
+  Future<void> _proposerChoixManquant(Map<String, dynamic> commande) async {
+    final manquant = ((commande['manquants'] as List?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .where((m) => !_manquantsPresentes.contains('${m['id']}'))
+        .firstOrNull;
+    if (manquant == null) return;
+    _manquantsPresentes.add('${manquant['id']}');
+    final message = await choisirPourArticleManquant(
+      context,
+      api: widget.api,
+      commande: commande,
+      manquant: manquant,
+    );
+    if (!mounted) return;
+    if (message != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    }
+    await _rafraichirCommandes();
   }
 
   /// Une réponse qui montre un suivi (commande passée, annulée, suivie) :

@@ -216,6 +216,15 @@ class _CatalogueBoutiqueState extends State<CatalogueBoutique> {
               ],
             ),
           ),
+        // Ce qui a manqué dans une commande : plus proposé aux clients
+        // jusqu'à ce que la boutique le remette (02/11).
+        _AVerifier(
+          produits: [
+            for (final p in produits)
+              if (p['manquant_le'] != null && p['is_available'] == false) p,
+          ],
+          onRemettre: widget.controller.basculerDisponibilite,
+        ),
         const SizedBox(height: 6),
         Expanded(
           child: lignes.isEmpty
@@ -500,6 +509,90 @@ class _Vide extends StatelessWidget {
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 12, color: TovoTheme.inkDoux),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// « À vérifier » : les articles qui ont manqué dans une commande. Ils ne
+/// sont plus proposés aux clients ; « Remettre » les remet en vente.
+class _AVerifier extends StatelessWidget {
+  const _AVerifier({required this.produits, required this.onRemettre});
+
+  final List<Map<String, dynamic>> produits;
+  final void Function(Map<String, dynamic>) onRemettre;
+
+  @override
+  Widget build(BuildContext context) {
+    if (produits.isEmpty) return const SizedBox.shrink();
+    return Container(
+      key: const ValueKey('a-verifier'),
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF6F5),
+        borderRadius: BorderRadius.circular(TovoTheme.radiusCard),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'À vérifier',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 2),
+          const Text(
+            'Ils ont manqué dans une commande et ne sont plus proposés. '
+            'Remettez-les dès qu’ils reviennent.',
+            style: TextStyle(fontSize: 12.5, color: TovoTheme.inkDoux),
+          ),
+          for (final p in produits)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: ((p['image_url'] as String?) ?? '').isEmpty
+                          ? const ColoredBox(color: TovoTheme.bloc)
+                          : Opacity(
+                              opacity: 0.55,
+                              child: CatalogImage(
+                                p['image_url'] as String,
+                                fit: BoxFit.cover,
+                                decodeWidth: 132,
+                              ),
+                            ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      '${p['name'] ?? ''}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  FilledButton(
+                    onPressed: () => onRemettre(p),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: TovoTheme.ink,
+                      minimumSize: const Size(0, 38),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                    ),
+                    child: const Text('Remettre'),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );

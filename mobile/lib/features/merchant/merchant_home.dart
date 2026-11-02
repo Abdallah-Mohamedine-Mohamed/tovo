@@ -231,17 +231,53 @@ String? _heure(String? iso) {
   return '${deux(t.day)}/${deux(t.month)} $hm';
 }
 
-class _CarteCommande extends StatelessWidget {
+class _CarteCommande extends StatefulWidget {
   const _CarteCommande({required this.commande, required this.controller});
 
   final Map<String, dynamic> commande;
   final MerchantController controller;
 
   @override
+  State<_CarteCommande> createState() => _CarteCommandeState();
+}
+
+class _CarteCommandeState extends State<_CarteCommande> {
+  /// Les articles cochés « Manque », pas encore signalés au client.
+  final _coches = <String>{};
+
+  Map<String, dynamic> get commande => widget.commande;
+  MerchantController get controller => widget.controller;
+
+  /// Les articles manquants déjà signalés pour cette commande (02/11).
+  List<Map<String, dynamic>> get _manquants =>
+      ((commande['articles_manquants'] as List?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+
+  Future<void> _prevenir() async {
+    final ok = await controller.signalerManquants(
+      commande['id'] as String,
+      _coches.toList(),
+    );
+    if (ok && mounted) setState(_coches.clear);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final statut = (commande['status'] as String?) ?? '';
     final etape = MerchantController.etapeSuivante(statut);
     final nouvelle = statut == 'pending';
+    final attente = commande['attente_client'] == true;
+    final manquants = _manquants;
+    final signales = {
+      for (final m in manquants)
+        if (m['decision'] == 'attente') '${m['order_item_id']}',
+    };
+    final remplaces = {
+      for (final m in manquants)
+        if (m['decision'] == 'remplacer') '${m['order_item_id']}',
+    };
+    final decides = manquants.where((m) => m['decision'] != 'attente').toList();
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -307,6 +343,28 @@ class _CarteCommande extends StatelessWidget {
             'Vous recevrez ${Money.format((commande['merchant_payout'] as num?)?.toInt() ?? 0)}',
             style: const TextStyle(fontSize: 11, color: TovoTheme.muted),
           ),
+          if (nouvelle && attente)
+            const _Bandeau(
+              couleur: Color(0xFFF1F2EE),
+              texte: Color(0xFF3B4643),
+              titre: 'En attente du client',
+              detail:
+                  'Il choisit de remplacer, retirer l’article ou annuler. Préparez déjà le reste ; au plus 10 minutes.',
+            )
+          else if (nouvelle && decides.isNotEmpty)
+            _Bandeau(
+              couleur: const Color(0xFFE8F4EE),
+              texte: const Color(0xFF116B4D),
+              titre: decides.first['decide_par'] == 'auto'
+                  ? 'Sans réponse du client'
+                  : 'Le client a répondu',
+              detail: [
+                for (final m in decides)
+                  m['decision'] == 'remplacer'
+                      ? '${m['nom']} : remplacé.'
+                      : '${m['nom']} : retiré.',
+              ].join(' '),
+            ),
           if (commande['order_items'] is List) ...[
             const SizedBox(height: 12),
             // Une photo par article : au comptoir, dix flacons se ressemblent
@@ -315,59 +373,93 @@ class _CarteCommande extends StatelessWidget {
                 in (commande['order_items'] as List).whereType<Map>())
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: TovoTheme.bloc,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: ((article['image_url'] as String?) ?? '').isEmpty
-                          ? null
-                          : ColoredBox(
-                              color: Colors.white,
-                              child: CatalogImage(
-                                article['image_url'] as String,
-                                fit: BoxFit.contain,
-                                decodeWidth: 132,
+                child: _LigneArticle(
+                  coche: _coches.contains('${article['id']}'),
+                  signale: signales.contains('${article['id']}'),
+                  remplace: remplaces.contains('${article['id']}'),
+                  // On ne coche que tant que la commande n'est pas acceptée,
+                  // et pas pendant que le client choisit.
+                  onManque: nouvelle && !attente && article['id'] != null
+                      ? () => setState(() {
+                          final id = '${article['id']}';
+                          if (!_coches.remove(id)) _coches.add(id);
+                        })
+                      : null,
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: TovoTheme.bloc,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: ((article['image_url'] as String?) ?? '').isEmpty
+                            ? null
+                            : ColoredBox(
+                                color: Colors.white,
+                                child: CatalogImage(
+                                  article['image_url'] as String,
+                                  fit: BoxFit.contain,
+                                  decodeWidth: 132,
+                                ),
                               ),
-                            ),
-                    ),
-                    const SizedBox(width: 10),
-                    Text(
-                      '${article['quantity']} ×',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '${article['product_name']}'
-                        '${(article['selections_label'] as String?)?.isNotEmpty == true ? ' · ${article['selections_label']}' : ''}',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                      const SizedBox(width: 10),
+                      Text(
+                        '${article['quantity']} ×',
                         style: const TextStyle(
-                          fontSize: 13,
-                          color: TovoTheme.ink,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${article['product_name']}'
+                          '${(article['selections_label'] as String?)?.isNotEmpty == true ? ' · ${article['selections_label']}' : ''}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: TovoTheme.ink,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
           ],
-          if (etape != null) ...[
+          if (_coches.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            FilledButton(
+              key: const ValueKey('prevenir-client'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                backgroundColor: TovoTheme.ink,
+              ),
+              onPressed: controller.actionEnCours(commande['id'] as String)
+                  ? null
+                  : _prevenir,
+              child: Text(
+                _coches.length == 1
+                    ? 'Prévenir le client · 1 article manque'
+                    : 'Prévenir le client · ${_coches.length} articles manquent',
+              ),
+            ),
+          ] else if (etape != null) ...[
             const SizedBox(height: 12),
             FilledButton(
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
               ),
-              onPressed: controller.actionEnCours(commande['id'] as String)
+              // Le client choisit encore : on n'accepte pas une commande
+              // qui peut changer.
+              onPressed:
+                  controller.actionEnCours(commande['id'] as String) ||
+                      (nouvelle && attente)
                   ? null
                   : () => controller.avancer(commande['id'] as String, etape),
               child: Text(MerchantController.libelleEtape(statut)),
@@ -377,6 +469,150 @@ class _CarteCommande extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Une ligne d'article, avec son bouton « Manque ? » et ses états.
+class _LigneArticle extends StatelessWidget {
+  const _LigneArticle({
+    required this.child,
+    required this.coche,
+    required this.signale,
+    required this.remplace,
+    this.onManque,
+  });
+
+  final Widget child;
+  final bool coche;
+  final bool signale;
+  final bool remplace;
+  final VoidCallback? onManque;
+
+  @override
+  Widget build(BuildContext context) {
+    final manque = coche || signale;
+    return Container(
+      decoration: BoxDecoration(
+        color: manque ? const Color(0xFFFBE9E8) : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: manque ? const EdgeInsets.all(6) : EdgeInsets.zero,
+      child: Row(
+        children: [
+          Expanded(
+            child: Opacity(opacity: manque ? 0.5 : 1, child: child),
+          ),
+          if (remplace)
+            const _Etiquette(
+              texte: 'Remplace',
+              fond: Color(0xFFE8F4EE),
+              couleur: Color(0xFF116B4D),
+            )
+          else if (signale)
+            const _Etiquette(
+              texte: 'Manque',
+              fond: Color(0xFFFBE9E8),
+              couleur: Color(0xFFA8322C),
+            )
+          else if (onManque != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Material(
+                color: coche ? TovoTheme.danger : TovoTheme.bloc,
+                shape: const StadiumBorder(),
+                child: InkWell(
+                  customBorder: const StadiumBorder(),
+                  onTap: onManque,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 9,
+                    ),
+                    child: Text(
+                      coche ? 'Manque ✕' : 'Manque ?',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: coche ? Colors.white : TovoTheme.ink,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Etiquette extends StatelessWidget {
+  const _Etiquette({
+    required this.texte,
+    required this.fond,
+    required this.couleur,
+  });
+
+  final String texte;
+  final Color fond;
+  final Color couleur;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(left: 8),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+    decoration: BoxDecoration(
+      color: fond,
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Text(
+      texte,
+      style: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        color: couleur,
+      ),
+    ),
+  );
+}
+
+/// Le bandeau d'une commande où un article a manqué.
+class _Bandeau extends StatelessWidget {
+  const _Bandeau({
+    required this.couleur,
+    required this.texte,
+    required this.titre,
+    required this.detail,
+  });
+
+  final Color couleur;
+  final Color texte;
+  final String titre;
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(top: 10),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: couleur,
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          titre,
+          style: TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w700,
+            color: texte,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(detail, style: TextStyle(fontSize: 12.5, color: texte)),
+      ],
+    ),
+  );
 }
 
 class _AucuneBoutique extends StatelessWidget {

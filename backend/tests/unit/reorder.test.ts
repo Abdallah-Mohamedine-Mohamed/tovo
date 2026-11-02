@@ -120,6 +120,8 @@ describe('GET /orders — de quoi composer la carte « Recommander »', () => {
       placed_at: '2026-09-20T12:00:00Z', delivered_at: '2026-09-20T12:40:00Z', merchant_id: 'm1',
       merchant_name: 'Otakoss',
       articles: [{ nom: 'Tacos poulet', quantite: 2 }],
+      // Les articles manquants en attente du choix du client (02/11) : aucun ici.
+      manquants: [],
     });
     await app.close();
   });

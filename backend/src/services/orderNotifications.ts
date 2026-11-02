@@ -128,7 +128,7 @@ function prenom(nom: string | null | undefined): string | null {
   return t ? t.split(/\s+/)[0]! : null;
 }
 
-async function jetons(userId: string, app: 'client' | 'driver' | 'merchant') {
+export async function jetons(userId: string, app: 'client' | 'driver' | 'merchant') {
   const { data } = await serviceClient().rpc('tokens_for', {
     p_user_id: userId,
     p_app: app,
@@ -137,7 +137,7 @@ async function jetons(userId: string, app: 'client' | 'driver' | 'merchant') {
 }
 
 /** Supprime les jetons que FCM vient de déclarer morts. */
-async function purger(invalides: string[]): Promise<void> {
+export async function purger(invalides: string[]): Promise<void> {
   if (invalides.length === 0) return;
   await serviceClient().from('push_tokens').delete().in('token', invalides);
 }

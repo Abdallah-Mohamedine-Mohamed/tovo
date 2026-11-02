@@ -51,6 +51,14 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const db = request.supabase!;
+    // Un article manque et le client n'a pas encore choisi : la boutique
+    // n'accepte pas une commande qui peut encore changer (02/11).
+    if (['confirmed', 'preparing', 'ready'].includes(body.data.status)) {
+      const { data: attente } = await db.from('orders').select('attente_client').eq('id', params.data.orderId).maybeSingle();
+      if (attente?.attente_client) {
+        return reply.code(409).send({ error: 'Le client n’a pas encore choisi pour l’article manquant. Attendez sa réponse (10 minutes au plus).' });
+      }
+    }
     const { data: statutFinal, error } = await db.rpc('advance_order_status', {
       p_order_id: params.data.orderId,
       p_status: body.data.status,
@@ -290,7 +298,7 @@ export async function fulfillmentRoutes(app: FastifyInstance): Promise<void> {
 
     let builder = request.supabase!
       .from('orders')
-      .select('id, user_id, status, total, items_total, merchant_payout, placed_at, dropoff_hint, order_items(product_name, quantity, selections_label, products(image_url))')
+      .select('id, user_id, status, total, items_total, merchant_payout, placed_at, dropoff_hint, attente_client, order_items(id, product_id, product_name, quantity, selections_label, line_total, products(image_url)), articles_manquants(id, order_item_id, nom, decision, remplacement_product_id, decide_par, decide_le)')
       .order('placed_at', { ascending: false })
       .limit(50);
 

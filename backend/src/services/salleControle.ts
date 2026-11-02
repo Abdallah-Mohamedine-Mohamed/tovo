@@ -48,8 +48,12 @@ export interface SignalementBrut {
   client_nom: string | null; client_tel: string | null;
 }
 
+export interface ManquantBrut { id: string; order_id: string; nom: string; le: string }
+
 export interface DonneesBrutes {
   commandes: CommandeBrute[];
+  /** Les articles manquants qui attendent le choix du client (migration 0090). */
+  manquants?: ManquantBrut[];
   boutiques: BoutiqueBrute[];
   livreurs: LivreurBrut[];
   signalements: SignalementBrut[];
@@ -122,7 +126,7 @@ export type Gravite = 'rouge' | 'orange' | 'gris';
 
 export interface Alerte {
   id: string;
-  type: 'pas_acceptee' | 'sans_livreur' | 'longue' | 'signalement';
+  type: 'pas_acceptee' | 'sans_livreur' | 'longue' | 'signalement' | 'article_manquant';
   gravite: Gravite;
   titre: string;
   detail: string;
@@ -191,6 +195,21 @@ export function construireSalle(donnees: DonneesBrutes, maintenant: number, debu
         action: { libelle: 'Prévenir le client', tel: c.client_tel },
       });
     }
+  }
+  // Un article manque et le client n'a pas encore choisi : la commande est
+  // bloquée côté boutique. Dès la première minute : l'appeler débloque tout.
+  const parId = new Map(donnees.commandes.map((c) => [c.id, c]));
+  for (const m of donnees.manquants ?? []) {
+    const c = parId.get(m.order_id);
+    if (!c) continue;
+    const depuis = minutes(m.le, maintenant);
+    alertes.push({
+      id: `article_manquant:${m.id}`, type: 'article_manquant', commande_id: c.id, depuis_min: depuis,
+      gravite: depuis >= SEUIL_ALERTE_MIN ? 'rouge' : 'orange',
+      titre: 'Article manquant',
+      detail: `${nomBoutique(c)} n’a plus de ${m.nom}. ${client(c)} n’a pas encore choisi (retiré d’office à 10 min).`,
+      action: { libelle: 'Appeler le client', tel: c.client_tel },
+    });
   }
   for (const s of donnees.signalements) {
     const depuis = minutes(s.le, maintenant);

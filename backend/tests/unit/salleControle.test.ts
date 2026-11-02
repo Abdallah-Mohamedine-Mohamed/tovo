@@ -89,6 +89,16 @@ describe('salle de contrôle', () => {
     expect(salle.en_cours[0]).toMatchObject({ id: 'b', en_alerte: true, etape: 0 });
   });
 
+  it('un article manquant sans réponse du client devient une alerte, avec son numéro', () => {
+    const d = base();
+    d.commandes = [commande('a', 'pending', 3)];
+    d.manquants = [{ id: 'm', order_id: 'a', nom: 'Pizza Double Fromage', le: il_y_a(6) }];
+    const [alerte] = construireSalle(d, MAINTENANT, jour).alertes;
+    expect(alerte).toMatchObject({ type: 'article_manquant', gravite: 'rouge', depuis_min: 6 });
+    expect(alerte!.action).toEqual({ libelle: 'Appeler le client', tel: '22790000000' });
+    expect(alerte!.detail).toContain('n’a plus de Pizza Double Fromage');
+  });
+
   it('les étapes et la médiane', () => {
     expect(['pending', 'preparing', 'ready', 'delivering', 'delivered'].map(etapeDe)).toEqual([0, 1, 2, 3, 4]);
     expect(mediane([])).toBeNull();

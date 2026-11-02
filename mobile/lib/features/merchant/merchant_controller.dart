@@ -55,7 +55,11 @@ class MerchantController extends ChangeNotifier {
     await refresh();
     _ecouter();
     _notifications = TovoPush.messagesEnAvantPlan().listen((message) {
-      if (message['kind'] == 'new_order') unawaited(actualiserCommandes());
+      // Une commande, ou la réponse d'un client à un article manquant.
+      if (message['kind'] == 'new_order' ||
+          message['kind'] == 'reponse_manquant') {
+        unawaited(actualiserCommandes());
+      }
     });
     _secours = Timer.periodic(const Duration(seconds: 30), (_) {
       unawaited(actualiserCommandes());
@@ -157,7 +161,7 @@ class MerchantController extends ChangeNotifier {
           .from('products')
           .select(
             'id, name, description, price, is_available, image_url, '
-            'category_id, categories(name)',
+            'category_id, categories(name), manquant_le',
           )
           .eq('merchant_id', id)
           .order('name')
@@ -274,7 +278,11 @@ class MerchantController extends ChangeNotifier {
     try {
       await _db
           .from('products')
-          .update({'is_available': nouvelEtat})
+          .update({
+            'is_available': nouvelEtat,
+            // Remis en vente : il n'est plus « à vérifier ».
+            if (nouvelEtat) 'manquant_le': null,
+          })
           .eq('id', id);
     } on Exception {
       await refresh(silencieux: true);
@@ -316,6 +324,27 @@ class MerchantController extends ChangeNotifier {
     _actionsEnCours.remove(orderId);
     notifyListeners();
     unawaited(actualiserCommandes());
+  }
+
+  /// Signale les articles qui manquent d'une commande pas encore acceptée
+  /// (02/11) : le client choisit de les remplacer, les retirer ou annuler.
+  Future<bool> signalerManquants(
+    String orderId,
+    List<String> articleIds,
+  ) async {
+    if (_actionsEnCours.contains(orderId)) return false;
+    _actionsEnCours.add(orderId);
+    notifyListeners();
+    final reponse = await _api.post('/merchant/orders/$orderId/manquants', {
+      'order_item_ids': articleIds,
+    });
+    if (!reponse.ok) erreur = reponse.content;
+    _actionsEnCours.remove(orderId);
+    notifyListeners();
+    await actualiserCommandes();
+    // Remis hors vente par le serveur : le catalogue doit le montrer.
+    unawaited(refresh(silencieux: true));
+    return reponse.ok;
   }
 
   static String? etapeSuivante(String statut) => switch (statut) {

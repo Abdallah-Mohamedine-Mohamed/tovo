@@ -21,6 +21,8 @@ import { commercesTerrainRoutes } from './routes/commercesTerrain.js';
 import { carteRoutes } from './routes/carte.js';
 import { compteRoutes } from './routes/compte.js';
 import { adminControleRoutes } from './routes/adminControle.js';
+import { articlesManquantsRoutes } from './routes/articlesManquants.js';
+import { retirerLesManquantsOublies } from './services/articlesManquants.js';
 import { CONTRACT_VERSION } from './components/builders.js';
 import { registerDispatchProcessor } from './services/dispatch.js';
 import { registerSweepProcessor } from './services/sweep.js';
@@ -141,6 +143,17 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(adminComptesRoutes);
   await app.register(compteRoutes);
   await app.register(adminControleRoutes);
+  await app.register(articlesManquantsRoutes);
+
+  // Un article manquant sans réponse du client depuis 10 minutes est retiré
+  // d'office, chaque minute (pas de file : ça doit marcher même sans Redis).
+  if (env.NODE_ENV !== 'test') {
+    const minuterie = setInterval(() => {
+      retirerLesManquantsOublies().catch((cause) => app.log.error({ cause }, 'retrait des manquants impossible'));
+    }, 60_000);
+    minuterie.unref();
+    app.addHook('onClose', async () => clearInterval(minuterie));
+  }
 
   return app;
 }
