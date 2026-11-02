@@ -25,6 +25,7 @@ import { Signalements } from './pages/signalements';
 import { BoutiquesDemandees } from './pages/boutiquesDemandees';
 import { CommercesTerrain } from './pages/commercesTerrain';
 import { PharmaciesGarde } from './pages/pharmaciesGarde';
+import { SalleControle } from './pages/salleControle';
 
 /**
  * Administration Tovo.
@@ -62,6 +63,12 @@ export const App = () => (
             disableTelemetry: true,
           }}
           resources={[
+            {
+              // En tête : c'est ce qu'on regarde pendant le service.
+              name: 'controle',
+              list: '/controle',
+              meta: { label: 'Salle de contrôle' },
+            },
             {
               name: 'orders',
               list: '/orders',
@@ -140,6 +147,7 @@ export const App = () => (
               }
             >
               <Route index element={<OrderList />} />
+              <Route path="/controle" element={<SalleControle />} />
               <Route path="/orders" element={<OrderList />} />
               <Route path="/dispatch" element={<DispatchList />} />
               <Route path="/merchants" element={<MerchantList />} />
@@ -158,7 +166,7 @@ export const App = () => (
             <Route
               element={
                 <Authenticated key="public" fallback={<Outlet />}>
-                  <NavigateToResource resource="orders" />
+                  <NavigateToResource resource="controle" />
                 </Authenticated>
               }
             >

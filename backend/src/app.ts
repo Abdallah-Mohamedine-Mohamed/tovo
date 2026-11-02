@@ -20,6 +20,7 @@ import { adminPharmaciesRoutes } from './routes/adminPharmacies.js';
 import { commercesTerrainRoutes } from './routes/commercesTerrain.js';
 import { carteRoutes } from './routes/carte.js';
 import { compteRoutes } from './routes/compte.js';
+import { adminControleRoutes } from './routes/adminControle.js';
 import { CONTRACT_VERSION } from './components/builders.js';
 import { registerDispatchProcessor } from './services/dispatch.js';
 import { registerSweepProcessor } from './services/sweep.js';
@@ -139,6 +140,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(carteRoutes);
   await app.register(adminComptesRoutes);
   await app.register(compteRoutes);
+  await app.register(adminControleRoutes);
 
   return app;
 }
