@@ -6,6 +6,7 @@ import {
   Descriptions,
   Divider,
   Drawer,
+  Dropdown,
   Empty,
   Select,
   Space,
@@ -15,6 +16,10 @@ import {
   Typography,
 } from 'antd';
 import { supabaseClient } from '../supabaseClient';
+import { imprimerTicket, type LargeurTicket } from '../ticket';
+
+/** Le rouleau de l'imprimante du poste : 80 mm sauf si on a choisi 58. */
+const largeurRetenue = (): LargeurTicket => (localStorage.getItem('ticket-largeur') === '58' ? 58 : 80);
 
 /**
  * La fiche complète d'une commande.
@@ -167,6 +172,27 @@ export const FicheCommande = ({
       onClose={onFerme}
       width={560}
       loading={charge}
+      extra={
+        fiche ? (
+          // Imprimer sur le rouleau du poste ; la flèche change de rouleau,
+          // et le choix est retenu pour la suite.
+          <Dropdown.Button
+            onClick={() => imprimerTicket(fiche, largeurRetenue())}
+            menu={{
+              items: [
+                { key: '80', label: 'Rouleau 80 mm' },
+                { key: '58', label: 'Rouleau 58 mm' },
+              ],
+              onClick: ({ key }) => {
+                localStorage.setItem('ticket-largeur', key);
+                imprimerTicket(fiche, key === '58' ? 58 : 80);
+              },
+            }}
+          >
+            Imprimer le ticket
+          </Dropdown.Button>
+        ) : null
+      }
     >
       {!fiche ? (
         <Empty description="Rien à afficher" />
