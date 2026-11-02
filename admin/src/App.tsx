@@ -3,6 +3,7 @@ import {
   AuthPage,
   ErrorComponent,
   ThemedLayoutV2,
+  ThemedTitleV2,
   useNotificationProvider,
 } from '@refinedev/antd';
 import routerProvider, { CatchAllNavigate, NavigateToResource } from '@refinedev/react-router';
@@ -140,7 +141,9 @@ export const App = () => (
             <Route
               element={
                 <Authenticated key="protege" fallback={<CatchAllNavigate to="/login" />}>
-                  <ThemedLayoutV2>
+                  <ThemedLayoutV2
+                    Title={({ collapsed }) => <ThemedTitleV2 collapsed={collapsed} text="Tovo" />}
+                  >
                     <Outlet />
                   </ThemedLayoutV2>
                 </Authenticated>

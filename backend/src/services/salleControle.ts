@@ -299,7 +299,9 @@ export function construireSalle(donnees: DonneesBrutes, maintenant: number, debu
         titre: `${nomBoutique(c)} → ${lieu(c)}`,
       };
     }),
-    boutiques: donnees.boutiques.filter((b) => b.ouverte || parBoutique.has(b.id))
+    // Seulement les boutiques qui ont travaillé aujourd'hui : toutes les ouvertes
+    // couvraient la carte de carrés noirs (capture du 02/11).
+    boutiques: donnees.boutiques.filter((b) => parBoutique.has(b.id) || actives.some((c) => c.merchant_id === b.id))
       .map((b) => ({ id: b.id, nom: b.nom, lat: b.lat, lng: b.lng, ouverte: b.ouverte })),
     livreurs: tableLivreurs.filter((l) => l.etat !== 'hors_ligne').map((l) => {
       const brut = livreurs.get(l.id)!;

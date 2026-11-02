@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Alert, Switch } from 'antd';
+import { Alert, App as AntdApp, Button, Switch } from 'antd';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { appelerBackend } from '../backend';
@@ -14,6 +14,11 @@ import { FicheCommande } from './orderDetail';
  *
  * Une alerte nouvelle sonne (si le son est activé : un navigateur ne joue
  * rien tant qu'on n'a pas touché la page).
+ *
+ * Une NOUVELLE COMMANDE (02/11, demande du fondateur) : un carillon distinct
+ * des bips d'alerte, une fenêtre en haut à droite qui reste 5 minutes ou
+ * jusqu'à ce que la commande soit acceptée, une notification Windows si
+ * l'onglet est caché, et le titre de l'onglet qui compte celles non vues.
  */
 
 type Gravite = 'rouge' | 'orange' | 'gris';
@@ -88,14 +93,134 @@ function sonner() {
   }
 }
 
+/** Le carillon d'une nouvelle commande : deux notes douces, montantes. */
+function carillon() {
+  try {
+    const ctx = new AudioContext();
+    const notes: Array<[number, number]> = [[660, 0], [990, 0.18]];
+    for (const [frequence, debut] of notes) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = frequence;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + debut);
+      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + debut + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + debut + 0.6);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(ctx.currentTime + debut);
+      osc.stop(ctx.currentTime + debut + 0.65);
+    }
+  } catch {
+    // Pas de son possible : la fenêtre suffit.
+  }
+}
+
+/** « 40130 min » ne se lit pas : 12 min, 3 h 20, 27 j. */
+export function dureeLisible(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 24 * 60) {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`;
+  }
+  return `${Math.floor(minutes / (24 * 60))} j`;
+}
+
+const TITRE_ONGLET = 'Tovo — Salle de contrôle';
+/** La fenêtre d'une nouvelle commande reste 5 minutes, sauf si quelqu'un agit avant. */
+const DUREE_FENETRE_S = 5 * 60;
+
 export function SalleControle() {
   const naviguer = useNavigate();
   const [salle, setSalle] = useState<Salle | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
   const [son, setSon] = useState(() => localStorage.getItem('salle-son') === 'oui');
   const dejaVues = useRef<Set<string> | null>(null);
+  const { notification } = AntdApp.useApp();
+  // Les commandes déjà connues (null : premier chargement, rien ne sonne).
+  const commandesVues = useRef<Set<string> | null>(null);
+  // Les fenêtres ouvertes, refermées dès que la commande est acceptée.
+  const fenetres = useRef<Set<string>>(new Set());
+  const sonRef = useRef(son);
+  sonRef.current = son;
+  const [nonVues, setNonVues] = useState(0);
   // La fiche d'une commande s'ouvre ici, sans quitter la salle.
   const [fiche, setFiche] = useState<string | null>(null);
+
+  /** Les commandes jamais vues : carillon, fenêtre, notification, titre. */
+  const annoncerLesNouvelles = (donnees: Salle) => {
+    const actuelles = new Map(donnees.en_cours.map((o) => [o.id, o]));
+    // Une commande acceptée (ou disparue) ferme sa fenêtre : quelqu'un a agi.
+    for (const id of [...fenetres.current]) {
+      const o = actuelles.get(id);
+      if (!o || o.etape > 0) {
+        notification.destroy(`commande:${id}`);
+        fenetres.current.delete(id);
+      }
+    }
+    const premiere = commandesVues.current === null;
+    const nouvelles = premiere ? [] : donnees.en_cours.filter((o) => !commandesVues.current!.has(o.id));
+    commandesVues.current = new Set(actuelles.keys());
+    if (!nouvelles.length) return;
+    if (sonRef.current) carillon();
+    for (const o of nouvelles) {
+      const cle = `commande:${o.id}`;
+      const texte = `${o.boutique} → ${o.lieu} · ${francs(o.total)} · ${o.client}`;
+      fenetres.current.add(o.id);
+      notification.open({
+        key: cle,
+        placement: 'topRight',
+        duration: DUREE_FENETRE_S,
+        message: <span style={{ fontWeight: 700 }}>Nouvelle commande</span>,
+        description: texte,
+        btn: (
+          <Button
+            type="primary"
+            onClick={() => {
+              notification.destroy(cle);
+              fenetres.current.delete(o.id);
+              setFiche(o.id);
+            }}
+          >
+            Voir
+          </Button>
+        ),
+        onClose: () => fenetres.current.delete(o.id),
+      });
+      // L'onglet est caché : Windows prévient, si on l'a autorisé.
+      if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+        const n = new Notification('Nouvelle commande', { body: texte, tag: cle });
+        n.onclick = () => {
+          window.focus();
+          setFiche(o.id);
+          n.close();
+        };
+      }
+    }
+    if (document.hidden) setNonVues((v) => v + nouvelles.length);
+  };
+  // Toujours la dernière version, sans recréer la lecture ni l'abonnement.
+  const annoncerRef = useRef(annoncerLesNouvelles);
+  annoncerRef.current = annoncerLesNouvelles;
+
+  // Le titre de l'onglet compte les commandes arrivées pendant qu'on regardait ailleurs.
+  useEffect(() => {
+    document.title = nonVues
+      ? `(${nonVues}) ${nonVues > 1 ? 'Nouvelles commandes' : 'Nouvelle commande'} — Tovo`
+      : TITRE_ONGLET;
+  }, [nonVues]);
+  useEffect(() => {
+    const revenir = () => {
+      if (!document.hidden) setNonVues(0);
+    };
+    document.addEventListener('visibilitychange', revenir);
+    window.addEventListener('focus', revenir);
+    return () => {
+      document.removeEventListener('visibilitychange', revenir);
+      window.removeEventListener('focus', revenir);
+      document.title = 'Tovo — Administration';
+    };
+  }, []);
 
   const charger = useCallback(async () => {
     try {
@@ -105,12 +230,13 @@ export function SalleControle() {
       // Une alerte jamais vue sonne ; au premier chargement, on ne sonne pas
       // pour ce qui était déjà là.
       const ids = new Set(donnees.alertes.map((a) => a.id));
-      if (dejaVues.current && son && [...ids].some((id) => !dejaVues.current!.has(id))) sonner();
+      if (dejaVues.current && sonRef.current && [...ids].some((id) => !dejaVues.current!.has(id))) sonner();
       dejaVues.current = ids;
+      annoncerRef.current(donnees);
     } catch (e) {
       setErreur(e instanceof Error ? e.message : 'Lecture impossible.');
     }
-  }, [son]);
+  }, []);
 
   useEffect(() => {
     void charger();
@@ -134,7 +260,11 @@ export function SalleControle() {
   const basculerSon = (oui: boolean) => {
     setSon(oui);
     localStorage.setItem('salle-son', oui ? 'oui' : 'non');
-    if (oui) sonner();
+    if (oui) {
+      carillon();
+      // Le bon moment pour demander les notifications Windows : un geste.
+      if ('Notification' in window && Notification.permission === 'default') void Notification.requestPermission();
+    }
   };
 
   const maj = salle ? new Date(salle.le).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
@@ -151,7 +281,7 @@ export function SalleControle() {
         <span style={{ fontSize: 13, color: GRIS }}>Mis à jour à {maj}</span>
         <span style={{ flex: 1 }} />
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
-          <Switch checked={son} onChange={basculerSon} /> Son des alertes
+          <Switch checked={son} onChange={basculerSon} /> Son et notifications
         </label>
       </div>
 
@@ -216,7 +346,7 @@ function Alertes({ salle, ouvrir, voir }: { salle: Salle; ouvrir: (page: string)
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: POINT_GRAVITE[a.gravite], flexShrink: 0 }} />
               <span style={{ fontSize: 14.5, fontWeight: 700, flex: 1 }}>{a.titre}</span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: POINT_GRAVITE[a.gravite] }}>{a.depuis_min} min</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: POINT_GRAVITE[a.gravite] }}>{dureeLisible(a.depuis_min)}</span>
             </div>
             <span style={{ fontSize: 13.5, color: '#3B4643', lineHeight: 1.4 }}>{a.detail}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
@@ -250,7 +380,18 @@ function Carte({ salle }: { salle: Salle }) {
       attribution: '© OpenStreetMap',
     }).addTo(carte.current);
     calque.current = L.layerGroup().addTo(carte.current);
-    return () => { carte.current?.remove(); carte.current = null; };
+    // Née avant que sa boîte ait sa taille finale, la carte ne chargeait
+    // qu'une partie des tuiles et laissait le reste gris (capture du 02/11).
+    const recaler = () => carte.current?.invalidateSize();
+    const minuterie = window.setTimeout(recaler, 200);
+    const observateur = new ResizeObserver(recaler);
+    observateur.observe(boite.current);
+    return () => {
+      window.clearTimeout(minuterie);
+      observateur.disconnect();
+      carte.current?.remove();
+      carte.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -303,7 +444,7 @@ function EnCours({ salle, voir }: { salle: Salle; voir: (id: string) => void }) 
         <button type="button" key={o.id} onClick={() => voir(o.id)} style={{ padding: '12px 0', border: 0, borderBottom: '1px solid #EEF0EC', background: 'transparent', font: 'inherit', color: 'inherit', textAlign: 'left', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
             <span style={{ fontSize: 14.5, fontWeight: 700, flex: 1 }}>{o.boutique}</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: o.en_alerte ? ROUGE_TEXTE : DOUX }}>{o.age_min} min</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: o.en_alerte ? ROUGE_TEXTE : DOUX }}>{dureeLisible(o.age_min)}</span>
           </span>
           <span style={{ fontSize: 13, color: DOUX }}>{o.client} · {o.lieu} · {francs(o.total)}</span>
           <span style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 4 }}>
