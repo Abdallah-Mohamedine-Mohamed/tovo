@@ -74,6 +74,7 @@ Future<AdresseChoisie?> choisirAdresse(
   String action = 'Livrer ici',
   bool autrePersonne = true,
   bool enregistrable = true,
+  bool toujoursEnregistrer = false,
 }) => Navigator.of(context).push<AdresseChoisie>(
   MaterialPageRoute(
     fullscreenDialog: true,
@@ -83,6 +84,7 @@ Future<AdresseChoisie?> choisirAdresse(
       action: action,
       autrePersonne: autrePersonne,
       enregistrable: enregistrable,
+      toujoursEnregistrer: toujoursEnregistrer,
     ),
   ),
 );
@@ -94,6 +96,7 @@ class ChoixAdresseScreen extends StatefulWidget {
     this.action = 'Livrer ici',
     this.autrePersonne = true,
     this.enregistrable = true,
+    this.toujoursEnregistrer = false,
     super.key,
   });
 
@@ -102,6 +105,10 @@ class ChoixAdresseScreen extends StatefulWidget {
   final String action;
   final bool autrePersonne;
   final bool enregistrable;
+
+  /// Depuis le profil (« Ajouter une adresse ») : on enregistre forcément,
+  /// la case disparaît et seule l'étiquette reste à choisir.
+  final bool toujoursEnregistrer;
 
   @override
   State<ChoixAdresseScreen> createState() => _ChoixAdresseScreenState();
@@ -124,7 +131,7 @@ class _ChoixAdresseScreenState extends State<ChoixAdresseScreen> {
   final _nom = TextEditingController();
   final _telephone = TextEditingController();
   bool _pourAutrui = false;
-  bool _enregistrer = false;
+  late bool _enregistrer = widget.toujoursEnregistrer;
   String _etiquette = 'Maison';
   bool _envoi = false;
 
@@ -483,17 +490,18 @@ class _ChoixAdresseScreenState extends State<ChoixAdresseScreen> {
           ],
           if (widget.enregistrable) ...[
             const SizedBox(height: 4),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              controlAffinity: ListTileControlAffinity.leading,
-              value: _enregistrer,
-              activeColor: TovoTheme.ink,
-              onChanged: (v) => setState(() => _enregistrer = v ?? false),
-              title: const Text(
-                'Enregistrer cette adresse',
-                style: TextStyle(fontSize: 15),
+            if (!widget.toujoursEnregistrer)
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: _enregistrer,
+                activeColor: TovoTheme.ink,
+                onChanged: (v) => setState(() => _enregistrer = v ?? false),
+                title: const Text(
+                  'Enregistrer cette adresse',
+                  style: TextStyle(fontSize: 15),
+                ),
               ),
-            ),
             if (_enregistrer)
               Wrap(
                 spacing: 8,

@@ -25,6 +25,8 @@ class TiroirConversations extends StatefulWidget {
     this.conversationCourante,
     this.onPanier,
     this.onCatalogue,
+    this.nom,
+    this.onProfil,
   });
 
   final TovoApi api;
@@ -33,6 +35,10 @@ class TiroirConversations extends StatefulWidget {
   final String? conversationCourante;
   final VoidCallback? onPanier;
   final VoidCallback? onCatalogue;
+
+  /// Le prénom du client, en tête du menu ; le toucher ouvre son profil.
+  final String? nom;
+  final VoidCallback? onProfil;
 
   @override
   State<TiroirConversations> createState() => _TiroirConversationsState();
@@ -111,6 +117,79 @@ class _TiroirConversationsState extends State<TiroirConversations> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (widget.onProfil != null) ...[
+              InkWell(
+                key: const ValueKey('ouvrir-profil'),
+                onTap: () {
+                  Navigator.pop(context);
+                  widget.onProfil!();
+                },
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 18, 14),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        alignment: Alignment.center,
+                        decoration: const BoxDecoration(
+                          color: TovoTheme.bloc,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          (widget.nom ?? '').trim().isEmpty
+                              ? '?'
+                              : widget.nom!
+                                    .trim()
+                                    .characters
+                                    .first
+                                    .toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              (widget.nom ?? '').trim().isEmpty
+                                  ? 'Mon profil'
+                                  : widget.nom!.trim(),
+                              style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const Text(
+                              'Voir mon profil',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: TovoTheme.inkDoux,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        color: Color(0xFF9AA39F),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const Divider(
+                height: 1,
+                indent: 20,
+                endIndent: 20,
+                color: Color(0xFFEEF0EC),
+              ),
+              const SizedBox(height: 6),
+            ],
             if (widget.onPanier != null)
               ListTile(
                 leading: const ConversationIcon(ConversationSymbol.cart),

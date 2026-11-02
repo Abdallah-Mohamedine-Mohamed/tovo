@@ -24,6 +24,7 @@ import 'assistant_activity_dock.dart';
 import 'conversations_drawer.dart';
 import 'conversation_chrome.dart';
 import 'photo_capture_sheet.dart';
+import '../profil/profil_screen.dart';
 import '../catalog/catalog_screen.dart';
 import '../catalog/product_sheet.dart';
 import '../../components/widgets/pastille_panier.dart';
@@ -503,6 +504,17 @@ class _ChatScreenState extends State<ChatScreen> {
       _homeVisible = true;
       _focusedTourIndex = null;
     });
+  }
+
+  /// Le profil ; il renvoie « commandes » pour ouvrir l'historique ici.
+  Future<void> _ouvrirProfil() async {
+    final suite = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => ProfilScreen(api: widget.api)),
+    );
+    if (!mounted) return;
+    // Le nom a pu changer : l'accueil et le menu le reprennent.
+    unawaited(_lirePrenom());
+    if (suite == 'commandes') await _ouvrirCommandes();
   }
 
   Future<void> _ouvrirCommandes() async {
@@ -1955,6 +1967,8 @@ class _ChatScreenState extends State<ChatScreen> {
             onNouvelle: _nouvelleConversation,
             onPanier: _ouvrirPanier,
             onCatalogue: () => _ouvrirCatalogue(directory: true),
+            nom: _prenom,
+            onProfil: () => unawaited(_ouvrirProfil()),
           ),
           appBar: AppBar(
             backgroundColor: Colors.transparent,
